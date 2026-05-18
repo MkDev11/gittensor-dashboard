@@ -855,7 +855,7 @@ function MinerListView({
                 sx={{
                   borderBottom: '1px solid',
                   borderColor: 'border.muted',
-                  bg: isMe ? 'rgba(94, 106, 210, 0.10)' : 'transparent',
+                  bg: isMe ? 'var(--accent-subtle)' : 'transparent',
                   '&:hover': { bg: 'canvas.default' },
                   '&:last-child': { borderBottom: 'none' },
                   opacity: dim ? 0.55 : 1,
