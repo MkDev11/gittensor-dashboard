@@ -147,39 +147,51 @@ async function refreshLiveIfStale(): Promise<void> {
   return inFlight;
 }
 
+// RepoEntry.owner/.name must be real strings — reject malformed slugs here
+// so a single bad row can't flow downstream as `name: undefined`.
+function parseFullName(fullName: string): { owner: string; name: string } | null {
+  const parts = fullName.split('/');
+  if (parts.length !== 2) return null;
+  const [owner, name] = parts;
+  if (!owner || !name) return null;
+  return { owner, name };
+}
+
+// One warn per unique bad name — `readAll` runs on every repo request.
+const warnedMalformed = new Set<string>();
+
 function readAll(): RepoEntry[] {
   try {
     const rows = getDb()
       .prepare('SELECT full_name, weight FROM repo_weights')
       .all() as Array<{ full_name: string; weight: number }>;
-    // Cold-start floor: before the first live fetch resolves, `liveByLc` is
-    // empty even though the DB may have a perfectly good cached snapshot from
-    // a previous run. Serve those rows verbatim (with `inactiveAt: null`)
-    // instead of returning [] — otherwise a transient outage at boot would
-    // render an empty dashboard.
-    if (lastFetchedAt === 0) {
-      return rows.map((r) => {
-        const [owner, name] = r.full_name.split('/');
-        return { fullName: r.full_name, owner, name, weight: r.weight, inactiveAt: null };
+    // Cold start (no live fetch yet): serve the DB cache so a boot-time
+    // upstream outage doesn't blank the dashboard. Steady state: only render
+    // rows still in the live snapshot — dropped rows stay in DB for audit.
+    const coldStart = lastFetchedAt === 0;
+    const out: RepoEntry[] = [];
+    for (const r of rows) {
+      const lc = r.full_name.toLowerCase();
+      if (!coldStart && !liveByLc.has(lc)) continue;
+      const parts = parseFullName(r.full_name);
+      if (!parts) {
+        if (!warnedMalformed.has(r.full_name)) {
+          warnedMalformed.add(r.full_name);
+          console.warn(
+            `[repos] skipping malformed repo_weights row: full_name=${JSON.stringify(r.full_name)}`,
+          );
+        }
+        continue;
+      }
+      out.push({
+        fullName: r.full_name,
+        owner: parts.owner,
+        name: parts.name,
+        weight: r.weight,
+        inactiveAt: coldStart ? null : liveByLc.get(lc)?.inactiveAt ?? null,
       });
     }
-    // Steady state: surface only rows present in the CURRENT live snapshot.
-    // The DB still keeps historical rows (we never delete) for cache/audit,
-    // but the displayed list mirrors live exactly — anything that's been
-    // dropped upstream stops being rendered.
-    return rows
-      .filter((r) => liveByLc.has(r.full_name.toLowerCase()))
-      .map((r) => {
-        const [owner, name] = r.full_name.split('/');
-        const live = liveByLc.get(r.full_name.toLowerCase());
-        return {
-          fullName: r.full_name,
-          owner,
-          name,
-          weight: r.weight,
-          inactiveAt: live?.inactiveAt ?? null,
-        };
-      });
+    return out;
   } catch {
     return [];
   }
