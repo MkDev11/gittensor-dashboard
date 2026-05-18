@@ -6,6 +6,7 @@ import { Box, Text, TextInput, Label, Link as PrimerLink } from '@primer/react';
 import Spinner from '@/components/Spinner';
 import { TableRowsSkeleton } from '@/components/Skeleton';
 import Dropdown from '@/components/Dropdown';
+import { IssueLabels } from '@/components/IssueLabels';
 import { SearchIcon, CommentIcon, ClockIcon } from '@primer/octicons-react';
 import type { IssueDto, IssuesResponse } from '@/lib/api-types';
 import { IssueStatusBadge } from '@/components/StatusBadge';
@@ -160,11 +161,7 @@ function IssueRow({ issue, isLast }: { issue: IssueDto; isLast: boolean }) {
               {issue.comments}
             </Box>
           )}
-          {issue.labels?.slice(0, 4).map((l) => (
-            <Label key={l.name} variant="secondary" sx={{ fontSize: '10px' }}>
-              {l.name}
-            </Label>
-          ))}
+          <IssueLabels labels={issue.labels} maxVisible={4} wrap />
         </Box>
       </Box>
     </Box>

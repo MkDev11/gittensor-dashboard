@@ -4,6 +4,7 @@ import React, { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useToast } from '@/lib/toast';
+import { useSn74Repos } from '@/lib/use-sn74-repos';
 import type { IssueDto } from '@/lib/api-types';
 
 interface IssuesResp {
@@ -12,9 +13,29 @@ interface IssuesResp {
   issues: IssueDto[];
 }
 
+interface UserReposResp {
+  count: number;
+  repos: Array<{ full_name: string }>;
+}
+
 export default function NewIssuesWatcher() {
   const router = useRouter();
   const { push } = useToast();
+  const { weights: sn74Weights, isSuccess: sn74ReposReady } = useSn74Repos();
+  // User-added custom repos are tracked separately from the SN74 list but
+  // are also intentionally watched. Combining the two gives the watcher
+  // its allowlist.
+  const { data: userReposData, isSuccess: userReposReady } = useQuery<UserReposResp>({
+    queryKey: ['user-repos'],
+    queryFn: async ({ signal }) => {
+      const r = await fetch('/api/user-repos', { signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 4 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
   const baselineRef = useRef<number>(Date.now());
   const baselineIsoRef = useRef<string>(new Date(baselineRef.current).toISOString());
   const seenRef = useRef<Set<string>>(new Set());
@@ -66,6 +87,15 @@ export default function NewIssuesWatcher() {
 
   useEffect(() => {
     if (!data) return;
+    if (!sn74ReposReady || !userReposReady) return;
+
+    // Allowlist: live SN74 repos plus any user-added custom repos. Issues
+    // from anything else (historical cache for repos dropped from upstream,
+    // or repos visited via URL but never added) are skipped — we don't want
+    // toasts that send the user to a now-empty page.
+    const userRepoSet = new Set(
+      (userReposData?.repos ?? []).map((r) => r.full_name.toLowerCase()),
+    );
 
     const baseline = baselineRef.current;
     let firedRegular = 0;
@@ -73,6 +103,9 @@ export default function NewIssuesWatcher() {
     for (const i of data.issues) {
       const key = `${i.repo_full_name}#${i.number}`;
       if (seenRef.current.has(key)) continue;
+
+      const slug = i.repo_full_name.toLowerCase();
+      if (!sn74Weights.has(slug) && !userRepoSet.has(slug)) continue;
       seenRef.current.add(key);
 
       // Only toast issues that were actually CREATED on GitHub after the user
@@ -131,7 +164,7 @@ export default function NewIssuesWatcher() {
         ttlMs: 8000,
       });
     }
-  }, [data, push, router]);
+  }, [data, push, router, sn74Weights, sn74ReposReady, userReposData, userReposReady]);
 
   return null;
 }

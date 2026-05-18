@@ -39,14 +39,13 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body>
-        {/* Synchronously read the layout preference from localStorage and
-         * set html data attributes BEFORE React paints any chrome. This is
-         * what keeps the first-paint layout (padding-left, --header-height)
-         * matching the user's saved preference instead of always falling
-         * back to the server-default sidebar mode. */}
+        {/* Synchronously read visual preferences from localStorage and set
+         * html data attributes BEFORE React paints any chrome. This keeps the
+         * first-paint layout and theme matching the user's saved preference
+         * instead of briefly falling back to server defaults. */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var h=document.documentElement;if(location.pathname==='/sign-in'){h.setAttribute('data-no-sidebar','');h.removeAttribute('data-top-header');return;}var s=JSON.parse(localStorage.getItem('gittensor.settings')||'{}');if(s.layout==='top-nav'){h.setAttribute('data-no-sidebar','');h.setAttribute('data-top-header','');}}catch(e){}})();`,
+            __html: `(function(){try{var h=document.documentElement;var t=localStorage.getItem('gittensor.theme');if(t==='light'||t==='dark'){h.setAttribute('data-theme',t);h.setAttribute('data-color-mode',t);h.style.colorScheme=t;}if(location.pathname==='/sign-in'){h.setAttribute('data-no-sidebar','');h.removeAttribute('data-top-header');return;}var s=JSON.parse(localStorage.getItem('gittensor.settings')||'{}');if(s.layout==='top-nav'){h.setAttribute('data-no-sidebar','');h.setAttribute('data-top-header','');}}catch(e){}})();`,
           }}
         />
         <StyledComponentsRegistry>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   XIcon,
   IssueOpenedIcon,
@@ -13,6 +13,7 @@ import {
 import { Box, Text, Label, Link as PrimerLink } from '@primer/react';
 import Spinner from '@/components/Spinner';
 import { IssueStatusBadge, PullStatusBadge } from '@/components/StatusBadge';
+import { IssueLabels } from '@/components/IssueLabels';
 import { formatRelativeTime } from '@/lib/format';
 import { normalizeGitHubBodyMarkdown, renderMarkdownToHtml } from '@/lib/markdown';
 import { useSettings } from '@/lib/settings';
@@ -29,10 +30,17 @@ interface ContentViewerProps {
   width?: number;
 }
 
+function preserveExistingBody<T extends IssueDto | PullDto>(next: T, current: T | null): T {
+  const currentBody = current?.body?.trim() ? current.body : null;
+  const nextHasBody = !!next.body?.trim();
+  return !nextHasBody && currentBody ? { ...next, body: currentBody } : next;
+}
+
 type ActiveTab = { kind: 'issue' } | { kind: 'pull'; number: number };
 
 export default function ContentViewer({ target, mode, onClose, width }: ContentViewerProps) {
   const { settings } = useSettings();
+  const targetKey = `${target.kind}:${target.owner}/${target.name}#${target.number}`;
   const [issueData, setIssueData] = useState<IssueDto | null>(
     target.kind === 'issue' ? ((target.preloaded as IssueDto | undefined) ?? null) : null
   );
@@ -61,28 +69,26 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
     setRelatedPRs([]);
     setRelatedPRsLoaded(false);
     setError(null);
-  }, [target]);
+  }, [targetKey]);
 
-  // Fetch the primary target's body if the listing endpoint didn't return one.
-  // Some listing endpoints strip `body` to keep payloads small (returns the DTO
-  // without the field); others (`/api/my-prs`) include body as-is — which can
-  // be null or "" for PRs/issues genuinely opened with no description.
+  // Always fetch the detail endpoint once per opened target. We can't trust
+  // `preloaded.body` to decide whether to skip — listing endpoints sometimes
+  // omit the field, sometimes set it to null explicitly (SELECT NULL as body),
+  // and sometimes return real values.
   //
-  // The check below is "the listing didn't tell us anything about body", not
-  // "body is empty". Empty body ("" or null) means we KNOW the body and it's
-  // empty — re-fetching would just return the same empty value. The previous
-  // version of this check treated "" as "not yet fetched" and the effect's
-  // own state setters made `issueData`/`pullData` re-trigger the effect,
-  // producing an infinite re-fetch loop on empty-body PRs.
-  //
-  // Deps are `[target]` only: the effect mutates issueData/pullData inside
-  // itself, so including them would also loop.
+  // The ref does double duty: (1) "have we already initiated a fetch for this
+  // target?" so the same modal doesn't refetch on parent re-renders, and
+  // (2) "is the in-flight fetch's result still relevant?" by comparing the
+  // captured key against the ref at resolve time. No cleanup-based cancel
+  // flag — that fights StrictMode's mount/unmount/mount cycle (the second
+  // mount would see ref === key and skip the new fetch, while the first
+  // fetch's resolve had the cancelled flag set, leaving loading stuck true).
+  const fetchedForRef = useRef<string | null>(null);
   useEffect(() => {
-    const preloaded = target.preloaded as { body?: string | null } | undefined;
-    const bodyKnown = preloaded !== undefined && 'body' in preloaded;
-    if (bodyKnown) return;
+    const key = targetKey;
+    if (fetchedForRef.current === key) return;
+    fetchedForRef.current = key;
 
-    let cancelled = false;
     setLoading(true);
     setError(null);
     const path =
@@ -95,22 +101,22 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
         return r.json();
       })
       .then((j) => {
-        if (cancelled) return;
-        if (target.kind === 'issue') setIssueData(j as IssueDto);
-        else setPullData(j as PullDto);
+        if (fetchedForRef.current !== key) return; // user moved to another target
+        if (target.kind === 'issue') {
+          setIssueData((current) => preserveExistingBody(j as IssueDto, current));
+        } else {
+          setPullData((current) => preserveExistingBody(j as PullDto, current));
+        }
       })
       .catch((e) => {
-        if (cancelled) return;
+        if (fetchedForRef.current !== key) return;
         setError(e instanceof Error ? e.message : String(e));
       })
       .finally(() => {
-        if (cancelled) return;
+        if (fetchedForRef.current !== key) return;
         setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [target]);
+  }, [targetKey]);
 
   // Fetch related PRs for issue mode (so we can show tabs)
   useEffect(() => {
@@ -121,7 +127,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
       .then((j) => setRelatedPRs(Array.isArray(j.pulls) ? (j.pulls as PullDto[]) : []))
       .catch(() => setRelatedPRs([]))
       .finally(() => setRelatedPRsLoaded(true));
-  }, [target]);
+  }, [targetKey]);
 
   useEffect(() => {
     if (mode !== 'modal') return;
@@ -371,8 +377,8 @@ function TabStrip({
     ...relatedPRs.map((pr) => {
       const status = pr.merged ? 'merged' : pr.draft ? 'draft' : pr.state === 'open' ? 'open' : 'closed';
       const tone =
-        status === 'merged' ? 'var(--done-emphasis)' :
-        status === 'open' ? 'var(--success-emphasis)' :
+        status === 'merged' ? 'var(--success-emphasis)' :
+        status === 'open' ? 'var(--accent-emphasis)' :
         status === 'draft' ? 'var(--fg-muted)' :
         'var(--danger-fg)';
       return {
@@ -487,39 +493,69 @@ function Header({
       <XIcon size={16} />
     </button>
   ) : null;
+  const statusNode =
+    target.kind === 'issue' ? (
+      data && 'state_reason' in data ? (
+        <IssueStatusBadge issue={data as IssueDto} mergedPRCount={mergedPRCount} />
+      ) : (
+        <IssueOpenedIcon size={16} />
+      )
+    ) : data ? (
+      <PullStatusBadge pr={data as PullDto} />
+    ) : (
+      <GitPullRequestIcon size={16} />
+    );
+  // Derive the GitHub URL from the active tab's target rather than
+  // data.html_url — guarantees the link matches the visible content
+  // even if data and target ever fall out of sync during a tab switch.
+  const githubHref = `https://github.com/${target.owner}/${target.name}/${target.kind === 'pull' ? 'pull' : 'issues'}/${target.number}`;
   return (
     <Box
       sx={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 2,
-        p: 3,
+        p: [2, 3],
         borderBottom: '1px solid',
         borderColor: 'var(--border-default)',
         bg: 'var(--bg-subtle)',
       }}
     >
-      {mode === 'side' && closeButton}
-      <Box sx={{ pt: '2px' }}>
-        {target.kind === 'issue' ? (
-          data && 'state_reason' in data ? (
-            <IssueStatusBadge issue={data as IssueDto} mergedPRCount={mergedPRCount} />
-          ) : (
-            <IssueOpenedIcon size={16} />
-          )
-        ) : data ? (
-          <PullStatusBadge pr={data as PullDto} />
-        ) : (
-          <GitPullRequestIcon size={16} />
-        )}
+      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, flexWrap: 'wrap' }}>
+          {mode === 'side' && closeButton}
+          {statusNode}
+        </Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
+          <a
+            href={githubHref}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 10px',
+              border: '1px solid var(--border-default)',
+              borderRadius: 6,
+              background: 'var(--bg-canvas)',
+              color: 'var(--fg-default)',
+              fontSize: 12,
+              fontWeight: 500,
+              textDecoration: 'none',
+            }}
+          >
+            <LinkExternalIcon size={12} />
+            GitHub
+          </a>
+          {mode !== 'side' && closeButton}
+        </Box>
       </Box>
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
-          <Text sx={{ fontWeight: 600, fontSize: 2, color: 'var(--fg-default)' }}>
-            {data?.title ?? 'Loading…'}
-          </Text>
+
+      <Box sx={{ minWidth: 0, mt: 2 }}>
+        <Text sx={{ display: 'block', fontWeight: 600, fontSize: 2, lineHeight: 1.35, color: 'var(--fg-default)', overflowWrap: 'anywhere' }}>
+          {data?.title ?? 'Loading…'}
+        </Text>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap', mt: 2 }}>
           <Text sx={{ color: 'var(--fg-muted)', fontSize: 1 }}>#{target.number}</Text>
-          <Text sx={{ color: 'var(--fg-muted)', fontSize: 0 }}>
+          <Text sx={{ color: 'var(--fg-muted)', fontSize: 0, overflowWrap: 'anywhere' }}>
             {target.owner}/{target.name}
           </Text>
         </Box>
@@ -585,45 +621,9 @@ function Header({
         )}
         {data && target.kind === 'issue' && (data as IssueDto).labels && (data as IssueDto).labels.length > 0 && (
           <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-            {(data as IssueDto).labels.slice(0, 8).map((l) => (
-              <Label key={l.name} variant="secondary" sx={{ fontSize: '10px' }}>
-                {l.name}
-              </Label>
-            ))}
+            <IssueLabels labels={(data as IssueDto).labels} maxVisible={8} maxLabelWidth={180} wrap />
           </Box>
         )}
-      </Box>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexShrink: 0 }}>
-        {(() => {
-          // Derive the GitHub URL from the active tab's target rather than
-          // data.html_url — guarantees the link matches the visible content
-          // even if data and target ever fall out of sync during a tab switch.
-          const githubHref = `https://github.com/${target.owner}/${target.name}/${target.kind === 'pull' ? 'pull' : 'issues'}/${target.number}`;
-          return (
-          <a
-            href={githubHref}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '4px 10px',
-              border: '1px solid var(--border-default)',
-              borderRadius: 6,
-              background: 'var(--bg-canvas)',
-              color: 'var(--fg-default)',
-              fontSize: 12,
-              fontWeight: 500,
-              textDecoration: 'none',
-            }}
-          >
-            <LinkExternalIcon size={12} />
-            GitHub
-          </a>
-          );
-        })()}
-        {mode !== 'side' && closeButton}
       </Box>
     </Box>
   );

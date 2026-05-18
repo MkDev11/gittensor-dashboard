@@ -116,7 +116,7 @@ export default function ManageReposPage() {
           <Heading sx={{ fontSize: 4 }}>Manage Repositories</Heading>
         </Box>
         <Text sx={{ color: 'fg.muted' }}>
-          Custom repositories tracked in this dashboard. They appear in the Browse view alongside the SN74 whitelist
+          Custom repositories tracked in this dashboard. They appear in the Explorer view alongside the SN74 whitelist
           with the weight assigned.
         </Text>
       </PageLayout.Header>
@@ -223,8 +223,8 @@ export default function ManageReposPage() {
           </Box>
         </Box>
 
-        <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflow: 'hidden', bg: 'canvas.default' }}>
-          <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+        <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflowX: 'auto', overflowY: 'hidden', bg: 'canvas.default' }}>
+          <Box as="table" sx={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: 1 }}>
             <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
               <Box as="tr">
                 <Box as="th" sx={{ ...thSx }}>Repository</Box>

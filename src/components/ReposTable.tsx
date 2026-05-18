@@ -171,11 +171,12 @@ export default function ReposTable({
           border: '1px solid',
           borderColor: 'border.default',
           borderRadius: 2,
-          overflow: 'hidden',
+          overflowX: 'auto',
+          overflowY: 'hidden',
           bg: 'canvas.default',
         }}
       >
-        <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+        <Box as="table" sx={{ width: '100%', minWidth: 1120, borderCollapse: 'collapse', fontSize: 1 }}>
           <Box
             as="thead"
             sx={{
@@ -323,6 +324,16 @@ function RepoRow({
   const router = useRouter();
   const band = weightBand(repo.weight);
   const weightPct = Math.min(100, Math.round((repo.weight / 1.0) * 100));
+  const weightBarBg =
+    band.tone === 'success'
+      ? 'var(--success-emphasis)'
+      : band.tone === 'accent'
+      ? 'var(--accent-emphasis)'
+      : band.tone === 'attention'
+      ? 'var(--attention-emphasis)'
+      : band.tone === 'severe'
+      ? '#e0823d'
+      : 'var(--neutral-emphasis)';
   const internalHref = `/repos/${repo.owner}/${repo.name}`;
   const githubHref = `https://github.com/${repo.fullName}`;
 
@@ -408,19 +419,10 @@ function RepoRow({
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2 }}>
           <Box sx={{ width: 80, height: 6, bg: 'canvas.inset', borderRadius: 999, overflow: 'hidden' }}>
             <Box
-              sx={{
-                height: '100%',
+              sx={{ height: '100%' }}
+              style={{
                 width: `${weightPct}%`,
-                bg:
-                  band.tone === 'success'
-                    ? 'success.emphasis'
-                    : band.tone === 'accent'
-                    ? 'accent.emphasis'
-                    : band.tone === 'attention'
-                    ? 'attention.emphasis'
-                    : band.tone === 'severe'
-                    ? 'severe.emphasis'
-                    : 'neutral.emphasis',
+                backgroundColor: weightBarBg,
               }}
             />
           </Box>

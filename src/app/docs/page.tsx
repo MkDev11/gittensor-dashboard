@@ -6,7 +6,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PageLayout, Heading, Text, Box, Label } from '@primer/react';
 import {
   BookIcon,
-  BrowserIcon,
+  TelescopeIcon,
   RepoIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
@@ -25,7 +25,7 @@ interface Section {
 
 const SECTIONS: Section[] = [
   { id: 'overview', title: 'Overview', icon: <BookIcon size={16} /> },
-  { id: 'browse', title: 'Browse', icon: <BrowserIcon size={16} /> },
+  { id: 'explorer', title: 'Explorer', icon: <TelescopeIcon size={16} /> },
   { id: 'repositories', title: 'Repositories', icon: <RepoIcon size={16} /> },
   { id: 'issues', title: 'Issues', icon: <IssueOpenedIcon size={16} /> },
   { id: 'pulls', title: 'Pull Requests', icon: <GitPullRequestIcon size={16} /> },
@@ -38,6 +38,8 @@ const SECTIONS: Section[] = [
 
 export default function DocsPage() {
   const [section, setSection] = useState<string>('overview');
+  const tocRef = useRef<HTMLDivElement | null>(null);
+  const sectionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   // When the user clicks a TOC entry we initiate a smooth scroll. Suppress the
   // observer-driven update during that scroll so the clicked entry stays active
   // until the scroll settles on its target.
@@ -46,15 +48,22 @@ export default function DocsPage() {
   useEffect(() => {
     // Active section = the last one whose heading has scrolled above an anchor
     // line near the top of the viewport (just below the sticky header).
-    const ANCHOR_OFFSET = 120;
+    const getAnchorOffset = () => {
+      const rawHeaderHeight = getComputedStyle(document.documentElement).getPropertyValue('--header-height');
+      const headerHeight = Number.parseFloat(rawHeaderHeight) || 0;
+      const mobileTocHeight = window.innerWidth < 768 ? tocRef.current?.offsetHeight ?? 0 : 0;
+      return headerHeight + mobileTocHeight + 16;
+    };
+
     const computeActive = () => {
       if (Date.now() < suppressObserverRef.current) return;
       let activeId = SECTIONS[0].id;
+      const anchorOffset = getAnchorOffset();
       for (const s of SECTIONS) {
         const el = document.getElementById(`docs-${s.id}`);
         if (!el) continue;
         const top = el.getBoundingClientRect().top;
-        if (top - ANCHOR_OFFSET <= 0) activeId = s.id;
+        if (top - anchorOffset <= 0) activeId = s.id;
         else break; // sections are in DOM order, no need to keep checking
       }
       setSection((prev) => (prev !== activeId ? activeId : prev));
@@ -69,35 +78,62 @@ export default function DocsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const toc = tocRef.current;
+    const activeButton = sectionButtonRefs.current[section];
+    if (!toc || !activeButton) return;
+
+    if (toc.scrollWidth > toc.clientWidth) {
+      const left = activeButton.offsetLeft - (toc.clientWidth - activeButton.offsetWidth) / 2;
+      toc.scrollTo({ left: Math.max(0, left), behavior: 'smooth' });
+      return;
+    }
+
+    if (toc.scrollHeight > toc.clientHeight) {
+      const top = activeButton.offsetTop - (toc.clientHeight - activeButton.offsetHeight) / 2;
+      toc.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+  }, [section]);
+
   return (
     <PageLayout containerWidth="xlarge" padding="normal">
       <PageLayout.Header>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <BookIcon size={20} />
-          <Heading sx={{ fontSize: 4 }}>Dashboard Documentation</Heading>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+          <Box sx={{ flexShrink: 0, display: 'inline-flex' }}>
+            <BookIcon size={20} />
+          </Box>
+          <Heading sx={{ fontSize: [3, null, 4], lineHeight: 1.2 }}>Dashboard Documentation</Heading>
         </Box>
-        <Text sx={{ color: 'fg.muted' }}>
+        <Text sx={{ color: 'fg.muted', display: 'block', maxWidth: 720 }}>
           Everything this dashboard does — features, conventions, and how scoring works.
         </Text>
       </PageLayout.Header>
       <PageLayout.Content>
-        <Box sx={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+        <Box sx={{ display: 'flex', flexDirection: ['column', null, 'row'], gap: [3, null, 4], alignItems: ['stretch', null, 'flex-start'] }}>
           {/* Left rail TOC */}
           <Box
+            ref={tocRef}
             sx={{
-              width: 220,
+              width: ['100%', null, 220],
               flexShrink: 0,
               position: 'sticky',
               // Clears the optional top header (--header-height is 0 in
               // sidebar mode, 64px in top-nav mode) plus a small gap.
-              top: 'calc(var(--header-height) + 16px)',
-              maxHeight: 'calc(100vh - var(--header-height) - 32px)',
-              overflowY: 'auto',
+              top: ['var(--header-height)', null, 'calc(var(--header-height) + 16px)'],
+              maxHeight: ['none', null, 'calc(100vh - var(--header-height) - 32px)'],
+              overflowX: ['auto', null, 'hidden'],
+              overflowY: ['hidden', null, 'auto'],
               border: '1px solid',
               borderColor: 'border.default',
               borderRadius: 2,
               bg: 'canvas.subtle',
-              p: 2,
+              p: [1, null, 2],
+              display: ['flex', null, 'block'],
+              gap: 1,
+              zIndex: 20,
+              boxShadow: ['0 8px 18px rgba(0, 0, 0, 0.18)', null, 'none'],
+              scrollbarWidth: 'none',
+              '&::-webkit-scrollbar': { display: 'none' },
             }}
           >
             {SECTIONS.map((s) => {
@@ -105,6 +141,9 @@ export default function DocsPage() {
               return (
                 <Box
                   as="button"
+                  ref={(node) => {
+                    sectionButtonRefs.current[s.id] = node as HTMLButtonElement | null;
+                  }}
                   key={s.id}
                   onClick={() => {
                     setSection(s.id);
@@ -115,9 +154,10 @@ export default function DocsPage() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 2,
-                    width: '100%',
+                    width: ['auto', null, '100%'],
+                    flexShrink: 0,
                     px: 2,
-                    py: '6px',
+                    py: ['8px', null, '6px'],
                     border: 'none',
                     bg: active ? 'var(--bg-emphasis)' : 'transparent',
                     color: active ? 'var(--fg-default)' : 'var(--fg-muted)',
@@ -128,7 +168,10 @@ export default function DocsPage() {
                     fontSize: 1,
                     fontFamily: 'inherit',
                     borderLeft: '3px solid',
-                    borderLeftColor: active ? 'var(--accent-emphasis)' : 'transparent',
+                    borderLeftColor: [null, null, active ? 'var(--accent-emphasis)' : 'transparent'],
+                    borderBottom: ['2px solid', null, 'none'],
+                    borderBottomColor: [active ? 'var(--accent-emphasis)' : 'transparent', null, 'transparent'],
+                    whiteSpace: 'nowrap',
                     '&:hover': { bg: active ? 'var(--bg-emphasis)' : 'var(--bg-canvas)' },
                   }}
                 >
@@ -140,10 +183,10 @@ export default function DocsPage() {
           </Box>
 
           {/* Content */}
-          <Box sx={{ flex: 1, minWidth: 0, lineHeight: 1.65, fontSize: 1, color: 'fg.default' }}>
+          <Box sx={{ flex: 1, minWidth: 0, width: '100%', lineHeight: 1.65, fontSize: 1, color: 'fg.default' }}>
             <Article id="overview" title="Overview">
               <P>
-                <strong>Gittensor Miner Dashboard</strong> is a real-time monitoring and decision tool for miners on{' '}
+                <strong>Gittensor Hub</strong> is a real-time monitoring and decision tool for miners on{' '}
                 <strong>Bittensor Subnet 74 (SN74)</strong> — a subnet that rewards merged GitHub PRs in whitelisted
                 open-source repositories.
               </P>
@@ -153,14 +196,14 @@ export default function DocsPage() {
               </P>
               <H3>Tech stack</H3>
               <Ul>
-                <Li>Next.js 14 (App Router) + TypeScript + Primer React</Li>
+                <Li>Next.js 15 (App Router) + TypeScript + Primer React</Li>
                 <Li>SQLite cache for issues / PRs / linked-issue map</Li>
                 <Li>TanStack Query for client-side polling and cache</Li>
                 <Li>Octokit for GitHub REST + raw fetch for SN74 whitelist auto-sync</Li>
               </Ul>
             </Article>
 
-            <Article id="browse" title="Browse">
+            <Article id="explorer" title="Explorer">
               <P>
                 The default landing page (<Code>/</Code>). Three-pane layout:
               </P>
@@ -251,7 +294,7 @@ export default function DocsPage() {
               </P>
               <Ul>
                 <Li>Form: <Code>owner/name</Code> + weight (0–1) + optional notes</Li>
-                <Li>Custom repos are polled by the same background worker and show up everywhere — Browse left rail, Repositories table, Issues, Pulls — with a <Pill>CUSTOM</Pill> pill</Li>
+                <Li>Custom repos are polled by the same background worker and show up everywhere — Explorer left rail, Repositories table, Issues, Pulls — with a <Pill>CUSTOM</Pill> pill</Li>
                 <Li>Edit weight or notes inline; remove with the trash icon (confirmation prompt)</Li>
               </Ul>
               <P>Stored in SQLite (<Code>user_repos</Code> table) so they persist across server restarts.</P>
@@ -264,7 +307,7 @@ export default function DocsPage() {
               </P>
               <Ul>
                 <Li><strong>Toast</strong>: bottom-right, 8s auto-dismiss, click to navigate</Li>
-                <Li><strong>Click</strong>: routes to <Code>/?repo=...&tab=issues&issue=N</Code> — Browse opens with the issue auto-loaded into the configured display (modal/side/accordion)</Li>
+                <Li><strong>Click</strong>: routes to <Code>/?repo=...&tab=issues&issue=N</Code> — Explorer opens with the issue auto-loaded into the configured display (modal/side/accordion)</Li>
                 <Li><strong>Sticky badges</strong>: red pill on the corresponding repo in the left rail; clears when you click that repo</Li>
                 <Li><strong>Mark all read</strong>: button in the left rail header clears all sticky badges at once</Li>
               </Ul>
@@ -303,18 +346,22 @@ function Article({ id, title, children }: { id: string; title: string; children:
   return (
     <Box
       id={`docs-${id}`}
-      sx={{ mb: 5, scrollMarginTop: 16 }}
+      sx={{
+        mb: [4, null, 5],
+        scrollMarginTop: ['calc(var(--header-height) + 64px)', null, 'calc(var(--header-height) + 16px)'],
+        minWidth: 0,
+      }}
     >
-      <Heading sx={{ fontSize: 3, mb: 2, pb: 2, borderBottom: '1px solid', borderColor: 'border.muted' }}>
+      <Heading sx={{ fontSize: [2, null, 3], lineHeight: 1.25, mb: 2, pb: 2, borderBottom: '1px solid', borderColor: 'border.muted' }}>
         {title}
       </Heading>
-      <Box sx={{ '& > * + *': { mt: 2 } }}>{children}</Box>
+      <Box sx={{ minWidth: 0, '& > * + *': { mt: 2 } }}>{children}</Box>
     </Box>
   );
 }
 
 function P({ children }: { children: React.ReactNode }) {
-  return <Box as="p" sx={{ mb: 2, color: 'fg.default' }}>{children}</Box>;
+  return <Box as="p" sx={{ mb: 2, color: 'fg.default', overflowWrap: 'anywhere' }}>{children}</Box>;
 }
 
 function H3({ children }: { children: React.ReactNode }) {
@@ -327,14 +374,14 @@ function H3({ children }: { children: React.ReactNode }) {
 
 function Ul({ children }: { children: React.ReactNode }) {
   return (
-    <Box as="ul" sx={{ pl: 4, mb: 2, '& > li + li': { mt: 1 } }}>
+    <Box as="ul" sx={{ pl: [3, null, 4], mb: 2, '& > li + li': { mt: 1 } }}>
       {children}
     </Box>
   );
 }
 
 function Li({ children }: { children: React.ReactNode }) {
-  return <Box as="li">{children}</Box>;
+  return <Box as="li" sx={{ overflowWrap: 'anywhere' }}>{children}</Box>;
 }
 
 function Code({ children }: { children: React.ReactNode }) {
@@ -348,6 +395,8 @@ function Code({ children }: { children: React.ReactNode }) {
         borderRadius: 4,
         fontFamily: 'mono',
         fontSize: 0,
+        whiteSpace: 'normal',
+        overflowWrap: 'anywhere',
       }}
     >
       {children}

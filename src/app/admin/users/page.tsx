@@ -180,8 +180,8 @@ export default function AdminUsersPage() {
         )}
 
         {data && (
-          <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.subtle', overflow: 'hidden' }}>
-            <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+          <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.subtle', overflowX: 'auto', overflowY: 'hidden' }}>
+            <Box as="table" sx={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: 1 }}>
               <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
                 <Box as="tr">
                   <Th>USER</Th>

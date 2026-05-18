@@ -226,8 +226,8 @@ export default function IssuesTable() {
         </Box>
       </Box>
 
-      <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflow: 'hidden', bg: 'canvas.default' }}>
-        <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+      <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflowX: 'auto', overflowY: 'hidden', bg: 'canvas.default' }}>
+        <Box as="table" sx={{ width: '100%', minWidth: 1040, borderCollapse: 'collapse', fontSize: 1 }}>
           <Box
             as="thead"
             sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}
@@ -560,7 +560,7 @@ function IssueTableRow({
         <Text sx={{ ml: 1, color: 'fg.muted', fontSize: 0 }}>#{issue.number}</Text>
       </Box>
       <Box as="td" sx={{ px: 2, py: '6px', verticalAlign: 'middle', height: 36 }}>
-        <Link href={`/repos/${owner}/${name}`} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
+        <Link href={`/repos/${owner}/${name}`} prefetch={false} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
           <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: 'accent.fg', '&:hover': { textDecoration: 'underline' } }}>
             <RepoIcon size={12} />
             <Text>{issue.repo_full_name}</Text>

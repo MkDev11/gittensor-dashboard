@@ -40,6 +40,7 @@ import { formatRelativeTime, isRecent } from '@/lib/format';
 import { useMinerLogin } from '@/lib/use-miner';
 import Dropdown from '@/components/Dropdown';
 import ContentViewer from '@/components/ContentViewer';
+import { IssueLabels } from '@/components/IssueLabels';
 import SearchInput from '@/components/SearchInput';
 import AuthorFilter from '@/components/AuthorFilter';
 import { useSettings } from '@/lib/settings';
@@ -67,6 +68,7 @@ type PullSortKey = 'opened' | 'updated' | 'closed' | 'author' | 'state';
 type SortDir = 'asc' | 'desc';
 type AuthorTarget = { login: string; association?: string | null };
 type RelatedPopoverLayout = { placement: 'down' | 'up'; maxHeight: number };
+type StickyBadge = { issues: number; pulls: number; priority?: boolean };
 interface RepoBadgesResponse {
   repo: string;
   issues_count: number;
@@ -208,9 +210,7 @@ export default function RepoExplorer() {
   // App-level baseline for per-repo new-content badges in the left rail.
   // Loaded from localStorage in a post-mount effect to avoid SSR/CSR
   // hydration mismatch.
-  const [appBaseline, setAppBaseline] = useState<string>(
-    () => new Date(Date.now() - 24 * 3600 * 1000).toISOString()
-  );
+  const [appBaseline, setAppBaseline] = useState<string>('');
 
   // Pagination state
   const [issuesPage, setIssuesPage] = useState(1);
@@ -429,7 +429,7 @@ export default function RepoExplorer() {
     setPullsPage(1);
   }, [prQuery, prState, prMineOnly, prAuthor, pullSortKey, pullSortDir]);
 
-  const { data: userReposData } = useQuery<{
+  const { data: userReposData, isSuccess: userReposReady } = useQuery<{
     count: number;
     repos: Array<{ full_name: string; weight: number; notes: string | null; added_at: string }>;
   }>({
@@ -448,7 +448,7 @@ export default function RepoExplorer() {
   // Server polls master_repositories.json every 5 min and persists any new
   // repos at weight 0; nothing is ever removed. Client refetches on the same
   // cadence so newly discovered repos appear without a page reload.
-  const { data: sn74ReposData, isLoading: sn74ReposLoading } = useQuery<{ repos: RepoEntry[]; source: 'live' | 'empty'; count: number }>({
+  const { data: sn74ReposData, isLoading: sn74ReposLoading, isSuccess: sn74ReposReady } = useQuery<{ repos: RepoEntry[]; source: 'live' | 'empty'; count: number }>({
     queryKey: ['sn74-repos'],
     queryFn: async ({ signal }) => {
       const r = await fetch('/api/sn74-repos', { signal });
@@ -472,6 +472,13 @@ export default function RepoExplorer() {
       });
     return [...sn74Repos, ...userExtras];
   }, [sn74Repos, userReposData]);
+
+  const visibleRepoNamesByLc = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const repo of allRepos) m.set(repo.fullName.toLowerCase(), repo.fullName);
+    return m;
+  }, [allRepos]);
+  const repoAllowlistReady = sn74ReposReady && userReposReady;
 
   const userRepoNames = useMemo(
     () => new Set((userReposData?.repos ?? []).map((u) => u.full_name)),
@@ -749,7 +756,7 @@ export default function RepoExplorer() {
   // `priority` flag is set when an owner or collaborator opens an issue
   // there, and unlike the count it persists across renders until the user
   // visits the repo (the sidebar row gets a yellow accent border).
-  const [stickyBadges, setStickyBadges] = useState<Record<string, { issues: number; pulls: number; priority?: boolean }>>({});
+  const [stickyBadges, setStickyBadges] = useState<Record<string, StickyBadge>>({});
 
   const { data: activityData } = useQuery<{
     since: string;
@@ -764,7 +771,7 @@ export default function RepoExplorer() {
     refetchInterval: 15000,
     staleTime: 10000,
     refetchOnWindowFocus: false,
-    enabled: hydrated,
+    enabled: hydrated && !!appBaseline,
   });
 
   useEffect(() => {
@@ -811,18 +818,61 @@ export default function RepoExplorer() {
     localStorage.setItem('gittensor.stickyBadges', JSON.stringify(stickyBadges));
   }, [stickyBadges, hydrated]);
 
+  // Keep a ref to the latest viewedAt so the activity-data effect can read
+  // it without making it a dependency. setViewedAt always allocates a new
+  // object (fresh timestamp on each repo selection), so depending on
+  // `viewedAt` directly made this effect re-fire on every click. The
+  // setStickyBadges updater below bails out via `return prev`, but React's
+  // per-call depth counter still incremented — eventually tripping
+  // "Maximum update depth exceeded".
+  const viewedAtRef = useRef(viewedAt);
   useEffect(() => {
-    if (!activityData?.activity) return;
+    viewedAtRef.current = viewedAt;
+  }, [viewedAt]);
+
+  useEffect(() => {
+    if (!hydrated || !repoAllowlistReady) return;
+    setStickyBadges((prev) => {
+      let changed = false;
+      const next: Record<string, StickyBadge> = {};
+      for (const [repo, badge] of Object.entries(prev)) {
+        const canonicalRepo = visibleRepoNamesByLc.get(repo.toLowerCase());
+        if (!canonicalRepo) {
+          changed = true;
+          continue;
+        }
+        const existing = next[canonicalRepo];
+        if (existing) {
+          const merged: StickyBadge = {
+            issues: Math.max(existing.issues, badge.issues),
+            pulls: Math.max(existing.pulls, badge.pulls),
+          };
+          if (existing.priority || badge.priority) merged.priority = true;
+          next[canonicalRepo] = merged;
+          changed = true;
+        } else {
+          next[canonicalRepo] = badge;
+          if (canonicalRepo !== repo) changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [hydrated, repoAllowlistReady, visibleRepoNamesByLc]);
+
+  useEffect(() => {
+    if (!activityData?.activity || !repoAllowlistReady) return;
     setStickyBadges((prev) => {
       let changed = false;
       const next = { ...prev };
+      const viewed = viewedAtRef.current;
       for (const [repo, info] of Object.entries(activityData.activity)) {
-        if (viewedAt[repo]) continue;
-        const cur = next[repo] ?? { issues: 0, pulls: 0 };
+        const canonicalRepo = visibleRepoNamesByLc.get(repo.toLowerCase());
+        if (!canonicalRepo || viewed[canonicalRepo]) continue;
+        const cur = next[canonicalRepo] ?? { issues: 0, pulls: 0 };
         const mergedIssues = Math.max(cur.issues, info.issues);
         const mergedPulls = Math.max(cur.pulls, info.pulls);
         if (mergedIssues !== cur.issues || mergedPulls !== cur.pulls) {
-          next[repo] = { issues: mergedIssues, pulls: mergedPulls };
+          next[canonicalRepo] = { issues: mergedIssues, pulls: mergedPulls };
           changed = true;
         }
       }
@@ -830,7 +880,7 @@ export default function RepoExplorer() {
       // returning `prev` lets React bail out of the re-render.
       return changed ? next : prev;
     });
-  }, [activityData, viewedAt]);
+  }, [activityData, repoAllowlistReady, visibleRepoNamesByLc]);
 
   // When user views a repo, drop its sticky badge entry.
   useEffect(() => {
@@ -860,12 +910,13 @@ export default function RepoExplorer() {
       const e = ev as CustomEvent<{ repo: string; kind: 'issue' | 'pull'; priority?: boolean }>;
       if (!e.detail) return;
       const { repo, kind, priority } = e.detail;
-      if (repo === selected.fullName) return; // currently viewing — no badge needed
+      const canonicalRepo = visibleRepoNamesByLc.get(repo.toLowerCase());
+      if (!canonicalRepo || canonicalRepo === selected.fullName) return; // currently viewing — no badge needed
       setStickyBadges((prev) => {
-        const cur = prev[repo] ?? { issues: 0, pulls: 0 };
+        const cur = prev[canonicalRepo] ?? { issues: 0, pulls: 0 };
         return {
           ...prev,
-          [repo]: {
+          [canonicalRepo]: {
             issues: cur.issues + (kind === 'issue' ? 1 : 0),
             pulls: cur.pulls + (kind === 'pull' ? 1 : 0),
             // Priority is sticky once set — sticks until the user views the
@@ -877,16 +928,17 @@ export default function RepoExplorer() {
     };
     window.addEventListener('gittensor-new-content', handler as EventListener);
     return () => window.removeEventListener('gittensor-new-content', handler as EventListener);
-  }, [selected]);
+  }, [selected, visibleRepoNamesByLc]);
 
-  // Total unread count across all repos.
+  // Total unread count across visible repos.
   const totalUnread = useMemo(() => {
     let count = 0;
-    for (const v of Object.values(stickyBadges)) {
+    for (const [repo, v] of Object.entries(stickyBadges)) {
+      if (!visibleRepoNamesByLc.has(repo.toLowerCase())) continue;
       count += (v.issues ?? 0) + (v.pulls ?? 0);
     }
     return count;
-  }, [stickyBadges]);
+  }, [stickyBadges, visibleRepoNamesByLc]);
 
   const markAllAsRead = () => {
     const now = new Date().toISOString();
@@ -999,7 +1051,7 @@ export default function RepoExplorer() {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           pr = (await r.json()) as PullDto;
         } catch (err) {
-          console.warn('[browse] could not open linked PR:', err);
+          console.warn('[explorer] could not open linked PR:', err);
           return;
         }
       }
@@ -1218,29 +1270,42 @@ export default function RepoExplorer() {
   const pagedIssues = filteredIssues;
   const pagedPulls = filteredPulls;
 
+  const renderedRepos = hydrated ? filteredRepos : [];
+  const renderedRepoCount = hydrated ? filteredRepos.length : 0;
+  const renderedAllRepoCount = hydrated ? allRepos.length : 0;
+  const renderedTrackedCount = hydrated ? tracked.size : 0;
+  const renderedTotalUnread = hydrated ? totalUnread : 0;
+  const renderedIssueTabCount = hydrated ? issueTabCount : undefined;
+  const renderedPullTabCount = hydrated ? pullTabCount : undefined;
+  const renderedNewIssuesCount = hydrated ? newIssuesCount : 0;
+  const renderedNewPullsCount = hydrated ? newPullsCount : 0;
+
   return (
-    <Box sx={{ display: 'flex', height: 'calc(100vh - var(--header-height) - 36px)', minHeight: 600, position: 'relative', overflow: 'hidden' }}>
+    <Box sx={{ display: 'flex', flexDirection: ['column', null, null, null, 'row'], height: ['auto', null, null, null, 'calc(100vh - var(--header-height) - 36px)'], minHeight: [0, null, null, null, 600], position: 'relative', overflow: ['visible', null, null, null, 'hidden'] }}>
       {/* LEFT: REPO LIST */}
       <Box
+        style={{ '--repo-explorer-left-width': `${leftWidth}px` } as React.CSSProperties}
         sx={{
-          width: leftWidth,
+          width: ['100%', null, null, null, 'var(--repo-explorer-left-width)'],
+          maxHeight: ['42vh', null, null, null, 'none'],
           flexShrink: 0,
           bg: 'var(--bg-canvas)',
           display: 'flex',
           flexDirection: 'column',
+          borderBottom: ['1px solid var(--border-default)', null, null, null, 'none'],
         }}
       >
         <Box sx={{ p: 3, borderBottom: '1px solid', borderColor: 'var(--border-default)', flexShrink: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2, flexWrap: 'wrap', rowGap: 1 }}>
             <Text sx={{ fontWeight: 600, fontSize: 1, color: 'var(--fg-default)', whiteSpace: 'nowrap' }}>Repositories</Text>
             <Text sx={{ color: 'var(--fg-muted)', fontSize: 0, whiteSpace: 'nowrap' }}>
-              {filteredRepos.length} of {allRepos.length}
+              {renderedRepoCount} of {renderedAllRepoCount}
             </Text>
-            {totalUnread > 0 && (
+            {renderedTotalUnread > 0 && (
               <Box
                 as="button"
                 onClick={markAllAsRead}
-                title={`Clear ${totalUnread} unread badge${totalUnread === 1 ? '' : 's'}`}
+                title={`Clear ${renderedTotalUnread} unread badge${renderedTotalUnread === 1 ? '' : 's'}`}
                 sx={{
                   ml: 'auto',
                   display: 'inline-flex',
@@ -1263,7 +1328,7 @@ export default function RepoExplorer() {
                 }}
               >
                 <CheckIcon size={11} />
-                Mark all read · {totalUnread}
+                Mark all read · {renderedTotalUnread}
               </Box>
             )}
           </Box>
@@ -1310,13 +1375,13 @@ export default function RepoExplorer() {
               title="Show only tracked repos"
             >
               {trackedOnly ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
-              <Text>{tracked.size}</Text>
+              <Text>{renderedTrackedCount}</Text>
             </Box>
           </Box>
         </Box>
 
         <Box sx={{ flex: 1, overflowY: 'auto' }}>
-          {filteredRepos.map((repo) => {
+          {renderedRepos.map((repo) => {
             const isSelected = repo.fullName === selected.fullName;
             const isTracked = tracked.has(repo.fullName);
             const sticky = stickyBadges[repo.fullName];
@@ -1514,11 +1579,11 @@ export default function RepoExplorer() {
               </Box>
             );
           })}
-          {filteredRepos.length === 0 && (
+          {renderedRepos.length === 0 && (
             // Distinguish "still fetching" from "actually no results": before
             // sn74-repos resolves we have no data to compare against the
             // filter, so the empty-state message would be misleading.
-            sn74ReposLoading || !sn74ReposData ? (
+            !hydrated || sn74ReposLoading || !sn74ReposData ? (
               <RepoListSkeleton />
             ) : (
               <Box sx={{ p: 4, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 1 }}>
@@ -1533,7 +1598,7 @@ export default function RepoExplorer() {
       <ResizeHandle onMouseDown={startResize('left')} />
 
       {/* RIGHT: ISSUES + PRS TABS FOR SELECTED REPO */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 320, bg: 'var(--bg-canvas)' }}>
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: [0, null, null, null, 320], bg: 'var(--bg-canvas)' }}>
         <Box sx={{ p: 3, pb: 0, borderBottom: '1px solid', borderColor: 'var(--border-default)', flexShrink: 0 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 3 }}>
             <RepoIcon size={20} />
@@ -1560,16 +1625,16 @@ export default function RepoExplorer() {
               onClick={() => switchTab('issues')}
               icon={<IssueOpenedIcon size={16} />}
               label="Issues"
-              count={issueTabCount}
-              newCount={tab === 'issues' ? 0 : newIssuesCount}
+              count={renderedIssueTabCount}
+              newCount={tab === 'issues' ? 0 : renderedNewIssuesCount}
             />
             <TabButton
               active={tab === 'pulls'}
               onClick={() => switchTab('pulls')}
               icon={<GitPullRequestIcon size={16} />}
               label="Pull Requests"
-              count={pullTabCount}
-              newCount={tab === 'pulls' ? 0 : newPullsCount}
+              count={renderedPullTabCount}
+              newCount={tab === 'pulls' ? 0 : renderedNewPullsCount}
             />
           </Box>
         </Box>
@@ -1621,7 +1686,19 @@ export default function RepoExplorer() {
                     },
                   ]}
                 />
-                <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 3, color: 'var(--fg-muted)', fontSize: 0 }}>
+                <Box
+                  sx={{
+                    ml: ['0', null, 'auto'],
+                    width: ['100%', null, 'auto'],
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: ['space-between', null, 'flex-end'],
+                    gap: [2, null, 3],
+                    flexWrap: 'wrap',
+                    color: 'var(--fg-muted)',
+                    fontSize: 0,
+                  }}
+                >
                   {issuesLoading && <Spinner size="sm" tone="muted" />}
                   {issueTotalCount > 0 && !issuesAllMode && (
                     <InlinePagination
@@ -1646,7 +1723,7 @@ export default function RepoExplorer() {
                     </>
                   )}
                   {issuesData && (
-                    <Text>
+                    <Text sx={{ width: ['100%', null, 'auto'], textAlign: ['right', null, 'left'], whiteSpace: 'nowrap' }}>
                       synced {formatRelativeTime(issuesData.last_fetch)}
                     </Text>
                   )}
@@ -1679,7 +1756,7 @@ export default function RepoExplorer() {
                   </Box>
                 )
               ) : (
-                <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+                <Box as="table" sx={{ width: '100%', minWidth: 1180, borderCollapse: 'collapse', fontSize: 1 }}>
                   <Box as="thead" sx={{ position: 'sticky', top: 0, bg: 'var(--bg-subtle)', zIndex: 1 }}>
                     <Box as="tr" sx={{ borderBottom: '1px solid', borderColor: 'var(--border-default)' }}>
                       <Box as="th" sx={{ ...tableHeaderSx, width: 28 }}></Box>
@@ -1859,7 +1936,19 @@ export default function RepoExplorer() {
                     </Box>
                   )}
                 </Box>
-                <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 3, color: 'var(--fg-muted)', fontSize: 0 }}>
+                <Box
+                  sx={{
+                    ml: ['0', null, 'auto'],
+                    width: ['100%', null, 'auto'],
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: ['space-between', null, 'flex-end'],
+                    gap: [2, null, 3],
+                    flexWrap: 'wrap',
+                    color: 'var(--fg-muted)',
+                    fontSize: 0,
+                  }}
+                >
                   {pullsLoading && <Spinner size="sm" tone="muted" />}
                   {pullTotalCount > 0 && !pullsAllMode && (
                     <InlinePagination
@@ -1884,7 +1973,7 @@ export default function RepoExplorer() {
                     </>
                   )}
                   {pullsData && (
-                    <Text>
+                    <Text sx={{ width: ['100%', null, 'auto'], textAlign: ['right', null, 'left'], whiteSpace: 'nowrap' }}>
                       synced {formatRelativeTime(pullsData.last_fetch)}
                     </Text>
                   )}
@@ -1914,7 +2003,7 @@ export default function RepoExplorer() {
                   </Box>
                 )
               ) : (
-                <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+                <Box as="table" sx={{ width: '100%', minWidth: 960, borderCollapse: 'collapse', fontSize: 1 }}>
                   <Box as="thead" sx={{ position: 'sticky', top: 0, bg: 'var(--bg-subtle)', zIndex: 1 }}>
                     <Box as="tr" sx={{ borderBottom: '1px solid', borderColor: 'var(--border-default)' }}>
                       <Box as="th" sx={{ ...tableHeaderSx, width: 28 }}></Box>
@@ -2057,12 +2146,13 @@ export default function RepoExplorer() {
           left edge as an inner absolute element. */}
       {settings.contentDisplay === 'side' && (issueModal || pullModal) && (
         <Box
+          style={{ '--repo-explorer-side-width': `${sideWidth}px` } as React.CSSProperties}
           sx={{
             position: 'absolute',
             top: 0,
             right: 0,
             bottom: 0,
-            width: sideWidth,
+            width: 'var(--repo-explorer-side-width)',
             minWidth: 320,
             maxWidth: '50vw',
             borderLeft: '1px solid',
@@ -2867,6 +2957,7 @@ function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => v
       aria-orientation="vertical"
       onMouseDown={onMouseDown}
       sx={{
+        display: ['none', null, null, null, 'block'],
         width: 4,
         flexShrink: 0,
         cursor: 'col-resize',
@@ -2994,81 +3085,6 @@ const AuthorStatCell = React.memo(function AuthorStatCell({ value, fg, bg }: { v
         <Text sx={{ color: 'var(--fg-muted)', fontFamily: 'mono', fontSize: 0 }}>—</Text>
       ) : (
         <CountBadge n={value} fg={fg} bg={bg} />
-      )}
-    </Box>
-  );
-});
-
-// GitHub uses 6-digit hex without `#` for label colors. Pick a readable
-// foreground (white on dark hues, black on light) using YIQ-style luminance.
-function readableFgFor(hex: string): string {
-  const h = hex.replace(/^#/, '');
-  if (h.length !== 6) return '#000000';
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
-  return yiq >= 160 ? '#1f2328' : '#ffffff';
-}
-
-const IssueLabels = React.memo(function IssueLabels({
-  labels,
-}: {
-  labels: Array<{ name: string; color?: string }>;
-}) {
-  if (!labels || labels.length === 0) return null;
-  // Cap to 4 visible to keep the title cell tidy; rest are tooltipped.
-  const visible = labels.slice(0, 4);
-  const hidden = labels.length - visible.length;
-  return (
-    <Box
-      sx={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '4px',
-        flexShrink: 0,
-        flexWrap: 'nowrap',
-        overflow: 'hidden',
-      }}
-    >
-      {visible.map((l) => {
-        const bg = `#${(l.color || '6e7781').replace(/^#/, '')}`;
-        const fg = readableFgFor(bg);
-        return (
-          <span
-            key={l.name}
-            title={l.name}
-            style={{
-              display: 'inline-block',
-              padding: '0 7px',
-              borderRadius: 999,
-              background: bg,
-              color: fg,
-              fontSize: 11,
-              fontWeight: 500,
-              lineHeight: '18px',
-              whiteSpace: 'nowrap',
-              maxWidth: 120,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {l.name}
-          </span>
-        );
-      })}
-      {hidden > 0 && (
-        <span
-          title={labels.slice(4).map((l) => l.name).join(', ')}
-          style={{
-            color: 'var(--fg-muted)',
-            fontSize: 11,
-            fontWeight: 500,
-            flexShrink: 0,
-          }}
-        >
-          +{hidden}
-        </span>
       )}
     </Box>
   );
@@ -3566,33 +3582,19 @@ function RelatedPRsCell({
               status === 'draft' ? 'var(--fg-muted)' :
               'var(--danger-fg)';
             return (
-              <Box
-                as="button"
+              <button
                 key={pr.number}
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   setOpen(false);
                   void onPRClick?.(pr.number);
                 }}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 2,
-                  px: 2,
-                  py: '6px',
-                  width: '100%',
-                  border: 'none',
-                  bg: 'transparent',
-                  color: 'inherit',
-                  fontFamily: 'inherit',
-                  fontSize: 'inherit',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  '&:hover': { bg: 'var(--bg-emphasis)' },
-                }}
+                onMouseEnter={highlightRelatedRow}
+                onMouseLeave={unhighlightRelatedRow}
+                style={relatedPopoverRowStyle}
               >
                 {pr.author_login ? (
-                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexShrink: 0, minWidth: 0, maxWidth: 110 }}>
+                  <span style={relatedPopoverAuthorStyle}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`https://github.com/${pr.author_login}.png?size=32`}
@@ -3600,29 +3602,20 @@ function RelatedPRsCell({
                       loading="lazy"
                       style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--border-muted)', display: 'block', flexShrink: 0 }}
                     />
-                    <Text sx={{ fontSize: 0, color: 'var(--fg-default)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={relatedPopoverAuthorTextStyle}>
                       {pr.author_login}
-                    </Text>
-                  </Box>
+                    </span>
+                  </span>
                 ) : (
                   <GitPullRequestIcon size={12} />
                 )}
-                <Text sx={{ color: statusColor, fontSize: 0, fontWeight: 700, textTransform: 'capitalize', flexShrink: 0 }}>
+                <span style={{ ...relatedPopoverStatusTextStyle, color: statusColor }}>
                   {status}
-                </Text>
-                <Text
-                  sx={{
-                    fontSize: 0,
-                    color: 'var(--fg-default)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    flex: 1,
-                  }}
-                >
+                </span>
+                <span style={relatedPopoverTitleStyle}>
                   #{pr.number} {pr.title}
-                </Text>
-              </Box>
+                </span>
+              </button>
             );
           })}
         </Box>
@@ -3745,36 +3738,22 @@ function RelatedIssuesCell({
               status === 'not_planned' ? SkipIcon :
               IssueClosedIcon;
             return (
-              <Box
-                as="button"
+              <button
                 key={iss.number}
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   setOpen(false);
                   onIssueClick?.(iss.number);
                 }}
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 2,
-                  px: 2,
-                  py: '6px',
-                  width: '100%',
-                  border: 'none',
-                  bg: 'transparent',
-                  color: 'inherit',
-                  fontFamily: 'inherit',
-                  fontSize: 'inherit',
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  '&:hover': { bg: 'var(--bg-emphasis)' },
-                }}
+                onMouseEnter={highlightRelatedRow}
+                onMouseLeave={unhighlightRelatedRow}
+                style={relatedPopoverRowStyle}
               >
-                <Box sx={{ color: statusColor, display: 'inline-flex', flexShrink: 0 }}>
+                <span style={{ color: statusColor, display: 'inline-flex', flexShrink: 0 }}>
                   <StatusIcon size={12} />
-                </Box>
+                </span>
                 {iss.author_login && (
-                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexShrink: 0, minWidth: 0, maxWidth: 110 }}>
+                  <span style={relatedPopoverAuthorStyle}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={`https://github.com/${iss.author_login}.png?size=32`}
@@ -3782,28 +3761,76 @@ function RelatedIssuesCell({
                       loading="lazy"
                       style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--border-muted)', display: 'block', flexShrink: 0 }}
                     />
-                    <Text sx={{ fontSize: 0, color: 'var(--fg-default)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <span style={relatedPopoverAuthorTextStyle}>
                       {iss.author_login}
-                    </Text>
-                  </Box>
+                    </span>
+                  </span>
                 )}
-                <Text
-                  sx={{
-                    fontSize: 0,
-                    color: 'var(--fg-default)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    flex: 1,
-                  }}
-                >
+                <span style={relatedPopoverTitleStyle}>
                   #{iss.number} {iss.title}
-                </Text>
-              </Box>
+                </span>
+              </button>
             );
           })}
         </Box>
       )}
     </Box>
   );
+}
+
+const relatedPopoverRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  width: '100%',
+  padding: '6px 8px',
+  border: 'none',
+  background: 'transparent',
+  color: 'inherit',
+  fontFamily: 'inherit',
+  fontSize: 'inherit',
+  textAlign: 'left',
+  cursor: 'pointer',
+};
+
+const relatedPopoverAuthorStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 4,
+  flexShrink: 0,
+  minWidth: 0,
+  maxWidth: 110,
+};
+
+const relatedPopoverAuthorTextStyle: React.CSSProperties = {
+  color: 'var(--fg-default)',
+  fontSize: 12,
+  fontWeight: 500,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const relatedPopoverStatusTextStyle: React.CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  textTransform: 'capitalize',
+  flexShrink: 0,
+};
+
+const relatedPopoverTitleStyle: React.CSSProperties = {
+  color: 'var(--fg-default)',
+  fontSize: 12,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  flex: 1,
+};
+
+function highlightRelatedRow(e: React.MouseEvent<HTMLButtonElement>) {
+  e.currentTarget.style.background = 'var(--bg-emphasis)';
+}
+
+function unhighlightRelatedRow(e: React.MouseEvent<HTMLButtonElement>) {
+  e.currentTarget.style.background = 'transparent';
 }

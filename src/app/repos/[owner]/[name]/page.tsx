@@ -105,7 +105,7 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
       <PageLayout.Header>
         {/* Back link */}
         <Box sx={{ mb: 3 }}>
-          <Link href="/repositories" style={{ textDecoration: 'none' }}>
+          <Link href="/repositories" prefetch={false} style={{ textDecoration: 'none' }}>
             <Box
               sx={{
                 display: 'inline-flex',
@@ -227,7 +227,7 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
       </PageLayout.Header>
 
       <PageLayout.Content>
-        <Box sx={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+        <Box sx={{ display: ['block', null, 'flex'], gap: 4, alignItems: 'flex-start' }}>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             {tab === 'readme' && <ReadmeTab owner={params.owner} name={params.name} />}
             {tab === 'code' && <CodeTab owner={params.owner} name={params.name} />}
@@ -237,7 +237,7 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
             {tab === 'check' && <RepoCheckTab owner={params.owner} name={params.name} />}
           </Box>
 
-          <Box sx={{ width: 320, flexShrink: 0, position: 'sticky', top: 'calc(var(--header-height) + 16px)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <Box sx={{ width: ['100%', null, 320], flexShrink: 0, position: ['static', null, 'sticky'], top: 'calc(var(--header-height) + 16px)', display: 'flex', flexDirection: 'column', gap: 4, mt: [4, null, 0] }}>
             <SidebarSection title="Repository Stats">
               <KvRow label="Weight" value={summary.data?.weight != null ? summary.data.weight.toFixed(2) : '—'} />
               <KvRow label="Total Score" value={fmtScore(summary.data?.totalScore)} />
@@ -434,7 +434,7 @@ function IssuesTab({ owner, name }: { owner: string; name: string }) {
         </Box>
       </Box>
 
-      <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+      <Box as="table" sx={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: 1 }}>
         <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
           <Box as="tr">
             <ColTh>ISSUE #</ColTh>
@@ -598,7 +598,7 @@ function PullsTab({ owner, name }: { owner: string; name: string }) {
         </Box>
       </Box>
 
-      <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+      <Box as="table" sx={{ width: '100%', minWidth: 920, borderCollapse: 'collapse', fontSize: 1 }}>
         <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
           <Box as="tr">
             <SortableTh sk="number" current={sortKey} dir={sortDir} onSort={onSort}>PR #</SortableTh>
@@ -1418,7 +1418,7 @@ function MinerTabBtn({ active, onClick, children }: { active: boolean; onClick: 
 
 function Panel({ children }: { children: React.ReactNode }) {
   return (
-    <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', overflow: 'hidden' }}>
+    <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', overflowX: 'auto', overflowY: 'hidden' }}>
       {children}
     </Box>
   );

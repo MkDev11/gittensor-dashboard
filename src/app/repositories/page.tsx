@@ -187,7 +187,7 @@ export default function RepositoriesPage() {
         <Box
           sx={{
             display: 'grid',
-            gridTemplateColumns: ['1fr', 'repeat(3, 1fr)'],
+            gridTemplateColumns: ['1fr', null, null, 'repeat(3, minmax(0, 1fr))'],
             gap: 3,
             mb: 3,
           }}
@@ -246,8 +246,8 @@ export default function RepositoriesPage() {
             borderBottom: 'none',
           }}
         >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap' }}>
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+          <Box sx={{ display: 'flex', flexDirection: ['column', null, 'row'], alignItems: ['stretch', null, 'center'], gap: 3, flexWrap: 'wrap' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, maxWidth: '100%', overflowX: 'auto', pb: ['2px', null, 0] }}>
               <StatusTab active={status === 'all'} onClick={() => { setStatus('all'); setPage(1); }} label="All" count={data?.count} />
               <StatusTab active={status === 'active'} onClick={() => { setStatus('active'); setPage(1); }} label="Active" count={data?.activeCount} />
               <StatusTab active={status === 'inactive'} onClick={() => { setStatus('inactive'); setPage(1); }} label="Inactive" count={data?.inactiveCount} />
@@ -280,7 +280,7 @@ export default function RepositoriesPage() {
               </Box>
             </Box>
 
-            <Box sx={{ flex: 1, minWidth: 240 }}>
+            <Box sx={{ flex: 1, minWidth: [0, null, 240], width: ['100%', null, 'auto'] }}>
               <TextInput
                 leadingVisual={SearchIcon}
                 placeholder="Search or enter owner/name…"
@@ -300,9 +300,20 @@ export default function RepositoriesPage() {
             </Box>
           </Box>
 
-          {/* Sort row — grid view has no column headers, so expose sort here */}
-          {view === 'grid' && (
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, mt: 3, color: 'fg.muted', fontSize: 1 }}>
+          {/* Card layouts have no sortable table headers, so expose sort controls there. */}
+          {(view === 'grid' || view === 'list') && (
+            <Box
+              sx={{
+                display: view === 'grid' ? 'flex' : ['flex', null, null, 'none'],
+                flexDirection: ['column', null, 'row'],
+                alignItems: ['stretch', null, 'center'],
+                justifyContent: 'flex-end',
+                gap: 2,
+                mt: 3,
+                color: 'fg.muted',
+                fontSize: 1,
+              }}
+            >
               <Text sx={{ color: 'fg.muted' }}>Sort:</Text>
               <Box
                 as="select"
@@ -319,7 +330,7 @@ export default function RepositoriesPage() {
                   fontSize: 1,
                   fontFamily: 'inherit',
                   cursor: 'pointer',
-                  minWidth: 140,
+                  minWidth: [0, null, 140],
                 }}
               >
                 {SORT_OPTIONS.map((o) => (
@@ -335,7 +346,7 @@ export default function RepositoriesPage() {
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  width: 28,
+                  width: ['100%', null, 28],
                   height: 28,
                   bg: 'canvas.default',
                   color: 'fg.default',
@@ -377,42 +388,36 @@ export default function RepositoriesPage() {
         )}
 
         {data && view === 'list' && (
-          <RepoTable
-            rows={pageItems}
-            startRank={pageStart + 1}
-            sortKey={sortKey}
-            sortDir={sortDir}
-            onSort={onSortChange}
-            tracked={tracked}
-            onToggleTrack={toggle}
-          />
+          <>
+            <Box sx={{ display: ['block', null, null, 'none'] }}>
+              <RepoCards
+                rows={pageItems}
+                startRank={pageStart + 1}
+                tracked={tracked}
+                onToggleTrack={toggle}
+              />
+            </Box>
+            <Box sx={{ display: ['none', null, null, 'block'] }}>
+              <RepoTable
+                rows={pageItems}
+                startRank={pageStart + 1}
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onSort={onSortChange}
+                tracked={tracked}
+                onToggleTrack={toggle}
+              />
+            </Box>
+          </>
         )}
 
         {data && view === 'grid' && (
-          <Box
-            sx={{
-              border: '1px solid',
-              borderColor: 'border.default',
-              borderTop: 'none',
-              borderBottomLeftRadius: 2,
-              borderBottomRightRadius: 2,
-              bg: 'canvas.subtle',
-              p: 3,
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-              gap: 3,
-            }}
-          >
-            {pageItems.map((r, i) => (
-              <RepoGridCard
-                key={r.fullName}
-                repo={r}
-                rank={pageStart + i + 1}
-                isTracked={tracked.has(r.fullName)}
-                onToggleTrack={() => toggle(r.fullName)}
-              />
-            ))}
-          </Box>
+          <RepoCards
+            rows={pageItems}
+            startRank={pageStart + 1}
+            tracked={tracked}
+            onToggleTrack={toggle}
+          />
         )}
 
         {data && (
@@ -428,8 +433,9 @@ export default function RepositoriesPage() {
               py: 2,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'flex-end',
+              justifyContent: ['space-between', null, 'flex-end'],
               gap: 2,
+              flexWrap: 'wrap',
               color: 'fg.muted',
               fontSize: 1,
             }}
@@ -466,6 +472,8 @@ function InfoCard({ title, children }: { title: string; children: React.ReactNod
         display: 'flex',
         flexDirection: 'column',
         gap: 0,
+        minWidth: 0,
+        overflow: 'hidden',
       }}
     >
       <Text
@@ -480,7 +488,7 @@ function InfoCard({ title, children }: { title: string; children: React.ReactNod
       >
         {title}
       </Text>
-      <Box sx={{ display: 'flex', flexDirection: 'column' }}>{children}</Box>
+      <Box sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>{children}</Box>
     </Box>
   );
 }
@@ -493,12 +501,13 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
 
 function CardRow({ repo, right }: { repo: GtRepo; right: React.ReactNode }) {
   return (
-    <Link href={`/repos/${repo.owner}/${repo.name}`} style={{ textDecoration: 'none' }}>
+    <Link href={`/repos/${repo.owner}/${repo.name}`} prefetch={false} style={{ display: 'block', minWidth: 0, textDecoration: 'none' }}>
       <Box
         sx={{
           display: 'flex',
           alignItems: 'center',
           gap: 2,
+          minWidth: 0,
           py: '8px',
           borderTop: '1px solid',
           borderColor: 'border.muted',
@@ -519,6 +528,7 @@ function CardRow({ repo, right }: { repo: GtRepo; right: React.ReactNode }) {
         <Text
           sx={{
             flex: 1,
+            minWidth: 0,
             color: 'fg.default',
             fontWeight: 500,
             fontSize: 1,
@@ -568,13 +578,15 @@ function RecentPrRow({ pr }: { pr: GtPrSummary }) {
     <Link
       href={`https://github.com/${pr.repository}/pull/${pr.pullRequestNumber}`}
       target="_blank"
-      style={{ textDecoration: 'none' }}
+      prefetch={false}
+      style={{ display: 'block', minWidth: 0, textDecoration: 'none' }}
     >
       <Box
         sx={{
           display: 'flex',
           alignItems: 'flex-start',
           gap: 2,
+          minWidth: 0,
           py: '8px',
           borderTop: '1px solid',
           borderColor: 'border.muted',
@@ -596,7 +608,7 @@ function RecentPrRow({ pr }: { pr: GtPrSummary }) {
           <Text sx={{ display: 'block', color: 'fg.muted', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {pr.repository}
           </Text>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: ['flex-start', null, 'center'], gap: 1, minWidth: 0, mt: '2px' }}>
             <Box sx={{ color, flexShrink: 0, display: 'inline-flex' }}>
               <Icon size={12} />
             </Box>
@@ -606,8 +618,10 @@ function RecentPrRow({ pr }: { pr: GtPrSummary }) {
                 fontWeight: 500,
                 fontSize: 1,
                 overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
+                textOverflow: ['clip', null, 'ellipsis'],
+                whiteSpace: ['normal', null, 'nowrap'],
+                overflowWrap: 'anywhere',
+                lineHeight: 1.35,
                 flex: 1,
               }}
               title={pr.title}
@@ -615,8 +629,13 @@ function RecentPrRow({ pr }: { pr: GtPrSummary }) {
               {pr.title}
             </Text>
           </Box>
+          <Text sx={{ display: ['block', null, 'none'], color: 'fg.muted', fontSize: 0, mt: 1 }}>
+            {formatRelativeTime(pr.prCreatedAt)}
+          </Text>
         </Box>
-        <Text sx={{ color: 'fg.muted', fontSize: 0, flexShrink: 0 }}>{formatRelativeTime(pr.prCreatedAt)}</Text>
+        <Text sx={{ display: ['none', null, 'block'], color: 'fg.muted', fontSize: 0, flexShrink: 0 }}>
+          {formatRelativeTime(pr.prCreatedAt)}
+        </Text>
       </Box>
     </Link>
   );
@@ -650,6 +669,7 @@ function StatusTab({
         color: active ? 'fg.default' : 'fg.muted',
         fontSize: 1,
         fontWeight: active ? 600 : 500,
+        flexShrink: 0,
         cursor: 'pointer',
         fontFamily: 'inherit',
         '&:hover': { color: 'fg.default' },
@@ -765,10 +785,11 @@ function RepoTable({
         borderColor: 'border.default',
         borderTop: 'none',
         bg: 'canvas.subtle',
-        overflow: 'hidden',
+        overflowX: 'auto',
+        overflowY: 'hidden',
       }}
     >
-      <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
+      <Box as="table" sx={{ width: '100%', minWidth: 980, borderCollapse: 'collapse', fontSize: 1 }}>
         <Box as="thead" sx={{ borderBottom: '1px solid', borderColor: 'border.default' }}>
           <Box as="tr">
             <Th width={70}>RANK</Th>
@@ -818,7 +839,7 @@ function RepoTable({
                   </Box>
                 </Box>
                 <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
-                  <Link href={`/repos/${r.owner}/${r.name}`} style={{ textDecoration: 'none' }}>
+                  <Link href={`/repos/${r.owner}/${r.name}`} prefetch={false} style={{ textDecoration: 'none' }}>
                     <Box
                       sx={{
                         display: 'inline-flex',
@@ -902,6 +923,56 @@ function RepoTable({
   );
 }
 
+function RepoCards({
+  rows,
+  startRank,
+  tracked,
+  onToggleTrack,
+}: {
+  rows: GtRepo[];
+  startRank: number;
+  tracked: Set<string>;
+  onToggleTrack: (fullName: string) => void;
+}) {
+  return (
+    <Box
+      sx={{
+        border: '1px solid',
+        borderColor: 'border.default',
+        borderTop: 'none',
+        borderBottomLeftRadius: 2,
+        borderBottomRightRadius: 2,
+        bg: 'canvas.subtle',
+        p: [2, null, 3],
+      }}
+    >
+      {rows.length === 0 ? (
+        <Box sx={{ p: 4, textAlign: 'center', color: 'fg.muted' }}>
+          No repositories match.
+        </Box>
+      ) : (
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))',
+            gap: 3,
+          }}
+        >
+          {rows.map((r, i) => (
+            <RepoGridCard
+              key={r.fullName}
+              repo={r}
+              rank={startRank + i}
+              isTracked={tracked.has(r.fullName)}
+              onToggleTrack={() => onToggleTrack(r.fullName)}
+            />
+          ))}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 function RepoGridCard({
   repo,
   rank,
@@ -955,7 +1026,7 @@ function RepoGridCard({
           loading="lazy"
           style={{ width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--border-muted)' }}
         />
-        <Link href={`/repos/${repo.owner}/${repo.name}`} style={{ textDecoration: 'none', flex: 1, minWidth: 0 }}>
+        <Link href={`/repos/${repo.owner}/${repo.name}`} prefetch={false} style={{ textDecoration: 'none', flex: 1, minWidth: 0 }}>
           <Text
             sx={{
               fontWeight: 600,
@@ -1003,7 +1074,7 @@ function RepoGridCard({
           </Text>
         </Box>
         <Box sx={{ width: '100%', height: 4, bg: 'canvas.inset', borderRadius: 999, overflow: 'hidden' }}>
-          <Box sx={{ height: '100%', width: `${weightPct}%`, bg: 'accent.emphasis' }} />
+          <Box sx={{ height: '100%', bg: 'accent.emphasis' }} style={{ width: `${weightPct}%` }} />
         </Box>
       </Box>
 

@@ -235,7 +235,7 @@ export default function MinersPage() {
         </Text>
       </PageLayout.Header>
       <PageLayout.Content>
-        <Box sx={{ display: 'flex', gap: 4, alignItems: 'flex-start' }}>
+        <Box sx={{ display: ['block', null, 'flex'], gap: 4, alignItems: 'flex-start' }}>
           {/* main column */}
           <Box sx={{ flex: 1, minWidth: 0 }}>
             {/* Toolbar */}
@@ -363,7 +363,7 @@ export default function MinersPage() {
               <Box
                 sx={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(min(280px, 100%), 1fr))',
                   gap: 3,
                 }}
               >
@@ -395,7 +395,7 @@ export default function MinersPage() {
           </Box>
 
           {/* Sidebar */}
-          <Box sx={{ width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 3, position: 'sticky', top: 'calc(var(--header-height) + 16px)' }}>
+          <Box sx={{ width: ['100%', null, 300], flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 3, position: ['static', null, 'sticky'], top: 'calc(var(--header-height) + 16px)', mt: [3, null, 0] }}>
             <SidebarCard title="Miners Activity">
               <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', alignItems: 'center', rowGap: '6px', columnGap: 2 }}>
                 <Text sx={{ fontSize: 0, color: 'fg.muted' }}></Text>
@@ -636,10 +636,10 @@ function Bar({ label, pct, color }: { label: string; pct: number; color: string 
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: '4px', fontSize: 1 }}>
         <Text sx={{ color: 'fg.default' }}>{label}</Text>
-        <Text sx={{ fontFamily: 'mono', fontWeight: 700, color }}>{pct}%</Text>
+        <Text sx={{ fontFamily: 'mono', fontWeight: 700 }} style={{ color }}>{pct}%</Text>
       </Box>
       <Box sx={{ width: '100%', height: 6, bg: 'canvas.inset', borderRadius: 999, overflow: 'hidden' }}>
-        <Box sx={{ height: '100%', width: `${pct}%`, bg: color }} />
+        <Box sx={{ height: '100%' }} style={{ width: `${pct}%`, backgroundColor: color }} />
       </Box>
     </Box>
   );

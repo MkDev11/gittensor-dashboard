@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
 
 export type ThemeMode = 'dark' | 'light';
 const STORAGE_KEY = 'gittensor.theme';
 const DEFAULT_THEME: ThemeMode = 'dark';
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 export function readStoredTheme(): ThemeMode {
   if (typeof window === 'undefined') return DEFAULT_THEME;
@@ -14,17 +15,22 @@ export function readStoredTheme(): ThemeMode {
 
 export function applyThemeAttr(theme: ThemeMode) {
   if (typeof document === 'undefined') return;
-  document.documentElement.setAttribute('data-theme', theme);
-  document.documentElement.style.colorScheme = theme;
+  const root = document.documentElement;
+  root.setAttribute('data-theme', theme);
+  root.setAttribute('data-color-mode', theme);
+  root.style.colorScheme = theme;
 }
 
 export function useTheme(): { theme: ThemeMode; setTheme: (t: ThemeMode) => void; toggle: () => void } {
   const [theme, setThemeState] = useState<ThemeMode>(DEFAULT_THEME);
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const stored = readStoredTheme();
     setThemeState(stored);
     applyThemeAttr(stored);
+  }, []);
+
+  useEffect(() => {
     const onStorage = () => {
       const next = readStoredTheme();
       setThemeState(next);

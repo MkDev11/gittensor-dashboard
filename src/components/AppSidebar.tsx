@@ -4,12 +4,13 @@ import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  RepoIcon,
+  StackIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
-  BrowserIcon,
+  TelescopeIcon,
   BookIcon,
-  OrganizationIcon,
+  PeopleIcon,
+  PersonIcon,
 } from '@primer/octicons-react';
 import type { Icon } from '@primer/octicons-react';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -26,12 +27,12 @@ interface NavItem {
 // horizontal top-nav with a Linear-style left rail. Docs is grouped at the
 // bottom as a "reference" link rather than mixed in with the working pages.
 const PRIMARY: NavItem[] = [
-  { href: '/', label: 'Browse', icon: BrowserIcon },
-  { href: '/miners', label: 'Miners', icon: OrganizationIcon },
-  { href: '/repositories', label: 'Repositories', icon: RepoIcon },
+  { href: '/', label: 'Explorer', icon: TelescopeIcon },
+  { href: '/miners', label: 'Miners', icon: PeopleIcon },
+  { href: '/repositories', label: 'Repositories', icon: StackIcon },
   { href: '/issues', label: 'Issues', icon: IssueOpenedIcon },
   { href: '/pulls', label: 'Pull Requests', icon: GitPullRequestIcon },
-  { href: '/my-prs', label: 'My PRs', icon: GitPullRequestIcon },
+  { href: '/my-prs', label: 'My PRs', icon: PersonIcon },
 ];
 
 const SECONDARY: NavItem[] = [
@@ -51,6 +52,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   return (
     <Link
       href={item.href}
+      prefetch={false}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -129,6 +131,7 @@ export default function AppSidebar() {
       {/* Brand */}
       <Link
         href="/"
+        prefetch={false}
         style={{
           display: 'flex',
           alignItems: 'center',

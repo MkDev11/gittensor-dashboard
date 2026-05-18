@@ -52,6 +52,8 @@
   --done-subtle: rgba(165, 132, 255, 0.14);
   --neutral-subtle: rgba(255, 255, 255, 0.06);
   --neutral-emphasis: #2a2c30;
+  --bottom-nav-bg: rgba(16, 17, 19, 0.96);
+  --bottom-nav-shadow: 0 -12px 28px rgba(0, 0, 0, 0.35);
   /* Skeleton placeholders need stronger contrast than --bg-subtle gives —
    * those bgs are within 8 RGB units of canvas and read as solid black. */
   --skeleton-base: rgba(255, 255, 255, 0.05);
@@ -140,6 +142,8 @@
   --done-subtle: rgba(86, 53, 195, 0.10);
   --neutral-subtle: rgba(0, 0, 0, 0.06);
   --neutral-emphasis: #4a4d54;
+  --bottom-nav-bg: rgba(249, 250, 251, 0.96);
+  --bottom-nav-shadow: 0 -10px 26px rgba(16, 24, 40, 0.10);
   --skeleton-base: rgba(0, 0, 0, 0.05);
   --skeleton-shine: rgba(0, 0, 0, 0.12);
 
@@ -213,6 +217,7 @@ a {
    * Sticky elements that need to clear chrome compose this with their own
    * gap (e.g. `top: calc(var(--header-height) + 16px)`). */
   --header-height: 0px;
+  --bottom-nav-height: 0px;
 }
 
 body {
@@ -228,18 +233,24 @@ body {
 html[data-no-sidebar] {
   --sidebar-width: 0px;
 }
+html[data-no-sidebar] body {
+  padding-left: 0;
+}
 
-/* Narrow viewports (phones, small tablets, deliberately resized windows)
- * can't afford the 240px sidebar — main content would be squeezed to
- * single-column-width. Collapse the sidebar and hand the full viewport
- * to main. The horizontal header is still usable at narrow widths so we
- * leave that alone. */
-@media (max-width: 768px) {
+/* Compact viewports cannot afford the 240px fixed rail. Collapse sidebar
+ * mode below the desktop header breakpoint and let AppHeader's compact top
+ * chrome + bottom dock take over across phones and tablets. */
+@media (max-width: 1279px) {
   html [data-app-sidebar] {
     display: none;
   }
-  html {
+  :root {
     --sidebar-width: 0px;
+    --header-height: 64px;
+    --bottom-nav-height: calc(72px + env(safe-area-inset-bottom));
+  }
+  body {
+    padding-left: 0;
   }
 }
 
@@ -248,6 +259,14 @@ html[data-no-sidebar] {
  * shift down to clear it. */
 html[data-top-header] {
   --header-height: 64px;
+}
+
+@media (max-width: 767px) {
+  :root,
+  html[data-top-header] {
+    --header-height: 96px;
+    --bottom-nav-height: calc(72px + env(safe-area-inset-bottom));
+  }
 }
 
 /* AppShell renders both chrome variants. CSS picks the active one based on
@@ -269,10 +288,15 @@ html[data-no-sidebar] [data-app-sidebar] {
 html:not([data-top-header]) [data-app-header] {
   display: none;
 }
+@media (max-width: 1279px) {
+  html:not([data-top-header]) [data-app-header] {
+    display: block !important;
+  }
+}
 
 main {
   flex: 1 0 auto;
-  padding-bottom: 36px;
+  padding-bottom: calc(36px + var(--bottom-nav-height));
 }
 
 /* Linear's focus ring: subtle inset glow, no harsh 2px outline. */

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import { Box, Text, IconButton } from '@primer/react';
+import { Box } from '@primer/react';
 import { XIcon, IssueOpenedIcon, GitPullRequestIcon, BellIcon } from '@primer/octicons-react';
 
 export type ToastVariant = 'info' | 'success' | 'warning' | 'danger';
@@ -56,13 +56,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       <Box
         sx={{
           position: 'fixed',
-          bottom: 16,
-          right: 16,
+          left: [2, null, 'auto'],
+          right: [2, null, 16],
+          bottom: ['calc(var(--bottom-nav-height, 0px) + 42px)', null, 16],
           zIndex: 9999,
           display: 'flex',
           flexDirection: 'column',
           gap: 2,
-          maxWidth: 380,
+          width: ['auto', null, 380],
+          maxWidth: ['calc(100vw - 16px)', null, 380],
+          pointerEvents: 'none',
         }}
       >
         {toasts.map((t) => (
@@ -90,43 +93,125 @@ function ToastCard({ toast, onClose }: { toast: Toast; onClose: () => void }) {
         bg: 'canvas.overlay',
         border: '1px solid',
         borderColor: 'border.default',
-        borderLeft: '3px solid',
-        borderLeftColor: variantStyle.bar,
         borderRadius: 2,
         boxShadow: 'var(--shadow-overlay)',
-        p: 3,
-        display: 'flex',
-        gap: 2,
-        alignItems: 'flex-start',
+        p: [2, 3],
+        display: 'grid',
+        gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+        gridTemplateAreas: "'icon title close' 'bar body body'",
+        columnGap: 2,
+        rowGap: 1,
+        alignItems: 'start',
+        overflow: 'hidden',
+        position: 'relative',
+        pointerEvents: 'auto',
         animation: 'slideUp 200ms ease',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          inset: 0,
+          borderLeft: ['none', null, '3px solid'],
+          borderLeftColor: variantStyle.bar,
+          borderTop: ['3px solid', null, 'none'],
+          borderTopColor: variantStyle.bar,
+          pointerEvents: 'none',
+        },
         '@keyframes slideUp': {
           from: { opacity: 0, transform: 'translateY(8px)' },
           to: { opacity: 1, transform: 'translateY(0)' },
         },
       }}
     >
-      <Box sx={{ pt: '2px', color: variantStyle.bar }}>
+      <Box
+        sx={{
+          gridArea: 'icon',
+          width: 28,
+          height: 28,
+          borderRadius: '50%',
+          bg: 'canvas.inset',
+          color: variantStyle.bar,
+          border: '1px solid',
+          borderColor: 'border.default',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
         <Icon size={16} />
       </Box>
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Text sx={{ fontWeight: 600, color: 'fg.default', display: 'block', fontSize: 1 }}>{toast.title}</Text>
-        {toast.body && (
-          <Text sx={{ color: 'fg.muted', fontSize: 0, mt: 1, display: 'block', wordBreak: 'break-word' }}>
-            {toast.body}
-          </Text>
-        )}
+      <Box sx={{ gridArea: 'title', minWidth: 0, alignSelf: 'center' }}>
+        <span
+          style={{
+            fontWeight: 700,
+            color: 'var(--fg-default)',
+            display: '-webkit-box',
+            fontSize: 13,
+            lineHeight: 1.3,
+            overflow: 'hidden',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: 2,
+            wordBreak: 'break-word',
+          }}
+        >
+          {toast.title}
+        </span>
       </Box>
-      <IconButton
-        icon={XIcon}
+      <button
+        type="button"
         aria-label="Dismiss notification"
-        size="small"
-        variant="invisible"
         onClick={(e: React.MouseEvent) => {
           e.preventDefault();
           e.stopPropagation();
           onClose();
         }}
+        style={{
+          gridArea: 'close',
+          width: 28,
+          height: 28,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          border: 'none',
+          borderRadius: 6,
+          background: 'transparent',
+          color: 'var(--fg-muted)',
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        <XIcon size={16} />
+      </button>
+      <Box
+        aria-hidden="true"
+        sx={{
+          gridArea: 'bar',
+          justifySelf: 'center',
+          width: 2,
+          height: '100%',
+          minHeight: 28,
+          borderRadius: 999,
+          bg: variantStyle.bar,
+          display: ['none', null, 'block'],
+        }}
       />
+      {toast.body && (
+        <span
+          style={{
+            gridArea: 'body',
+            color: 'var(--fg-muted)',
+            fontSize: 12,
+            lineHeight: 1.35,
+            display: '-webkit-box',
+            overflow: 'hidden',
+            WebkitBoxOrient: 'vertical',
+            WebkitLineClamp: 2,
+            wordBreak: 'break-word',
+          }}
+        >
+          {toast.body}
+        </span>
+      )}
     </Box>
   );
 
@@ -154,6 +239,7 @@ function ToastCard({ toast, onClose }: { toast: Toast; onClose: () => void }) {
           width: '100%',
           cursor: 'pointer',
           textAlign: 'left',
+          pointerEvents: 'auto',
         }}
       >
         {inner}
@@ -162,7 +248,7 @@ function ToastCard({ toast, onClose }: { toast: Toast; onClose: () => void }) {
   }
   if (toast.href) {
     return (
-      <a href={toast.href} style={{ textDecoration: 'none', display: 'block' }}>
+      <a href={toast.href} style={{ textDecoration: 'none', display: 'block', pointerEvents: 'auto' }}>
         {inner}
       </a>
     );

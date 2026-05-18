@@ -181,7 +181,7 @@ export default function MyPrsPage() {
           </Box>
         )}
 
-        <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', overflow: 'hidden' }}>
+        <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', overflowX: 'auto', overflowY: 'hidden' }}>
           {filtered.length === 0 && isLoading ? (
             <TableRowsSkeleton
               rows={10}

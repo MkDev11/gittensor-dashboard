@@ -229,7 +229,7 @@ export default function AllPullsPage() {
           </Box>
         </Box>
 
-        <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflow: 'hidden', bg: 'canvas.default' }}>
+        <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflowX: 'auto', overflowY: 'hidden', bg: 'canvas.default' }}>
           <Box as="table" sx={{ width: '100%', minWidth: 1100, borderCollapse: 'collapse', fontSize: 1 }}>
             <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
               <Box as="tr">
@@ -547,7 +547,7 @@ function PullTableRow({
         </Box>
       </Box>
       <Box as="td" sx={{ px: 2, py: '6px', verticalAlign: 'middle' }}>
-        <Link href={`/?repo=${encodeURIComponent(pr.repo_full_name)}&tab=pulls`} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
+        <Link href={`/?repo=${encodeURIComponent(pr.repo_full_name)}&tab=pulls`} prefetch={false} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
           <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: 'accent.fg', '&:hover': { textDecoration: 'underline' } }}>
             <RepoIcon size={12} />
             <Text>{pr.repo_full_name}</Text>
@@ -608,7 +608,7 @@ function PullTableRow({
                 ? `/?repo=${encodeURIComponent(pr.repo_full_name)}&tab=issues&issue=${li.number}`
                 : `/?repo=${encodeURIComponent(li.repo)}&tab=issues&issue=${li.number}`;
               return (
-                <Link key={`${li.repo}#${li.number}`} href={target} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
+                <Link key={`${li.repo}#${li.number}`} href={target} prefetch={false} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
                   <Box
                     sx={{
                       display: 'inline-flex',

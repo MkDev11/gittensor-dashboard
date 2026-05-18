@@ -22,8 +22,12 @@ interface Sn74ReposResp {
  * repos at weight 0; nothing is ever removed. Client refetches on the same
  * cadence so newly discovered repos appear without a page reload.
  */
-export function useSn74Repos(): { repos: RepoEntry[]; weights: Map<string, number> } {
-  const { data } = useQuery<Sn74ReposResp>({
+export function useSn74Repos(): {
+  repos: RepoEntry[];
+  weights: Map<string, number>;
+  isSuccess: boolean;
+} {
+  const { data, isSuccess } = useQuery<Sn74ReposResp>({
     queryKey: ['sn74-repos'],
     queryFn: async ({ signal }) => {
       const r = await fetch('/api/sn74-repos', { signal });
@@ -44,7 +48,7 @@ export function useSn74Repos(): { repos: RepoEntry[]; weights: Map<string, numbe
     return m;
   }, [repos]);
 
-  return { repos, weights };
+  return { repos, weights, isSuccess };
 }
 
 /** Look up a single repo's weight from a Map produced by `useSn74Repos`.

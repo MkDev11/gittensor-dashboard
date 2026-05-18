@@ -174,7 +174,7 @@ export default function SettingsPage() {
           </Field>
           <Field
             label="Page size"
-            hint="Rows per page in the Browse Issues / PRs tables. Choose 'All' to disable pagination."
+            hint="Rows per page in the Explorer Issues / PRs tables. Choose 'All' to disable pagination."
           >
             <Dropdown
               value={String(settings.pageSize)}
@@ -196,7 +196,7 @@ export default function SettingsPage() {
         <Section title="Issue / PR content" icon={<EyeIcon size={16} />}>
           <Field
             label="Display mode"
-            hint="How issue and PR bodies open when you click a row in the Browse view."
+            hint="How issue and PR bodies open when you click a row in the Explorer view."
           >
             <Dropdown
               value={settings.contentDisplay}
@@ -303,20 +303,21 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
     <Box
       sx={{
         display: 'flex',
+        flexDirection: ['column', 'row'],
         gap: 3,
         py: 2,
         borderBottom: '1px solid',
         borderColor: 'border.muted',
         '&:last-child': { borderBottom: 'none', pb: 0 },
         '&:first-child': { pt: 0 },
-        alignItems: 'center',
+        alignItems: ['stretch', 'center'],
       }}
     >
       <Box sx={{ flex: 1, minWidth: 0 }}>
         <Text sx={{ fontWeight: 500, display: 'block', fontSize: 1 }}>{label}</Text>
         {hint && <Text sx={{ color: 'fg.muted', fontSize: 0, display: 'block', mt: 1 }}>{hint}</Text>}
       </Box>
-      <Box sx={{ flexShrink: 0 }}>{children}</Box>
+      <Box sx={{ flexShrink: 0, alignSelf: ['stretch', 'center'] }}>{children}</Box>
     </Box>
   );
 }
@@ -392,4 +393,3 @@ function NumberInput({
     />
   );
 }
-
