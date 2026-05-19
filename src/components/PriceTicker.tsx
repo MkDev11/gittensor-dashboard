@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { formatUsd, formatTao } from '@/lib/format';
 
 interface Prices {
   tao_usd: number;
@@ -11,17 +12,7 @@ interface Prices {
   source?: string;
 }
 
-function fmtUsd(n: number): string {
-  if (!n) return '—';
-  if (n >= 1) return `$${n.toFixed(2)}`;
-  return `$${n.toFixed(4)}`;
-}
-
-function fmtTao(n: number): string {
-  if (!n) return '—';
-  if (n >= 1) return `${n.toFixed(3)}τ`;
-  return `${n.toFixed(6)}τ`;
-}
+const USD_OPTS = { style: 'price', fallback: '—' } as const;
 
 interface PriceTickerProps {
   variant?: 'chip' | 'mobile-strip';
@@ -86,7 +77,7 @@ export default function PriceTicker({ variant = 'chip' }: PriceTickerProps) {
     );
   }
   const ageSec = Math.max(0, Math.floor((Date.now() - data.fetched_at) / 1000));
-  const tooltip = `TAO ${fmtUsd(data.tao_usd)} · α(SN74) ${fmtUsd(data.alpha_usd)} (${fmtTao(data.alpha_tao)} TAO) · updated ${ageSec}s ago`;
+  const tooltip = `TAO ${formatUsd(data.tao_usd, USD_OPTS)} · α(SN74) ${formatUsd(data.alpha_usd, USD_OPTS)} (${formatTao(data.alpha_tao)} TAO) · updated ${ageSec}s ago`;
 
   if (variant === 'mobile-strip') {
     return (
@@ -112,8 +103,8 @@ export default function PriceTicker({ variant = 'chip' }: PriceTickerProps) {
           userSelect: 'none',
         }}
       >
-        <MarketValue label="TAO" value={fmtUsd(data.tao_usd)} accent="var(--accent-fg)" />
-        <MarketValue label="α74" value={fmtUsd(data.alpha_usd)} accent="var(--success-fg)" />
+        <MarketValue label="TAO" value={formatUsd(data.tao_usd, USD_OPTS)} accent="var(--accent-fg)" />
+        <MarketValue label="α74" value={formatUsd(data.alpha_usd, USD_OPTS)} accent="var(--success-fg)" />
       </div>
     );
   }
@@ -140,12 +131,12 @@ export default function PriceTicker({ variant = 'chip' }: PriceTickerProps) {
     >
       <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
         <span style={{ color: 'var(--fg-muted)', fontSize: 10, fontWeight: 600, letterSpacing: 0 }}>TAO</span>
-        <span style={{ color: 'var(--fg-default)', fontWeight: 700 }}>{fmtUsd(data.tao_usd)}</span>
+        <span style={{ color: 'var(--fg-default)', fontWeight: 700 }}>{formatUsd(data.tao_usd, USD_OPTS)}</span>
       </span>
       <span style={{ color: 'var(--border-default)' }}>·</span>
       <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
         <span style={{ color: 'var(--fg-muted)', fontSize: 10, fontWeight: 600, letterSpacing: 0 }}>α74</span>
-        <span style={{ color: 'var(--fg-default)', fontWeight: 700 }}>{fmtUsd(data.alpha_usd)}</span>
+        <span style={{ color: 'var(--fg-default)', fontWeight: 700 }}>{formatUsd(data.alpha_usd, USD_OPTS)}</span>
       </span>
     </div>
   );

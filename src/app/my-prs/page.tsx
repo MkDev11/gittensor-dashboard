@@ -9,15 +9,16 @@ import {
   Heading,
   Text,
   Box,
-  TextInput,
   Label,
   Link as PrimerLink,
 } from '@primer/react';
 import Spinner from '@/components/Spinner';
-import { TableRowsSkeleton } from '@/components/Skeleton';
 import Dropdown from '@/components/Dropdown';
-import { SearchIcon, RepoIcon, ClockIcon, TriangleUpIcon, TriangleDownIcon } from '@primer/octicons-react';
+import SearchInput from '@/components/SearchInput';
+import { RepoIcon } from '@primer/octicons-react';
 import { PullStatusBadge } from '@/components/StatusBadge';
+import { SortedTable, type SortedTableColumn } from '@/components/SortedTable';
+import { useListData } from '@/lib/list-data/useListData';
 import { formatRelativeTime } from '@/lib/format';
 import { useMinerLogin } from '@/lib/use-miner';
 import type { PullDto } from '@/lib/api-types';
@@ -41,34 +42,13 @@ interface MyPRsResp {
 type StateFilter = 'all' | 'open' | 'draft' | 'merged' | 'closed';
 type ListFilter = 'all' | 'whitelisted' | 'other';
 type SortKey = 'state' | 'opened' | 'updated' | 'closed' | 'repo' | 'weight';
-type SortDir = 'asc' | 'desc';
+
+type Filters = { state: StateFilter; list: ListFilter };
 
 export default function MyPrsPage() {
-  const [stateFilter, setStateFilter] = useState<StateFilter>('all');
-  const [listFilter, setListFilter] = useState<ListFilter>('whitelisted');
-  const [query, setQuery] = useState('');
-  const [sortKey, setSortKey] = useState<SortKey>('updated');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const { settings } = useSettings();
   const [openPull, setOpenPull] = useState<MyPullDto | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
-
-  const handleRowClick = (pr: MyPullDto) => {
-    if (settings.contentDisplay === 'modal' || settings.contentDisplay === 'side') {
-      setOpenPull(pr);
-    } else {
-      const k = `${pr.repo_full_name}#${pr.number}`;
-      setExpandedKey((prev) => (prev === k ? null : k));
-    }
-  };
-
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setSortKey(key);
-      setSortDir(key === 'repo' ? 'asc' : 'desc');
-    }
-  };
 
   const { data, isLoading, isError } = useQuery<MyPRsResp>({
     queryKey: ['my-prs'],
@@ -80,41 +60,177 @@ export default function MyPrsPage() {
     refetchInterval: 30000,
   });
 
-  const filtered = useMemo(() => {
-    if (!data?.pulls) return [];
-    const q = query.trim().toLowerCase();
-    let list = data.pulls.filter((p) => {
-      if (q && !`${p.title} #${p.number} ${p.repo_full_name}`.toLowerCase().includes(q)) return false;
-      if (listFilter === 'whitelisted' && !p.in_whitelist) return false;
-      if (listFilter === 'other' && p.in_whitelist) return false;
-      if (stateFilter === 'all') return true;
-      const s = pullStatus(p);
-      return s === stateFilter;
-    });
-    list = [...list].sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === 'state') cmp = pullStatus(a).localeCompare(pullStatus(b));
-      else if (sortKey === 'opened') cmp = (a.created_at ?? '').localeCompare(b.created_at ?? '');
-      else if (sortKey === 'updated') cmp = (a.updated_at ?? '').localeCompare(b.updated_at ?? '');
-      else if (sortKey === 'closed') cmp = (a.merged_at ?? a.closed_at ?? '').localeCompare(b.merged_at ?? b.closed_at ?? '');
-      else if (sortKey === 'repo') cmp = a.repo_full_name.localeCompare(b.repo_full_name);
-      else if (sortKey === 'weight') cmp = (a.weight ?? 0) - (b.weight ?? 0);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return list;
-  }, [data, query, stateFilter, listFilter, sortKey, sortDir]);
+  const list = useListData<MyPullDto, Filters, SortKey>({
+    data: data?.pulls,
+    search: (p, q) =>
+      `${p.title} #${p.number} ${p.repo_full_name}`.toLowerCase().includes(q),
+    filters: {
+      state: (p, v) => v === 'all' || pullStatus(p) === v,
+      list: (p, v) =>
+        v === 'all' || (v === 'whitelisted' ? p.in_whitelist : !p.in_whitelist),
+    },
+    initialFilters: { state: 'all', list: 'whitelisted' },
+    sorts: {
+      state: (a, b) => pullStatus(a).localeCompare(pullStatus(b)),
+      opened: (a, b) => (a.created_at ?? '').localeCompare(b.created_at ?? ''),
+      updated: (a, b) => (a.updated_at ?? '').localeCompare(b.updated_at ?? ''),
+      closed: (a, b) =>
+        (a.merged_at ?? a.closed_at ?? '').localeCompare(
+          b.merged_at ?? b.closed_at ?? '',
+        ),
+      repo: (a, b) => a.repo_full_name.localeCompare(b.repo_full_name),
+      weight: (a, b) => (a.weight ?? 0) - (b.weight ?? 0),
+    },
+    initialSort: { key: 'updated', dir: 'desc' },
+    defaultDirFor: (k) => (k === 'repo' ? 'asc' : 'desc'),
+  });
+
+  const handleRowClick = (pr: MyPullDto) => {
+    if (settings.contentDisplay === 'modal' || settings.contentDisplay === 'side') {
+      setOpenPull(pr);
+    } else {
+      const k = `${pr.repo_full_name}#${pr.number}`;
+      setExpandedKey((prev) => (prev === k ? null : k));
+    }
+  };
 
   const me = useMinerLogin();
   const counts = useMemo(() => {
-    if (!data?.pulls) return { open: 0, draft: 0, merged: 0, closed: 0 };
     const c = { open: 0, draft: 0, merged: 0, closed: 0 };
+    if (!data?.pulls) return c;
+    const lf = list.filters.list;
     for (const p of data.pulls) {
-      if (listFilter === 'whitelisted' && !p.in_whitelist) continue;
-      if (listFilter === 'other' && p.in_whitelist) continue;
+      if (lf === 'whitelisted' && !p.in_whitelist) continue;
+      if (lf === 'other' && p.in_whitelist) continue;
       c[pullStatus(p)]++;
     }
     return c;
-  }, [data, listFilter]);
+  }, [data, list.filters.list]);
+
+  const columns = useMemo<SortedTableColumn<MyPullDto, SortKey>[]>(
+    () => [
+      {
+        key: 'state',
+        label: 'State',
+        sortKey: 'state',
+        skeletonWidth: 60,
+        render: (pr) => <PullStatusBadge pr={pr} />,
+      },
+      {
+        key: 'title',
+        label: 'Pull Request',
+        cellSx: { maxWidth: 360 },
+        render: (pr) => (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+            <PrimerLink
+              href={pr.html_url ?? '#'}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              sx={{
+                fontWeight: 500,
+                color: 'fg.default',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                '&:hover': { color: 'accent.fg' },
+              }}
+              title={pr.title}
+            >
+              {pr.title}
+            </PrimerLink>
+            <Text sx={{ color: 'fg.muted', fontSize: 0, flexShrink: 0 }}>
+              #{pr.number}
+            </Text>
+          </Box>
+        ),
+      },
+      {
+        key: 'repo',
+        label: 'Repository',
+        sortKey: 'repo',
+        skeletonWidth: 140,
+        render: (pr) => (
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+            <RepoIcon size={12} />
+            <Text sx={{ fontWeight: 500, color: 'fg.default' }}>
+              {pr.repo_full_name}
+            </Text>
+            {!pr.in_whitelist && (
+              <Label variant="secondary" sx={{ ml: 1, fontSize: '10px' }}>
+                not in SN74
+              </Label>
+            )}
+          </Box>
+        ),
+      },
+      {
+        key: 'weight',
+        label: 'Weight',
+        sortKey: 'weight',
+        align: 'right',
+        skeletonWidth: 60,
+        cellSx: {
+          fontFamily: 'mono',
+          fontVariantNumeric: 'tabular-nums',
+          fontSize: 1,
+        },
+        render: (pr) => (
+          <Text
+            sx={{
+              fontWeight:
+                (pr.weight ?? 0) >= 0.3
+                  ? 700
+                  : (pr.weight ?? 0) >= 0.15
+                    ? 600
+                    : (pr.weight ?? 0) >= 0.05
+                      ? 500
+                      : 400,
+              color: pr.weight ? 'fg.default' : 'fg.muted',
+            }}
+          >
+            {pr.weight !== null ? pr.weight.toFixed(4) : '—'}
+          </Text>
+        ),
+      },
+      {
+        key: 'opened',
+        label: 'Opened',
+        sortKey: 'opened',
+        skeletonWidth: 70,
+        cellSx: { fontSize: 0, color: 'fg.muted', whiteSpace: 'nowrap' },
+        render: (pr) => formatRelativeTime(pr.created_at),
+      },
+      {
+        key: 'updated',
+        label: 'Updated',
+        sortKey: 'updated',
+        skeletonWidth: 70,
+        cellSx: { fontSize: 0, color: 'fg.muted', whiteSpace: 'nowrap' },
+        render: (pr) => formatRelativeTime(pr.updated_at),
+      },
+      {
+        key: 'closed',
+        label: 'Merged / Closed',
+        sortKey: 'closed',
+        skeletonWidth: 100,
+        cellSx: { fontSize: 0, whiteSpace: 'nowrap' },
+        render: (pr) =>
+          pr.merged_at ? (
+            <Text sx={{ color: 'success.fg' }}>
+              merged {formatRelativeTime(pr.merged_at)}
+            </Text>
+          ) : pr.closed_at ? (
+            <Text sx={{ color: 'danger.fg' }}>
+              closed {formatRelativeTime(pr.closed_at)}
+            </Text>
+          ) : (
+            <Text sx={{ color: 'fg.muted' }}>—</Text>
+          ),
+      },
+    ],
+    [],
+  );
 
   return (
     <PageLayout containerWidth="full" padding="normal">
@@ -134,16 +250,16 @@ export default function MyPrsPage() {
       </PageLayout.Header>
       <PageLayout.Content>
         <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-          <TextInput
-            leadingVisual={SearchIcon}
+          <SearchInput
+            value={list.query}
+            onChange={list.setQuery}
             placeholder="Filter by title, repo, #…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            sx={{ width: 360, maxWidth: '100%' }}
+            width={360}
+            ariaLabel="Filter pull requests"
           />
           <Dropdown
-            value={listFilter}
-            onChange={(v) => setListFilter(v)}
+            value={list.filters.list}
+            onChange={(v) => list.setFilter('list', v)}
             options={[
               { value: 'all', label: 'All repos' },
               { value: 'whitelisted', label: 'SN74 whitelist' },
@@ -153,8 +269,8 @@ export default function MyPrsPage() {
             ariaLabel="Filter by repo list"
           />
           <Dropdown
-            value={stateFilter}
-            onChange={(v) => setStateFilter(v)}
+            value={list.filters.state}
+            onChange={(v) => list.setFilter('state', v)}
             options={[
               { value: 'all', label: 'All states' },
               { value: 'open', label: 'Open' },
@@ -169,7 +285,7 @@ export default function MyPrsPage() {
             {isLoading && <Spinner size="sm" tone="muted" />}
             {data && (
               <Text>
-                {filtered.length} of {data.count} · synced {formatRelativeTime(data.last_fetch)}
+                {list.filtered.length} of {data.count} · synced {formatRelativeTime(data.last_fetch)}
               </Text>
             )}
           </Box>
@@ -181,69 +297,33 @@ export default function MyPrsPage() {
           </Box>
         )}
 
-        <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', overflowX: 'auto', overflowY: 'hidden' }}>
-          {filtered.length === 0 && isLoading ? (
-            <TableRowsSkeleton
-              rows={10}
-              cols={[
-                { width: 60 },
-                { flex: 1 },
-                { width: 140 },
-                { width: 60 },
-                { width: 70 },
-                { width: 70 },
-                { width: 100 },
-              ]}
-            />
-          ) : filtered.length === 0 && !isLoading ? (
-            <Box sx={{ p: 4, textAlign: 'center', color: 'fg.muted' }}>
-              {data && data.count === 0
-                ? `No PRs found for ${me} yet — wait a moment for the GitHub search to populate.`
-                : 'No PRs match these filters.'}
-            </Box>
-          ) : (
-            <Box as="table" sx={{ width: '100%', minWidth: 900, borderCollapse: 'collapse', fontSize: 1 }}>
-              <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
-                <Box as="tr">
-                  <SortHeaderTh label="State" sortKey="state" current={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <Box as="th" sx={tableHeaderSx}>Pull Request</Box>
-                  <SortHeaderTh label="Repository" sortKey="repo" current={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeaderTh label="Weight" sortKey="weight" current={sortKey} dir={sortDir} onClick={toggleSort} align="right" />
-                  <SortHeaderTh label="Opened" sortKey="opened" current={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeaderTh label="Updated" sortKey="updated" current={sortKey} dir={sortDir} onClick={toggleSort} />
-                  <SortHeaderTh label="Merged / Closed" sortKey="closed" current={sortKey} dir={sortDir} onClick={toggleSort} />
-                </Box>
-              </Box>
-              <Box as="tbody">
-                {filtered.map((pr) => {
-                  const k = `${pr.repo_full_name}#${pr.number}`;
-                  const expanded = expandedKey === k;
-                  const [o, n] = pr.repo_full_name.split('/');
-                  return (
-                    <React.Fragment key={k}>
-                      <MyPRTableRow
-                        pr={pr}
-                        onRowClick={() => handleRowClick(pr)}
-                        expanded={expanded}
-                      />
-                      {expanded && settings.contentDisplay === 'accordion' && (
-                        <Box as="tr">
-                          <Box as="td" colSpan={7} sx={{ p: 0 }}>
-                            <ContentViewer
-                              target={{ kind: 'pull', owner: o, name: n, number: pr.number, preloaded: pr }}
-                              mode="inline"
-                              onClose={() => setExpandedKey(null)}
-                            />
-                          </Box>
-                        </Box>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </Box>
-            </Box>
-          )}
-        </Box>
+        <SortedTable
+          columns={columns}
+          rows={list.filtered}
+          rowKey={(pr) => `${pr.repo_full_name}#${pr.number}`}
+          sortKey={list.sortKey}
+          sortDir={list.sortDir}
+          onSort={list.toggleSort}
+          onRowClick={handleRowClick}
+          loading={isLoading}
+          empty={
+            data && data.count === 0
+              ? `No PRs found for ${me} yet — wait a moment for the GitHub search to populate.`
+              : 'No PRs match these filters.'
+          }
+          isExpanded={(pr) => expandedKey === `${pr.repo_full_name}#${pr.number}`}
+          renderExpanded={(pr) => {
+            if (settings.contentDisplay !== 'accordion') return null;
+            const [o, n] = pr.repo_full_name.split('/');
+            return (
+              <ContentViewer
+                target={{ kind: 'pull', owner: o, name: n, number: pr.number, preloaded: pr }}
+                mode="inline"
+                onClose={() => setExpandedKey(null)}
+              />
+            );
+          }}
+        />
       </PageLayout.Content>
 
       {openPull && settings.contentDisplay === 'modal' && (() => {
@@ -286,194 +366,6 @@ export default function MyPrsPage() {
         );
       })()}
     </PageLayout>
-  );
-}
-
-const tableHeaderSx = {
-  px: 3,
-  py: 2,
-  textAlign: 'left' as const,
-  fontWeight: 600,
-  fontSize: '11px',
-  color: 'fg.muted',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.5px',
-  whiteSpace: 'nowrap' as const,
-};
-
-function SortHeaderTh({
-  label,
-  sortKey,
-  current,
-  dir,
-  onClick,
-  align = 'left',
-}: {
-  label: string;
-  sortKey: SortKey;
-  current: SortKey;
-  dir: SortDir;
-  onClick: (k: SortKey) => void;
-  align?: 'left' | 'right' | 'center';
-}) {
-  const active = current === sortKey;
-  return (
-    <Box
-      as="th"
-      onClick={() => onClick(sortKey)}
-      sx={{ ...tableHeaderSx, textAlign: align, cursor: 'pointer', userSelect: 'none', '&:hover': { color: 'fg.default' } }}
-    >
-      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-        {label}
-        {active && (dir === 'asc' ? <TriangleUpIcon size={12} /> : <TriangleDownIcon size={12} />)}
-      </Box>
-    </Box>
-  );
-}
-
-function MyPRTableRow({
-  pr,
-  onRowClick,
-  expanded,
-}: {
-  pr: MyPullDto;
-  onRowClick?: () => void;
-  expanded?: boolean;
-}) {
-  return (
-    <Box
-      as="tr"
-      onClick={onRowClick}
-      data-explorer-row="true"
-      sx={{
-        borderBottom: '1px solid',
-        borderColor: 'border.muted',
-        bg: expanded ? 'accent.muted' : 'canvas.default',
-        cursor: 'pointer',
-        '&:hover': { bg: 'canvas.subtle' },
-      }}
-    >
-      <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
-        <PullStatusBadge pr={pr} />
-      </Box>
-      <Box as="td" sx={{ p: 2, maxWidth: 360, verticalAlign: 'middle' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
-          <PrimerLink
-            href={pr.html_url ?? '#'}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            sx={{ fontWeight: 500, color: 'fg.default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', '&:hover': { color: 'accent.fg' } }}
-            title={pr.title}
-          >
-            {pr.title}
-          </PrimerLink>
-          <Text sx={{ color: 'fg.muted', fontSize: 0, flexShrink: 0 }}>#{pr.number}</Text>
-        </Box>
-      </Box>
-      <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-          <RepoIcon size={12} />
-          <Text sx={{ fontWeight: 500, color: 'fg.default' }}>{pr.repo_full_name}</Text>
-          {!pr.in_whitelist && (
-            <Label variant="secondary" sx={{ ml: 1, fontSize: '10px' }}>
-              not in SN74
-            </Label>
-          )}
-        </Box>
-      </Box>
-      <Box
-        as="td"
-        sx={{
-          p: 2,
-          textAlign: 'right',
-          fontFamily: 'mono',
-          fontVariantNumeric: 'tabular-nums',
-          fontSize: 1,
-          fontWeight: (pr.weight ?? 0) >= 0.3 ? 700 : (pr.weight ?? 0) >= 0.15 ? 600 : (pr.weight ?? 0) >= 0.05 ? 500 : 400,
-          color: pr.weight ? 'fg.default' : 'fg.muted',
-          verticalAlign: 'middle',
-        }}
-      >
-        {pr.weight !== null ? pr.weight.toFixed(4) : '—'}
-      </Box>
-      <Box as="td" sx={{ p: 2, fontSize: 0, color: 'fg.muted', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-        {formatRelativeTime(pr.created_at)}
-      </Box>
-      <Box as="td" sx={{ p: 2, fontSize: 0, color: 'fg.muted', whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-        {formatRelativeTime(pr.updated_at)}
-      </Box>
-      <Box as="td" sx={{ p: 2, fontSize: 0, whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
-        {pr.merged_at ? (
-          <Text sx={{ color: 'success.fg' }}>merged {formatRelativeTime(pr.merged_at)}</Text>
-        ) : pr.closed_at ? (
-          <Text sx={{ color: 'danger.fg' }}>closed {formatRelativeTime(pr.closed_at)}</Text>
-        ) : (
-          <Text sx={{ color: 'fg.muted' }}>—</Text>
-        )}
-      </Box>
-    </Box>
-  );
-}
-
-function MyPRRow({ pr, isLast }: { pr: MyPullDto; isLast: boolean }) {
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 3,
-        p: 3,
-        borderBottom: isLast ? 'none' : '1px solid',
-        borderColor: 'border.muted',
-        bg: 'canvas.default',
-        '&:hover': { bg: 'canvas.subtle' },
-      }}
-    >
-      <Box sx={{ pt: '2px' }}>
-        <PullStatusBadge pr={pr} />
-      </Box>
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap' }}>
-          <PrimerLink
-            href={pr.html_url ?? '#'}
-            target="_blank"
-            rel="noreferrer"
-            sx={{ fontWeight: 600, color: 'fg.default', '&:hover': { color: 'accent.fg' } }}
-          >
-            {pr.title}
-          </PrimerLink>
-          <Text sx={{ color: 'fg.muted', fontSize: 0 }}>#{pr.number}</Text>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'fg.muted', fontSize: 0, mt: 1, flexWrap: 'wrap' }}>
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-            <RepoIcon size={12} />
-            <Text sx={{ fontWeight: 500, color: 'fg.default' }}>{pr.repo_full_name}</Text>
-            {pr.in_whitelist && pr.weight !== null && (
-              <Label variant="secondary" sx={{ ml: 1, fontSize: '10px' }}>
-                w={pr.weight.toFixed(4)}
-              </Label>
-            )}
-            {!pr.in_whitelist && (
-              <Label variant="secondary" sx={{ ml: 1, fontSize: '10px' }}>
-                not in SN74
-              </Label>
-            )}
-            {pr.author_association && pr.author_association !== 'NONE' && (
-              <Label variant="secondary" sx={{ ml: 1, fontSize: '10px' }}>
-                {pr.author_association.toLowerCase()}
-              </Label>
-            )}
-          </Box>
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-            <ClockIcon size={12} />
-            opened {formatRelativeTime(pr.created_at)}
-          </Box>
-          {pr.merged_at && <Text>· merged {formatRelativeTime(pr.merged_at)}</Text>}
-          {!pr.merged_at && pr.closed_at && <Text>· closed {formatRelativeTime(pr.closed_at)}</Text>}
-        </Box>
-      </Box>
-    </Box>
   );
 }
 

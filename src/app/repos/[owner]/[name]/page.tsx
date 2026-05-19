@@ -26,7 +26,7 @@ import {
 import type { Icon } from '@primer/octicons-react';
 import Spinner from '@/components/Spinner';
 import { SkeletonBar } from '@/components/Skeleton';
-import { useTrackedRepos } from '@/lib/tracked-repos';
+import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import type { IssueDto, IssuesResponse } from '@/lib/api-types';
 import { renderMarkdownToHtml } from '@/lib/markdown';
 import { formatRelativeTime } from '@/lib/format';
@@ -87,7 +87,7 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
   const params = use(ctx.params);
   const fullName = `${params.owner}/${params.name}`;
   const { tracked, toggle } = useTrackedRepos();
-  const isTracked = tracked.has(fullName);
+  const isTracked = repoIsTracked(tracked, fullName);
   const [tab, setTab] = useState<TabKey>('readme');
 
   const summary = useQuery<RepoSummary>({
@@ -321,7 +321,10 @@ function ReadmeTab({ owner, name }: { owner: string; name: string }) {
     },
     staleTime: 5 * 60_000,
   });
-  const html = useMemo(() => (data?.content ? renderMarkdownToHtml(data.content) : ''), [data]);
+  const html = useMemo(
+    () => (data?.content ? renderMarkdownToHtml(data.content, { repoFullName: `${owner}/${name}` }) : ''),
+    [data, name, owner]
+  );
   if (isLoading) return <PanelLoading />;
   if (isError) return <PanelError message="Failed to load README." />;
   if (!data?.content) return <PanelEmpty title="No README" message="This repository doesn't have a README file." />;
@@ -344,7 +347,10 @@ function ContributingTab({ owner, name }: { owner: string; name: string }) {
     },
     staleTime: 5 * 60_000,
   });
-  const html = useMemo(() => (data?.content ? renderMarkdownToHtml(data.content) : ''), [data]);
+  const html = useMemo(
+    () => (data?.content ? renderMarkdownToHtml(data.content, { repoFullName: `${owner}/${name}` }) : ''),
+    [data, name, owner]
+  );
   if (isLoading) return <PanelLoading />;
   if (isError) return <PanelError message="Failed to load contributing guide." />;
   if (!data?.content) return <PanelEmpty title="No contributing guide" message="This repository doesn't have a CONTRIBUTING.md." />;
