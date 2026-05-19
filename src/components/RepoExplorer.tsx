@@ -41,7 +41,7 @@ import RelatedPRsCell, { type LinkedPullReference } from '@/components/RelatedPR
 import { IssueLabels } from '@/components/IssueLabels';
 import SearchInput from '@/components/SearchInput';
 import AuthorFilter from '@/components/AuthorFilter';
-import AuthorSidebar from '@/components/AuthorSidebar';
+import AuthorActivitySidebar from '@/components/AuthorActivitySidebar';
 import { useSettings } from '@/lib/settings';
 import { useToast } from '@/lib/toast';
 import { pullStatus } from '@/types/entities';
@@ -59,7 +59,7 @@ import { usePullFilters, type PRState } from '@/components/repo-explorer/usePull
 
 type RepoSort = 'weight' | 'name' | 'tracked';
 type Tab = 'issues' | 'pulls';
-type AuthorTarget = { login: string; association?: string | null };
+type AuthorTarget = { login: string; association?: string | null; initialTab: 'issues' | 'pulls' };
 type RelatedPopoverLayout = { placement: 'down' | 'up'; maxHeight: number };
 type StickyBadge = { issues: number; pulls: number; priority?: boolean };
 interface RepoBadgesResponse {
@@ -965,13 +965,27 @@ export default function RepoExplorer() {
     [pullsData?.pulls, selected.owner, selected.name, settings.contentDisplay],
   );
 
-  const openAuthorSidebar = useCallback((login: string, association?: string | null) => {
+  const openAuthorSidebar = useCallback((login: string, association: string | null | undefined, initialTab: 'issues' | 'pulls') => {
     setIssueModal(null);
     setPullModal(null);
     setExpandedIssue(null);
     setExpandedPull(null);
-    setAuthorTarget({ login, association });
+    setAuthorTarget({ login, association, initialTab });
   }, []);
+
+  const openIssueAuthorSidebar = useCallback(
+    (login: string, association?: string | null) => {
+      openAuthorSidebar(login, association, 'issues');
+    },
+    [openAuthorSidebar],
+  );
+
+  const openPullAuthorSidebar = useCallback(
+    (login: string, association?: string | null) => {
+      openAuthorSidebar(login, association, 'pulls');
+    },
+    [openAuthorSidebar],
+  );
 
   const openIssueFromAuthorSidebar = useCallback(
     (issue: Issue) => {
@@ -986,6 +1000,24 @@ export default function RepoExplorer() {
 
       setTabState('issues');
       setExpandedIssue(issue.number);
+    },
+    [settings.contentDisplay],
+  );
+
+  const openPullFromAuthorSidebar = useCallback(
+    (pull: Pull) => {
+      setAuthorTarget(null);
+      setIssueModal(null);
+      setExpandedIssue(null);
+      setExpandedPull(null);
+
+      if (settings.contentDisplay === 'modal' || settings.contentDisplay === 'side') {
+        setPullModal(pull);
+        return;
+      }
+
+      setTabState('pulls');
+      setPendingOpen({ kind: 'pull', number: pull.number });
     },
     [settings.contentDisplay],
   );
@@ -1659,7 +1691,7 @@ export default function RepoExplorer() {
                             }
                             onSetValidation={(next) => setValidation.mutate({ number: issue.number, status: next })}
                             onPRClick={openLinkedPullRequest}
-                            onAuthorClick={openAuthorSidebar}
+                            onAuthorClick={openIssueAuthorSidebar}
                           />
                           {expanded && settings.contentDisplay === 'accordion' && (
                             <Box as="tr">
@@ -1882,6 +1914,7 @@ export default function RepoExplorer() {
                             expanded={expanded}
                             onView={handleView}
                             linkedIssues={linkedIssues}
+                            onAuthorClick={openPullAuthorSidebar}
                             onIssueClick={(num) => {
                               setPullModal(null);
                               setIssueModal(null);
@@ -1973,14 +2006,17 @@ export default function RepoExplorer() {
               willChange: 'transform',
             }}
           >
-            <AuthorSidebar
+            <AuthorActivitySidebar
+              key={`${selected.fullName}:${renderedAuthorTarget.login}:${renderedAuthorTarget.initialTab}`}
               owner={selected.owner}
               name={selected.name}
               repoFullName={selected.fullName}
               login={renderedAuthorTarget.login}
               initialAssociation={renderedAuthorTarget.association ?? null}
+              initialTab={renderedAuthorTarget.initialTab}
               onClose={() => setAuthorTarget(null)}
               onIssueClick={openIssueFromAuthorSidebar}
+              onPullClick={openPullFromAuthorSidebar}
             />
           </Box>
         </>
@@ -2337,6 +2373,7 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
   expanded,
   onView,
   linkedIssues,
+  onAuthorClick,
   onIssueClick,
 }: {
   pr: Pull;
@@ -2344,6 +2381,7 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
   expanded: boolean;
   onView: () => void;
   linkedIssues: Array<{ number: number; title: string; state: string; state_reason: string | null; author_login: string | null }>;
+  onAuthorClick: (login: string, association?: string | null) => void;
   onIssueClick: (issueNumber: number) => void;
 }) {
   return (
@@ -2422,6 +2460,7 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
           credibility={pr.author_credibility}
           credibilityVariant="pulls"
           highlight={mine}
+          onClick={onAuthorClick}
         />
       </Box>
       <Box as="td" sx={tableTimeSx} title={pr.created_at ?? undefined}>
@@ -2455,6 +2494,7 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
   prev.mine === next.mine &&
   prev.expanded === next.expanded &&
   prev.linkedIssues === next.linkedIssues &&
+  prev.onAuthorClick === next.onAuthorClick &&
   prev.onIssueClick === next.onIssueClick,
 );
 

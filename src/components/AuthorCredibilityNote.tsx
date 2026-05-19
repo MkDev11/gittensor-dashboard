@@ -7,10 +7,10 @@ function percent(value: number | null): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function fill(value: number | null): string {
+function tone(value: number | null): string {
   if (value === null) return 'var(--neutral-emphasis)';
   if (value >= 0.8) return 'var(--success-emphasis)';
-  if (value >= 0.5) return '#9a6700';
+  if (value >= 0.5) return '#d4a72c';
   return 'var(--danger-emphasis)';
 }
 
@@ -27,6 +27,7 @@ export default function AuthorCredibilityNote({
     ? credibility.issue_credibility ?? credibility.credibility
     : credibility.credibility ?? credibility.issue_credibility;
   if (value === null) return null;
+  const color = tone(value);
 
   return (
     <span
@@ -38,9 +39,11 @@ export default function AuthorCredibilityNote({
         height: 18,
         minWidth: 34,
         padding: '0 5px',
+        border: '1px solid',
+        borderColor: color,
         borderRadius: '999px',
-        background: fill(value),
-        color: '#ffffff',
+        background: 'transparent',
+        color,
         fontFamily: 'var(--font-mono), ui-monospace, SFMono-Regular, monospace',
         fontVariantNumeric: 'tabular-nums',
         fontSize: '10px',
