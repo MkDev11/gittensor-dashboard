@@ -3,6 +3,7 @@ import { getDb, getReadDb, IssueRow } from '@/lib/db';
 import { refreshIssuesIfStale, backfillPrIssueLinksIfNeeded } from '@/lib/refresh';
 import { buildEtag, etagNotModified, withEtagHeaders } from '@/lib/etag';
 import { getSessionFromCookies } from '@/lib/auth';
+import { authorCredibilityForLogin, getGittensorCredibilityMap } from '@/lib/gittensor-credibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -378,6 +379,8 @@ export async function GET(
     for (const r of rows2) user_validations[r.issue_number] = r.status;
   }
 
+  const credibilityMap = rows.length > 0 ? await getGittensorCredibilityMap() : null;
+
   return NextResponse.json(
     {
       repo: full,
@@ -389,6 +392,7 @@ export async function GET(
       issues: rows.map((r) => ({
         ...r,
         labels: r.labels ? JSON.parse(r.labels) : [],
+        author_credibility: authorCredibilityForLogin(credibilityMap, r.author_login),
       })),
       linked_prs_by_issue,
       page_author_stats,

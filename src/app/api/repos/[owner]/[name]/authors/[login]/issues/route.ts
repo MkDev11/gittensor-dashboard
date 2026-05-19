@@ -6,6 +6,11 @@ export const dynamic = 'force-dynamic';
 const LIMIT_DEFAULT = 80;
 const LIMIT_MAX = 200;
 
+function positiveInt(value: string | null, fallback: number): number {
+  const n = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function parseLabels(raw: string | null): Array<{ name: string; color?: string }> {
   if (!raw) return [];
   try {
@@ -24,8 +29,13 @@ export async function GET(
   const full = `${params.owner}/${params.name}`;
   const login = params.login;
   const url = new URL(req.url);
-  const requestedLimit = parseInt(url.searchParams.get('limit') ?? `${LIMIT_DEFAULT}`, 10) || LIMIT_DEFAULT;
+  const page = positiveInt(url.searchParams.get('page'), 1);
+  const requestedLimit = parseInt(
+    url.searchParams.get('pageSize') ?? url.searchParams.get('limit') ?? `${LIMIT_DEFAULT}`,
+    10,
+  ) || LIMIT_DEFAULT;
   const limit = Math.min(LIMIT_MAX, Math.max(1, requestedLimit));
+  const offset = (page - 1) * limit;
 
   const db = getReadDb();
   const mergedPrSql = `EXISTS (
@@ -93,12 +103,17 @@ export async function GET(
        FROM issues i
        WHERE i.repo_full_name = ? AND i.author_login = ?
        ORDER BY updated_at DESC, id DESC
-       LIMIT ?`,
+       LIMIT ? OFFSET ?`,
     )
-    .all(full, login, limit) as Array<IssueRow & { merged_pr_count: number }>;
+    .all(full, login, limit, offset) as Array<IssueRow & { merged_pr_count: number }>;
+
+  const total = stats?.total ?? 0;
 
   return NextResponse.json({
     repo: full,
+    page,
+    page_size: limit,
+    total_pages: Math.max(1, Math.ceil(total / limit)),
     author: {
       login,
       association,
@@ -106,7 +121,7 @@ export async function GET(
       html_url: `https://github.com/${encodeURIComponent(login)}`,
     },
     stats: {
-      total: stats?.total ?? 0,
+      total,
       open: stats?.open ?? 0,
       completed: stats?.completed ?? 0,
       not_planned: stats?.not_planned ?? 0,

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getReadDb, IssueRow } from '@/lib/db';
 import { getLiveReposAsyncServer } from '@/lib/repos-server';
+import { backfillPrIssueLinksIfNeeded } from '@/lib/refresh';
+import { authorCredibilityForLogin, getGittensorCredibilityMap } from '@/lib/gittensor-credibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,6 +12,17 @@ const SINCE_LIMIT = 200;
 
 type SortKey = 'opened' | 'closed' | 'updated' | 'comments' | 'repo' | 'weight' | 'number';
 type SortDir = 'asc' | 'desc';
+
+interface LinkedPullRow {
+  repo_full_name: string;
+  issue_number: number;
+  number: number;
+  title: string;
+  state: string;
+  draft: number;
+  merged: number;
+  author_login: string | null;
+}
 
 const HAS_MERGED_PR_SQL =
   `EXISTS (SELECT 1 FROM pr_issue_links l
@@ -263,24 +276,39 @@ export async function GET(req: NextRequest) {
     )
     .all(...filteredWhere.args, limit, offset) as IssueRow[];
 
-  const mergedPrCounts = new Map<string, number>();
+  const linkedPrsByIssue = new Map<string, Array<{ number: number; title: string; state: string; draft: number; merged: number; author_login: string | null }>>();
   if (rows.length > 0) {
+    for (const repoFullName of new Set(rows.map((r) => r.repo_full_name))) {
+      backfillPrIssueLinksIfNeeded(repoFullName);
+    }
+
     const pairWhere = rows.map(() => '(l.repo_full_name = ? AND l.issue_number = ?)').join(' OR ');
     const pairArgs = rows.flatMap((r) => [r.repo_full_name, r.number]);
-    const countRows = db
+    const linkRows = db
       .prepare(
-        `SELECT l.repo_full_name, l.issue_number, COUNT(*) AS merged_pr_count
+        `SELECT l.repo_full_name, l.issue_number, p.number, p.title, p.state, p.draft, p.merged, p.author_login
          FROM pr_issue_links l
          JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
-         WHERE p.merged = 1 AND (${pairWhere})
-         GROUP BY l.repo_full_name, l.issue_number`,
+         WHERE ${pairWhere}
+         ORDER BY l.repo_full_name ASC, l.issue_number ASC, p.number ASC`,
       )
-      .all(...pairArgs) as Array<{ repo_full_name: string; issue_number: number; merged_pr_count: number }>;
-    for (const r of countRows) {
-      mergedPrCounts.set(`${r.repo_full_name}#${r.issue_number}`, r.merged_pr_count);
+      .all(...pairArgs) as LinkedPullRow[];
+    for (const r of linkRows) {
+      const key = `${r.repo_full_name}#${r.issue_number}`;
+      const list = linkedPrsByIssue.get(key) ?? [];
+      list.push({
+        number: r.number,
+        title: r.title,
+        state: r.state,
+        draft: r.draft,
+        merged: r.merged,
+        author_login: r.author_login,
+      });
+      linkedPrsByIssue.set(key, list);
     }
   }
 
+  const credibilityMap = rows.length > 0 ? await getGittensorCredibilityMap() : null;
   const totalPages = Math.max(1, Math.ceil(totals.count / pageSize));
 
   return NextResponse.json({
@@ -291,10 +319,15 @@ export async function GET(req: NextRequest) {
     total_pages: totalPages,
     authors: authorRows,
     author_count: authorRows.length,
-    issues: rows.map((r) => ({
-      ...r,
-      labels: parseLabels(r.labels),
-      merged_pr_count: mergedPrCounts.get(`${r.repo_full_name}#${r.number}`) ?? 0,
-    })),
+    issues: rows.map((r) => {
+      const linkedPrs = linkedPrsByIssue.get(`${r.repo_full_name}#${r.number}`) ?? [];
+      return {
+        ...r,
+        labels: parseLabels(r.labels),
+        merged_pr_count: linkedPrs.filter((pr) => pr.merged === 1).length,
+        linked_prs: linkedPrs,
+        author_credibility: authorCredibilityForLogin(credibilityMap, r.author_login),
+      };
+    }),
   });
 }
