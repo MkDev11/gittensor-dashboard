@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { buildIssueDiscoveriesForRepo, repoNamesMatch } from '@/lib/gt-repo-miners';
 import type { RepoMiner, RepoMinersResponse } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
@@ -79,7 +80,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
     interface OssAgg { githubId: string; githubUsername: string; prCount: number; score: number }
     const ossMap = new Map<string, OssAgg>();
     for (const p of shared.prs) {
-      if (p.repository !== fullName) continue;
+      if (!repoNamesMatch(p.repository, fullName)) continue;
       const id = p.githubId || p.author;
       if (!id) continue;
       let row = ossMap.get(id);
@@ -108,22 +109,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
         };
       });
 
-    // Issue Discoveries: miners whose githubId matches any author of issues in
-    // this repo. Upstream /miners doesn't expose per-repo issue lists, so we
-    // approximate: rank issue-eligible miners by issueDiscoveryScore globally
-    // and surface those with > 0 totalOpenIssues.
-    const issueDiscoveries: RepoMiner[] = [...shared.miners]
-      .filter((m) => m.isIssueEligible && (m.totalOpenIssues ?? 0) > 0)
-      .sort((a, b) => num(b.issueDiscoveryScore) - num(a.issueDiscoveryScore))
-      .slice(0, 10)
-      .map((m) => ({
-        githubId: m.githubId ?? '',
-        githubUsername: m.githubUsername,
-        prCount: m.totalSolvedIssues ?? 0,
-        score: Number(num(m.issueDiscoveryScore).toFixed(2)),
-        ossRank: m.githubId ? shared.issueRankByGithubId.get(m.githubId) ?? null : null,
-        avatarUrl: `https://github.com/${m.githubUsername}.png?size=48`,
-      }));
+    // Issue Discoveries: upstream miners who authored issues in this repo (local cache).
+    const issueDiscoveries = buildIssueDiscoveriesForRepo(
+      fullName,
+      shared.miners,
+      shared.issueRankByGithubId,
+    );
 
     const body: RepoMinersResponse = {
       fullName,
