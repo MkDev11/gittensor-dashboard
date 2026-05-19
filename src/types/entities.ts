@@ -178,6 +178,11 @@ export interface Miner {
   usdPerDay?: number;
 }
 
+export interface AuthorCredibility {
+  credibility: number | null;
+  issue_credibility: number | null;
+}
+
 export interface MinersResponse {
   count: number;
   fetched_at: number;
@@ -227,6 +232,7 @@ export interface Issue {
   fetched_at: string;
   first_seen_at: string;
   merged_pr_count?: number;
+  author_credibility?: AuthorCredibility | null;
 }
 
 export interface IssueStateCounts {
@@ -322,6 +328,7 @@ export interface Pull {
   html_url: string | null;
   fetched_at: string;
   first_seen_at: string;
+  author_credibility?: AuthorCredibility | null;
 }
 
 export interface PullStateCounts {

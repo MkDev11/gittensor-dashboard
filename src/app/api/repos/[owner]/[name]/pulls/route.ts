@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb, getReadDb, PullRow } from '@/lib/db';
 import { refreshPullsIfStale } from '@/lib/refresh';
 import { buildEtag, etagNotModified, withEtagHeaders } from '@/lib/etag';
+import { authorCredibilityForLogin, getGittensorCredibilityMap } from '@/lib/gittensor-credibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -195,6 +196,8 @@ export async function GET(
     }
   }
 
+  const credibilityMap = rows.length > 0 ? await getGittensorCredibilityMap() : null;
+
   return NextResponse.json(
     {
       repo: full,
@@ -203,7 +206,10 @@ export async function GET(
       ...(new_count !== undefined ? { new_count } : {}),
       last_fetch: meta?.last_pulls_fetch ?? null,
       last_error: meta?.last_fetch_error ?? null,
-      pulls: rows,
+      pulls: rows.map((r) => ({
+        ...r,
+        author_credibility: authorCredibilityForLogin(credibilityMap, r.author_login),
+      })),
       linked_issues_by_pull,
     },
     { headers: withEtagHeaders(etag) },
