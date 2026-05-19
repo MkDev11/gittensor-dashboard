@@ -24,6 +24,8 @@ export interface Miner {
   failedReason?: string | null;
   credibility: string;
   issueCredibility?: string;
+  eligibleRepoCount?: number;
+  issueEligibleRepoCount?: number;
   issueDiscoveryScore?: string;
   issueTokenScore?: string;
   totalScore: string;
@@ -429,7 +431,8 @@ export function UsdValue({
   );
 }
 
-// Star toggle that tracks / untracks a miner.
+// Star toggle that tracks / untracks a miner. Stops click propagation so
+// the row's surrounding link doesn't navigate away when the star is hit.
 export function TrackButton({
   isTracked,
   onClick,
@@ -440,7 +443,11 @@ export function TrackButton({
   return (
     <Box
       as="button"
-      onClick={onClick}
+      onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        e.preventDefault();
+        onClick();
+      }}
       aria-label={isTracked ? 'Untrack miner' : 'Track miner'}
       sx={{
         display: 'inline-flex',

@@ -3,6 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { PageLayout, Heading, Text, Box } from '@primer/react';
 import {
@@ -44,10 +45,10 @@ interface MinersResp {
   miners: Miner[];
 }
 
-type SortKey = 'score' | 'earnings' | 'activity' | 'credibility';
+type SortKey = 'score' | 'earnings' | 'activity';
 type EligibilityFilter = 'all' | 'eligible' | 'ineligible';
 
-const SORT_KEYS: SortKey[] = ['score', 'earnings', 'activity', 'credibility'];
+const SORT_KEYS: SortKey[] = ['score', 'earnings', 'activity'];
 
 const PAGE_SIZE = 25;
 
@@ -55,7 +56,6 @@ const PAGE_SIZE = 25;
 function sortLabel(key: SortKey, mode: Mode): string {
   if (key === 'score') return 'Score';
   if (key === 'earnings') return 'Earnings';
-  if (key === 'credibility') return 'Credibility';
   // activity
   if (mode === 'oss') return 'PRs';
   if (mode === 'discovery') return 'Issues';
@@ -99,14 +99,16 @@ export default function MinersPage() {
     refetchIntervalInBackground: true,
   });
 
-  // Cache per-mode views once; downstream memos read by id.
+  // Cache per-mode views once; downstream memos read by uid. (Upstream
+  // /miners doesn't expose a UUID `id` field; uid is the unique-per-row
+  // integer key.)
   const views = useMemo(() => {
-    const map = new Map<string, MinerView>();
+    const map = new Map<number, MinerView>();
     if (!data?.miners) return map;
-    for (const m of data.miners) map.set(m.id, viewOf(m, mode));
+    for (const m of data.miners) map.set(m.uid, viewOf(m, mode));
     return map;
   }, [data, mode]);
-  const v = (m: Miner): MinerView => views.get(m.id) ?? viewOf(m, mode);
+  const v = (m: Miner): MinerView => views.get(m.uid) ?? viewOf(m, mode);
 
   // Highest mode-score among eligible miners; denominator for every
   // row's relative score bar. Independent of the active sort.
@@ -134,17 +136,16 @@ export default function MinersPage() {
       if (sortKey === 'score') cmp = v(a).score - v(b).score;
       else if (sortKey === 'earnings') cmp = v(a).usd - v(b).usd;
       else if (sortKey === 'activity') cmp = v(a).counts.primary - v(b).counts.primary;
-      else if (sortKey === 'credibility') cmp = v(a).cred - v(b).cred;
       if (cmp === 0) cmp = v(a).score - v(b).score;
       return sortDir === 'desc' ? -cmp : cmp;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, sortKey, sortDir, views]);
 
-  // miner.id → global rank in the current sort. Stable under filters.
+  // miner.uid → global rank in the current sort. Stable under filters.
   const ranks = useMemo(() => {
-    const m = new Map<string, number>();
-    sortedAll.forEach((miner, i) => m.set(miner.id, i + 1));
+    const m = new Map<number, number>();
+    sortedAll.forEach((miner, i) => m.set(miner.uid, i + 1));
     return m;
   }, [sortedAll]);
 
@@ -994,7 +995,7 @@ function Leaderboard({
   mode,
 }: {
   miners: Miner[];
-  ranks: Map<string, number>;
+  ranks: Map<number, number>;
   leaderScore: number;
   viewOfMiner: (m: Miner) => MinerView;
   me: string;
@@ -1022,19 +1023,20 @@ function Leaderboard({
       <LeaderboardHeader mode={mode} primaryLabel={primaryLabel} />
       {miners.map((m, i) => {
         // Global rank stays stable across search/eligibility filters.
-        const rank = ranks.get(m.id) ?? i + 1;
+        const rank = ranks.get(m.uid) ?? i + 1;
         const vw = viewOfMiner(m);
         const pct = leaderScore > 0 ? Math.max(1, Math.round((vw.score / leaderScore) * 100)) : 0;
+        const trackKey = String(m.uid);
         return (
           <LeaderRow
-            key={m.id}
+            key={m.uid}
             miner={m}
             view={vw}
             rank={rank}
             pct={pct}
             isMe={ghKey(m.githubUsername) === ghKey(me)}
-            isTracked={tracked.has(m.id)}
-            onToggleTrack={() => onToggleTrack(m.id)}
+            isTracked={tracked.has(trackKey)}
+            onToggleTrack={() => onToggleTrack(trackKey)}
             isLast={i === miners.length - 1}
           />
         );
@@ -1060,11 +1062,13 @@ function LeaderboardHeader({
     <Box
       sx={{
         display: ['none', null, 'grid'],
-        gridTemplateColumns: '48px minmax(200px, 1fr) 220px 80px 80px 80px 80px 100px 40px',
+        gridTemplateColumns: mode === 'total'
+          ? '48px minmax(180px, 1fr) 200px 80px 80px 80px 80px 120px 40px'
+          : '48px minmax(180px, 1fr) 200px 80px 80px 80px 120px 40px',
         gridTemplateAreas:
           mode === 'total'
-            ? `"rank identity mid act cred ossCred discCred usd track"`
-            : `"rank identity mid m1 m2 m3 m4 usd track"`,
+            ? `"rank identity mid merged solved ossRepos discRepos usd track"`
+            : `"rank identity mid m1 m2 m3 usd track"`,
         alignItems: 'center',
         columnGap: 3,
         px: 4,
@@ -1079,17 +1083,16 @@ function LeaderboardHeader({
       <HeaderCell area="mid">Score</HeaderCell>
       {mode === 'total' ? (
         <>
-          <HeaderCell area="act" align="right">Activity</HeaderCell>
-          <HeaderCell area="cred" align="right">Credibility</HeaderCell>
-          <HeaderCell area="ossCred" align="right">OSS Cred</HeaderCell>
-          <HeaderCell area="discCred" align="right">Disc Cred</HeaderCell>
+          <HeaderCell area="merged" align="right">Merged</HeaderCell>
+          <HeaderCell area="solved" align="right">Solved</HeaderCell>
+          <HeaderCell area="ossRepos" align="right">OSS Repos</HeaderCell>
+          <HeaderCell area="discRepos" align="right">Disc Repos</HeaderCell>
         </>
       ) : (
         <>
           <HeaderCell area="m1" align="right">{primaryLabel}</HeaderCell>
           <HeaderCell area="m2" align="right">Open</HeaderCell>
           <HeaderCell area="m3" align="right">Closed</HeaderCell>
-          <HeaderCell area="m4" align="right">Cred</HeaderCell>
         </>
       )}
       <HeaderCell area="usd" align="right">$/Day</HeaderCell>
@@ -1308,7 +1311,7 @@ function LeaderboardGrid({
   onToggleTrack,
 }: {
   miners: Miner[];
-  ranks: Map<string, number>;
+  ranks: Map<number, number>;
   leaderScore: number;
   viewOfMiner: (m: Miner) => MinerView;
   me: string;
@@ -1332,19 +1335,20 @@ function LeaderboardGrid({
       }}
     >
       {miners.map((m, i) => {
-        const rank = ranks.get(m.id) ?? i + 1;
+        const rank = ranks.get(m.uid) ?? i + 1;
         const vw = viewOfMiner(m);
         const pct = leaderScore > 0 ? Math.max(1, Math.round((vw.score / leaderScore) * 100)) : 0;
+        const trackKey = String(m.uid);
         return (
           <LeaderCard
-            key={m.id}
+            key={m.uid}
             miner={m}
             view={vw}
             rank={rank}
             pct={pct}
             isMe={ghKey(m.githubUsername) === ghKey(me)}
-            isTracked={tracked.has(m.id)}
-            onToggleTrack={() => onToggleTrack(m.id)}
+            isTracked={tracked.has(trackKey)}
+            onToggleTrack={() => onToggleTrack(trackKey)}
           />
         );
       })}
@@ -1381,6 +1385,7 @@ function LeaderCard({
   const avatarSize = 32;
 
   return (
+    <Link href={`/miners/${miner.uid}`} prefetch={false} style={{ textDecoration: 'none', color: 'inherit' }}>
     <Box
       sx={{
         position: 'relative',
@@ -1405,6 +1410,7 @@ function LeaderCard({
         // Ineligible: darker + desaturated. No longer signalled by a badge.
         opacity: dim ? 0.4 : 1,
         filter: dim ? 'grayscale(0.5)' : undefined,
+        cursor: 'pointer',
         transition: 'transform 120ms ease, border-color 120ms ease',
         '&:hover': {
           transform: 'translateY(-2px)',
@@ -1456,16 +1462,32 @@ function LeaderCard({
         sx={{
           gridArea: 'metrics',
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+          gridTemplateColumns: view.mode === 'total' ? 'repeat(4, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))',
           columnGap: 2,
         }}
       >
         {view.mode === 'total' ? (
           <>
-            <CompactMetric label="Act" value={view.counts.primary.toLocaleString()} color="var(--fg-default)" />
-            <CompactMetric label="Cred" value={percentOrZero(view.cred)} color={credColor(view.cred)} />
-            <CompactMetric label="OSS" value={percentOrZero(num(miner.credibility))} color={credColor(num(miner.credibility))} />
-            <CompactMetric label="Disc" value={percentOrZero(num(miner.issueCredibility))} color={credColor(num(miner.issueCredibility))} />
+            <CompactMetric
+              label="Merged"
+              value={(miner.totalMergedPrs ?? 0).toLocaleString()}
+              color={(miner.totalMergedPrs ?? 0) > 0 ? 'var(--success-fg)' : 'var(--fg-muted)'}
+            />
+            <CompactMetric
+              label="Solved"
+              value={(miner.totalSolvedIssues ?? 0).toLocaleString()}
+              color={(miner.totalSolvedIssues ?? 0) > 0 ? 'var(--done-emphasis)' : 'var(--fg-muted)'}
+            />
+            <CompactMetric
+              label="OSS Repos"
+              value={(miner.eligibleRepoCount ?? 0).toLocaleString()}
+              color={(miner.eligibleRepoCount ?? 0) > 0 ? 'var(--success-fg)' : 'var(--fg-muted)'}
+            />
+            <CompactMetric
+              label="Disc Repos"
+              value={(miner.issueEligibleRepoCount ?? 0).toLocaleString()}
+              color={(miner.issueEligibleRepoCount ?? 0) > 0 ? 'var(--done-emphasis)' : 'var(--fg-muted)'}
+            />
           </>
         ) : (
           <>
@@ -1484,11 +1506,11 @@ function LeaderCard({
               value={view.counts.closed.toLocaleString()}
               color={view.counts.closed > 0 ? 'var(--danger-fg)' : 'var(--fg-muted)'}
             />
-            <CompactMetric label="Cred" value={percentOrZero(cred)} color={credColor(cred)} />
           </>
         )}
       </Box>
     </Box>
+    </Link>
   );
 }
 
@@ -1522,6 +1544,7 @@ function LeaderRow({
   const avatarSize = 28;
 
   return (
+    <Link href={`/miners/${miner.uid}`} prefetch={false} style={{ textDecoration: 'none', color: 'inherit' }}>
     <Box
       sx={{
         position: 'relative',
@@ -1532,14 +1555,16 @@ function LeaderRow({
         gridTemplateColumns: [
           '36px 1fr auto auto',
           null,
-          '48px minmax(200px, 1fr) 220px 80px 80px 80px 80px 100px 40px',
+          view.mode === 'total'
+            ? '48px minmax(180px, 1fr) 200px 80px 80px 80px 80px 120px 40px'
+            : '48px minmax(180px, 1fr) 200px 80px 80px 80px 120px 40px',
         ],
         gridTemplateAreas: [
           `"rank identity usd track" "mid mid mid mid" "metrics metrics metrics metrics"`,
           null,
           view.mode === 'total'
-            ? `"rank identity mid act cred ossCred discCred usd track"`
-            : `"rank identity mid m1 m2 m3 m4 usd track"`,
+            ? `"rank identity mid merged solved ossRepos discRepos usd track"`
+            : `"rank identity mid m1 m2 m3 usd track"`,
         ],
         alignItems: 'center',
         columnGap: [2, null, 3],
@@ -1565,7 +1590,7 @@ function LeaderRow({
         opacity: dim ? 0.35 : 1,
         filter: dim ? 'grayscale(0.5)' : undefined,
         transition: 'background-color 100ms, transform 120ms',
-        cursor: 'default',
+        cursor: 'pointer',
         '&:hover': {
           bg: isMe ? 'var(--accent-subtle)' : 'canvas.default',
         },
@@ -1611,51 +1636,51 @@ function LeaderRow({
        * sub-grid in the parent's `metrics` row, laying every metric out
        * in a single equal-width row.
        *
-       * Total mode: Activity · Credibility · OSS Cred · Disc Cred.
-       * OSS / Disc: Score · Cred. */}
+       * Total mode: Merged · Solved · OSS Repos · Disc Repos.
+       * OSS / Disc: primary · Open · Closed. */}
       <Box
         sx={{
           gridArea: ['metrics', null, 'auto'],
           display: ['grid', null, 'contents'],
-          gridTemplateColumns: ['repeat(4, minmax(0, 1fr))', null, 'none'],
+          gridTemplateColumns: [view.mode === 'total' ? 'repeat(4, minmax(0, 1fr))' : 'repeat(3, minmax(0, 1fr))', null, 'none'],
           columnGap: [2, null, 0],
         }}
       >
         {view.mode === 'total' ? (
           <>
             <MetricCell
-              gridArea="act"
-              label="Activity"
-              mobileLabel="Act"
-              value={view.counts.primary.toLocaleString()}
-              color="var(--fg-default)"
+              gridArea="merged"
+              label="Merged"
+              mobileLabel="Mrgd"
+              value={(miner.totalMergedPrs ?? 0).toLocaleString()}
+              color={(miner.totalMergedPrs ?? 0) > 0 ? 'var(--success-fg)' : 'var(--fg-muted)'}
               isTop={isTop}
               alignMobile="left"
             />
             <MetricCell
-              gridArea="cred"
-              label="Credibility"
-              mobileLabel="Cred"
-              value={percentOrZero(view.cred)}
-              color={credColor(view.cred)}
+              gridArea="solved"
+              label="Solved"
+              mobileLabel="Slvd"
+              value={(miner.totalSolvedIssues ?? 0).toLocaleString()}
+              color={(miner.totalSolvedIssues ?? 0) > 0 ? 'var(--done-emphasis)' : 'var(--fg-muted)'}
               isTop={isTop}
               alignMobile="left"
             />
             <MetricCell
-              gridArea="ossCred"
-              label="OSS Cred"
+              gridArea="ossRepos"
+              label="OSS Repos"
               mobileLabel="OSS"
-              value={percentOrZero(num(miner.credibility))}
-              color={credColor(num(miner.credibility))}
+              value={(miner.eligibleRepoCount ?? 0).toLocaleString()}
+              color={(miner.eligibleRepoCount ?? 0) > 0 ? 'var(--success-fg)' : 'var(--fg-muted)'}
               isTop={isTop}
               alignMobile="left"
             />
             <MetricCell
-              gridArea="discCred"
-              label="Disc Cred"
+              gridArea="discRepos"
+              label="Disc Repos"
               mobileLabel="Disc"
-              value={percentOrZero(num(miner.issueCredibility))}
-              color={credColor(num(miner.issueCredibility))}
+              value={(miner.issueEligibleRepoCount ?? 0).toLocaleString()}
+              color={(miner.issueEligibleRepoCount ?? 0) > 0 ? 'var(--done-emphasis)' : 'var(--fg-muted)'}
               isTop={isTop}
               alignMobile="left"
             />
@@ -1686,14 +1711,6 @@ function LeaderRow({
               isTop={isTop}
               alignMobile="left"
             />
-            <MetricCell
-              gridArea="m4"
-              label="Cred"
-              value={percentOrZero(cred)}
-              color={credColor(cred)}
-              isTop={isTop}
-              alignMobile="left"
-            />
           </>
         )}
       </Box>
@@ -1706,6 +1723,7 @@ function LeaderRow({
         <TrackButton isTracked={isTracked} onClick={onToggleTrack} />
       </Box>
     </Box>
+    </Link>
   );
 }
 
