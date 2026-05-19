@@ -45,10 +45,10 @@ export type EffectiveIssueState = 'open' | 'completed' | 'not_planned' | 'duplic
  *                 *without* a merged linked PR (Gittensor's risky/negative
  *                 category) and reopened/null-reason
  *
- * `mergedPRCount === null` means the related-PR map hasn't loaded yet. We
- * default to NOT claiming Completed in that case — a brief render as
- * "Closed" while data hydrates is preferable to a stale "Completed" badge
- * being wrong per the strict mining rule.
+ * `mergedPRCount === null` means the related-PR map hasn't loaded yet. In
+ * that transient detail-view state we trust GitHub's close reason so a
+ * completed issue doesn't briefly render as generic Closed. List/table views
+ * pass a concrete count from the server and keep the strict mining buckets.
  */
 export function effectiveIssueState(
   issue: IssueDto,
@@ -58,7 +58,7 @@ export function effectiveIssueState(
   const reason = (issue.state_reason ?? '').toUpperCase();
   if (reason === 'NOT_PLANNED') return 'not_planned';
   if (reason === 'DUPLICATE') return 'duplicate';
-  if (reason === 'COMPLETED' && (mergedPRCount ?? 0) > 0) return 'completed';
+  if (reason === 'COMPLETED' && (mergedPRCount === null || mergedPRCount > 0)) return 'completed';
   return 'closed';
 }
 

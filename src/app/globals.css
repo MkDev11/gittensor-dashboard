@@ -420,7 +420,8 @@ select {
   color: var(--fg-default);
   font-size: 14px;
   line-height: 1.55;
-  overflow-wrap: break-word;
+  min-width: 0;
+  overflow-wrap: anywhere;
   word-wrap: break-word;
   max-width: 100%;
 }
@@ -475,6 +476,19 @@ select {
   text-decoration: none;
 }
 .md-content a:hover { text-decoration: underline; }
+.md-content a.gh-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.md-content a.gh-ref .gh-ref-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  transform: translateY(1px);
+}
 
 .md-content code {
   background: var(--bg-emphasis);
@@ -482,7 +496,8 @@ select {
   border-radius: 4px;
   font-family: var(--font-mono), ui-monospace, SFMono-Regular, 'SF Mono', Consolas, monospace;
   font-size: 85%;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   white-space: break-spaces;
 }
 .md-content pre {
@@ -491,6 +506,7 @@ select {
   border-radius: 8px;
   padding: 16px;
   overflow: auto;
+  max-width: 100%;
   margin: 0 0 16px;
   font-family: var(--font-mono), ui-monospace, SFMono-Regular, 'SF Mono', Consolas, monospace;
   font-size: 85%;

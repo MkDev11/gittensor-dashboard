@@ -22,7 +22,7 @@ import {
   ArrowUpIcon,
 } from '@primer/octicons-react';
 import { TableRowsSkeleton, CardGridSkeleton } from '@/components/Skeleton';
-import { useTrackedRepos } from '@/lib/tracked-repos';
+import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import { formatRelativeTime } from '@/lib/format';
 
 interface GtRepo {
@@ -804,7 +804,7 @@ function RepoTable({
         <Box as="tbody">
           {rows.map((r, i) => {
             const rank = startRank + i;
-            const isTracked = tracked.has(r.fullName);
+            const isTracked = repoIsTracked(tracked, r.fullName);
             return (
               <Box
                 as="tr"
@@ -963,7 +963,7 @@ function RepoCards({
               key={r.fullName}
               repo={r}
               rank={startRank + i}
-              isTracked={tracked.has(r.fullName)}
+              isTracked={repoIsTracked(tracked, r.fullName)}
               onToggleTrack={() => onToggleTrack(r.fullName)}
             />
           ))}
