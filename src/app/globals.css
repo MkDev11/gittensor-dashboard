@@ -42,6 +42,8 @@
 
   /* Shadows — minimal; Linear leans on borders + bg shifts instead */
   --shadow-overlay: 0 16px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-default);
+  /* Leftward shadow for slide-in side panels; theme-aware. */
+  --shadow-panel-overlay: -16px 0 32px rgba(0, 0, 0, 0.45);
 
   /* Semantic state tints. Kept in sync with `linear-theme.ts`. */
   --accent-subtle: rgba(94, 106, 210, 0.16);
@@ -125,6 +127,7 @@
   --selected-check: #2a8054;
 
   --shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--border-default);
+  --shadow-panel-overlay: -16px 0 32px rgba(0, 0, 0, 0.10);
 
   --btn-primary-bg: #5e6ad2;
   --btn-primary-hover-bg: #4b56b9;
