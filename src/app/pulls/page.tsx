@@ -15,13 +15,13 @@ import { TableRowsSkeleton } from '@/components/Skeleton';
 import Dropdown from '@/components/Dropdown';
 import SearchInput from '@/components/SearchInput';
 import AuthorFilter from '@/components/AuthorFilter';
-import type { PullDto } from '@/lib/api-types';
-import { pullStatus } from '@/lib/api-types';
+import type { Pull } from '@/types/entities';
+import { pullStatus } from '@/types/entities';
 import ContentViewer from '@/components/ContentViewer';
 import { useSettings } from '@/lib/settings';
 import { useSn74Repos, lookupWeight } from '@/lib/use-sn74-repos';
 
-interface AggPull extends PullDto {
+interface AggPull extends Pull {
   linked_issues: Array<{ repo: string; number: number }>;
 }
 

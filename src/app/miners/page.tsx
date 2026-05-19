@@ -18,44 +18,7 @@ import { TableRowsSkeleton, CardGridSkeleton } from '@/components/Skeleton';
 import { useMinerLogin } from '@/lib/use-miner';
 import { useTrackedMiners } from '@/lib/tracked-miners';
 import { formatUsd, formatUsdMonthly, formatPercent } from '@/lib/format';
-
-interface Miner {
-  id: string;
-  uid: number;
-  hotkey: string;
-  githubUsername: string;
-  githubId?: string;
-  isEligible: boolean;
-  isIssueEligible?: boolean;
-  failedReason?: string | null;
-  credibility: string;
-  issueCredibility?: string;
-  issueDiscoveryScore?: string;
-  issueTokenScore?: string;
-  totalScore: string;
-  baseTotalScore?: string;
-  totalSolvedIssues?: number;
-  totalValidSolvedIssues?: number;
-  totalOpenIssues?: number;
-  totalClosedIssues?: number;
-  totalOpenPrs?: number;
-  totalClosedPrs?: number;
-  totalMergedPrs?: number;
-  totalPrs?: number;
-  totalAdditions?: number;
-  totalDeletions?: number;
-  uniqueReposCount?: number;
-  alphaPerDay?: number;
-  taoPerDay?: number;
-  usdPerDay?: number;
-}
-
-interface MinersResp {
-  count: number;
-  fetched_at: number;
-  source?: string;
-  miners: Miner[];
-}
+import type { Miner, MinersResponse } from '@/types/entities';
 
 type SortKey = 'score' | 'earnings' | 'issues' | 'credibility';
 type EligibilityFilter = 'all' | 'eligible' | 'ineligible';
@@ -93,7 +56,7 @@ export default function MinersPage() {
     }
   };
 
-  const { data, isLoading, isError } = useQuery<MinersResp>({
+  const { data, isLoading, isError } = useQuery<MinersResponse>({
     queryKey: ['miners'],
     queryFn: async () => {
       const r = await fetch('/api/miners');

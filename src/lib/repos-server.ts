@@ -2,7 +2,7 @@
 // imported by client components. The `repos.ts` sibling stays as the
 // client-safe type/helper surface; the bundled JSON snapshot it ships is
 // intentionally not consulted here — live is the sole source of truth.
-import type { RepoEntry } from './repos';
+import type { Sn74Repo } from './repos';
 import { getDb } from './db';
 
 // Live source. We poll entrius/gittensor:main/master_repositories.json every
@@ -147,7 +147,7 @@ async function refreshLiveIfStale(): Promise<void> {
   return inFlight;
 }
 
-function readAll(): RepoEntry[] {
+function readAll(): Sn74Repo[] {
   try {
     const rows = getDb()
       .prepare('SELECT full_name, weight FROM repo_weights')
@@ -185,17 +185,17 @@ function readAll(): RepoEntry[] {
   }
 }
 
-function buildList(): RepoEntry[] {
+function buildList(): Sn74Repo[] {
   return readAll().sort((a, b) => b.weight - a.weight);
 }
 
-export function getLiveReposServer(): RepoEntry[] {
+export function getLiveReposServer(): Sn74Repo[] {
   void refreshLiveIfStale();
   return buildList();
 }
 
 export async function getLiveReposAsyncServer(): Promise<{
-  repos: RepoEntry[];
+  repos: Sn74Repo[];
   source: 'live' | 'empty';
   fetchedAt: number;
 }> {

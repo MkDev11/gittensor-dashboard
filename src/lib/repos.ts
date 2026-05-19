@@ -1,16 +1,6 @@
-export interface RepoEntry {
-  fullName: string;
-  owner: string;
-  name: string;
-  weight: number;
-  /**
-   * SN74's authoritative "this repo is inactive" timestamp. Set by the
-   * Gittensor validator team in master_repositories.json when a repo is
-   * deprioritised — miners earn no rewards from inactive repos. Absent on
-   * active repos.
-   */
-  inactiveAt: string | null;
-}
+import type { Sn74Repo } from '@/types/entities';
+
+export type { Sn74Repo };
 
 /**
  * Empty by design — the bundled `master_repositories.json` is no longer
@@ -19,7 +9,7 @@ export interface RepoEntry {
  * a synchronous initial value now just gets an empty list until the live
  * fetch lands; render an empty/loading state accordingly.
  */
-export const ALL_REPOS: RepoEntry[] = [];
+export const ALL_REPOS: Sn74Repo[] = [];
 
 export function weightBand(weight: number): {
   label: string;

@@ -29,7 +29,7 @@ import {
   ChevronDownIcon,
   CheckIcon,
 } from '@primer/octicons-react';
-import { ALL_REPOS, type RepoEntry } from '@/lib/repos';
+import { ALL_REPOS, type Sn74Repo } from '@/lib/repos';
 import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import { IssueStatusBadge, PullStatusBadge } from '@/components/StatusBadge';
 import { formatRelativeTime, isRecent } from '@/lib/format';
@@ -42,8 +42,8 @@ import AuthorFilter from '@/components/AuthorFilter';
 import AuthorSidebar from '@/components/AuthorSidebar';
 import { useSettings } from '@/lib/settings';
 import { useToast } from '@/lib/toast';
-import { pullStatus } from '@/lib/api-types';
-import type { IssueDto, IssuesResponse, IssuesMetaResponse, PullDto, PullsResponse, PullsMetaResponse } from '@/lib/api-types';
+import { pullStatus } from '@/types/entities';
+import type { Issue, IssuesResponse, IssuesMetaResponse, Pull, PullsResponse, PullsMetaResponse } from '@/types/entities';
 import { RepoListSkeleton, TableRowsSkeleton } from '@/components/Skeleton';
 import { tableHeaderSx, tableCellSx, tableTimeSx } from '@/components/repo-explorer/styles';
 import { weightColor, weightFontWeight } from '@/components/repo-explorer/weights';
@@ -121,7 +121,7 @@ function useRelatedPopoverLayout(
 // `null` selection without making every downstream read nullable, so we hold a
 // dummy entry that yields empty issues/PRs and gets swapped out the moment
 // `allRepos` populates (see the `selected`-hydration effect below).
-const EMPTY_REPO: RepoEntry = {
+const EMPTY_REPO: Sn74Repo = {
   fullName: '',
   owner: '',
   name: '',
@@ -134,7 +134,7 @@ export default function RepoExplorer() {
   const [repoQuery, setRepoQuery] = useState('');
   const [repoSort, setRepoSort] = useState<RepoSort>('weight');
   const [trackedOnly, setTrackedOnly] = useState(false);
-  const [selected, setSelected] = useState<RepoEntry>(EMPTY_REPO);
+  const [selected, setSelected] = useState<Sn74Repo>(EMPTY_REPO);
   const [tab, setTabState] = useState<Tab>('issues');
 
   const {
@@ -192,8 +192,8 @@ export default function RepoExplorer() {
   const [renderedAuthorTarget, setRenderedAuthorTarget] = useState<AuthorTarget | null>(null);
   const [authorPanelActive, setAuthorPanelActive] = useState(false);
   const authorSideRef = useRef<HTMLDivElement | null>(null);
-  const [issueModal, setIssueModal] = useState<IssueDto | null>(null);
-  const [pullModal, setPullModal] = useState<PullDto | null>(null);
+  const [issueModal, setIssueModal] = useState<Issue | null>(null);
+  const [pullModal, setPullModal] = useState<Pull | null>(null);
   const [expandedIssue, setExpandedIssue] = useState<number | null>(null);
   const [expandedPull, setExpandedPull] = useState<number | null>(null);
   const { settings, update, hydrated: settingsReady } = useSettings();
@@ -419,7 +419,7 @@ export default function RepoExplorer() {
   // Server polls master_repositories.json every 5 min and persists any new
   // repos at weight 0; nothing is ever removed. Client refetches on the same
   // cadence so newly discovered repos appear without a page reload.
-  const { data: sn74ReposData, isLoading: sn74ReposLoading, isSuccess: sn74ReposReady } = useQuery<{ repos: RepoEntry[]; source: 'live' | 'empty'; count: number }>({
+  const { data: sn74ReposData, isLoading: sn74ReposLoading, isSuccess: sn74ReposReady } = useQuery<{ repos: Sn74Repo[]; source: 'live' | 'empty'; count: number }>({
     queryKey: ['sn74-repos'],
     queryFn: async ({ signal }) => {
       const r = await fetch('/api/sn74-repos', { signal });
@@ -431,11 +431,11 @@ export default function RepoExplorer() {
     refetchOnWindowFocus: false,
   });
 
-  const sn74Repos: RepoEntry[] = sn74ReposData?.repos ?? ALL_REPOS;
+  const sn74Repos: Sn74Repo[] = sn74ReposData?.repos ?? ALL_REPOS;
 
   const allRepos = useMemo(() => {
     const sn74Set = new Set(sn74Repos.map((r) => r.fullName));
-    const userExtras: RepoEntry[] = (userReposData?.repos ?? [])
+    const userExtras: Sn74Repo[] = (userReposData?.repos ?? [])
       .filter((u) => !sn74Set.has(u.full_name))
       .map((u) => {
         const [owner, name] = u.full_name.split('/');
@@ -945,7 +945,7 @@ export default function RepoExplorer() {
         try {
           const r = await fetch(`/api/pull/${selected.owner}/${selected.name}/${prNumber}`);
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          pr = (await r.json()) as PullDto;
+          pr = (await r.json()) as Pull;
         } catch (err) {
           console.warn('[explorer] could not open linked PR:', err);
           return;
@@ -972,7 +972,7 @@ export default function RepoExplorer() {
   }, []);
 
   const openIssueFromAuthorSidebar = useCallback(
-    (issue: IssueDto) => {
+    (issue: Issue) => {
       setAuthorTarget(null);
       setPullModal(null);
       setExpandedPull(null);
@@ -1030,32 +1030,32 @@ export default function RepoExplorer() {
         if (kind === 'issue') {
           setTabState('issues');
           if (useOverlay) {
-            setIssueModal(data as IssueDto);
+            setIssueModal(data as Issue);
             setPullModal(null);
             setExpandedIssue(null);
           } else {
             setIssueModal(null);
             setPullModal(null);
-            setExpandedIssue((data as IssueDto).number);
+            setExpandedIssue((data as Issue).number);
             setTimeout(() => {
               document
-                .querySelector(`[data-issue-number="${(data as IssueDto).number}"]`)
+                .querySelector(`[data-issue-number="${(data as Issue).number}"]`)
                 ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 120);
           }
         } else {
           setTabState('pulls');
           if (useOverlay) {
-            setPullModal(data as PullDto);
+            setPullModal(data as Pull);
             setIssueModal(null);
             setExpandedPull(null);
           } else {
             setPullModal(null);
             setIssueModal(null);
-            setExpandedPull((data as PullDto).number);
+            setExpandedPull((data as Pull).number);
             setTimeout(() => {
               document
-                .querySelector(`[data-pull-number="${(data as PullDto).number}"]`)
+                .querySelector(`[data-pull-number="${(data as Pull).number}"]`)
                 ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 120);
           }
@@ -2328,7 +2328,7 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
   linkedIssues,
   onIssueClick,
 }: {
-  pr: PullDto;
+  pr: Pull;
   mine: boolean;
   expanded: boolean;
   onView: () => void;
@@ -2453,7 +2453,7 @@ const ExplorerIssueRow = React.memo(function ExplorerIssueRow({
   onPRClick,
   onAuthorClick,
 }: {
-  issue: IssueDto;
+  issue: Issue;
   expanded: boolean;
   onView: () => void;
   authorStats: { open: number; completed: number; not_planned: number; closed: number } | null;

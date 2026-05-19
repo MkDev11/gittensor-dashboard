@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { GtRepoPr, GtRepoPrsResponse } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,23 +19,6 @@ interface UpstreamPr {
   deletions?: number | null;
   commitCount?: number | null;
   score?: string | number | null;
-}
-
-export interface GtRepoPr {
-  pullRequestNumber: number;
-  title: string;
-  author: string;
-  githubId: string | null;
-  avatarUrl: string;
-  prState: 'OPEN' | 'MERGED' | 'CLOSED';
-  prCreatedAt: string;
-  mergedAt: string | null;
-  additions: number;
-  deletions: number;
-  commitCount: number;
-  score: number;
-  // PR title prefix `#NNN ...` → linked issue number on this repo (gittensor convention).
-  linkedIssueNumber: number | null;
 }
 
 interface Cached {
@@ -118,7 +102,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       merged: sorted.filter((p) => p.prState === 'MERGED').length,
       closed: sorted.filter((p) => p.prState === 'CLOSED').length,
     };
-    return NextResponse.json({ fullName, counts, prs: sorted, fetched_at: shared.fetched_at });
+    const body: GtRepoPrsResponse = { fullName, counts, prs: sorted, fetched_at: shared.fetched_at };
+    return NextResponse.json(body);
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 502 });
   }

@@ -8,7 +8,7 @@ import Spinner from '@/components/Spinner';
 import { TableRowsSkeleton } from '@/components/Skeleton';
 import { IssueStatusBadge } from '@/components/StatusBadge';
 import { formatRelativeTime, isRecent } from '@/lib/format';
-import type { IssueDto } from '@/lib/api-types';
+import type { Issue } from '@/types/entities';
 
 interface AuthorIssuesResponse {
   repo: string;
@@ -26,7 +26,7 @@ interface AuthorIssuesResponse {
     closed: number;
     last_updated_at: string | null;
   };
-  issues: Array<IssueDto & { merged_pr_count: number }>;
+  issues: Array<Issue & { merged_pr_count: number }>;
 }
 
 export default function AuthorSidebar({
@@ -44,7 +44,7 @@ export default function AuthorSidebar({
   login: string;
   initialAssociation: string | null;
   onClose: () => void;
-  onIssueClick: (issue: IssueDto) => void;
+  onIssueClick: (issue: Issue) => void;
 }) {
   const { data, isLoading, isError } = useQuery<AuthorIssuesResponse>({
     queryKey: ['author-issues', owner, name, login],

@@ -26,7 +26,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
 } from '@primer/octicons-react';
-import type { IssueDto } from '@/lib/api-types';
+import type { Issue } from '@/types/entities';
 import { IssueStatusBadge } from '@/components/StatusBadge';
 import { formatRelativeTime, isRecent } from '@/lib/format';
 import { useTrackedRepos } from '@/lib/tracked-repos';
@@ -56,7 +56,7 @@ interface IssuesResp {
   total_pages: number;
   authors: Array<{ login: string; count: number }>;
   author_count: number;
-  issues: IssueDto[];
+  issues: Issue[];
 }
 
 interface UserReposResp {
@@ -83,7 +83,7 @@ export default function IssuesTable() {
   const [trackedOnly, setTrackedOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [authorFilter, setAuthorFilter] = useState<string>('all');
-  const [openIssue, setOpenIssue] = useState<IssueDto | null>(null);
+  const [openIssue, setOpenIssue] = useState<Issue | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [authorTarget, setAuthorTarget] = useState<AuthorTarget | null>(null);
 
@@ -137,7 +137,7 @@ export default function IssuesTable() {
       .join(',');
   }, [currentRepoNames, scopedTracked, trackedOnly]);
 
-  const handleRowClick = (issue: IssueDto) => {
+  const handleRowClick = (issue: Issue) => {
     if (settings.contentDisplay === 'modal' || settings.contentDisplay === 'side') {
       setOpenIssue(issue);
     } else {
@@ -146,7 +146,7 @@ export default function IssuesTable() {
     }
   };
 
-  const openAuthorDetails = (issue: IssueDto) => {
+  const openAuthorDetails = (issue: Issue) => {
     if (!issue.author_login) return;
     const [owner, name] = issue.repo_full_name.split('/');
     setOpenIssue(null);
@@ -160,7 +160,7 @@ export default function IssuesTable() {
     });
   };
 
-  const openIssueFromAuthor = (issue: IssueDto) => {
+  const openIssueFromAuthor = (issue: Issue) => {
     setAuthorTarget(null);
     const key = `${issue.repo_full_name}#${issue.number}`;
     if (settings.contentDisplay === 'accordion' && rows.some((row) => `${row.repo_full_name}#${row.number}` === key)) {
@@ -661,7 +661,7 @@ function IssueTableRow({
   onAuthorClick,
   expanded,
 }: {
-  issue: IssueDto;
+  issue: Issue;
   tracked: boolean;
   onToggleTrack?: () => void;
   onRowClick?: () => void;
