@@ -297,7 +297,7 @@ export default function IssuesTable() {
               color: trackedOnly ? 'var(--attention-emphasis)' : 'var(--fg-default)',
               cursor: 'pointer',
               fontSize: '14px',
-              fontWeight: 400,
+              fontWeight: 500,
               lineHeight: '20px',
               userSelect: 'none',
               '&:hover': { borderColor: 'var(--border-strong)' },
@@ -346,20 +346,11 @@ export default function IssuesTable() {
         </Box>
       </Box>
 
-      <Box
-        sx={{
-          border: '1px solid',
-          borderColor: 'var(--border-default)',
-          borderRadius: 2,
-          overflowX: 'auto',
-          overflowY: 'hidden',
-          bg: 'var(--bg-canvas)',
-        }}
-      >
+      <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflowX: 'auto', overflowY: 'hidden', bg: 'canvas.default' }}>
         <Box as="table" sx={{ width: '100%', minWidth: 1120, borderCollapse: 'collapse', fontSize: 1 }}>
           <Box
             as="thead"
-            sx={{ bg: 'var(--bg-subtle)', borderBottom: '1px solid', borderColor: 'var(--border-default)' }}
+            sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}
           >
             <Box as="tr">
               <Box as="th" sx={{ ...headerCellSx, width: 44, textAlign: 'center' }} aria-label="Tracked repository" />
@@ -602,7 +593,7 @@ const headerCellSx = {
   textAlign: 'left' as const,
   fontWeight: 600,
   fontSize: 0,
-  color: 'var(--fg-muted)',
+  color: 'fg.muted',
   textTransform: 'uppercase' as const,
   letterSpacing: '0.5px',
   whiteSpace: 'nowrap' as const,
@@ -630,7 +621,7 @@ function HeaderCell({
         textAlign: align,
         cursor: onClick ? 'pointer' : 'default',
         userSelect: 'none',
-        '&:hover': onClick ? { color: 'var(--fg-default)' } : undefined,
+        '&:hover': onClick ? { color: 'fg.default' } : undefined,
       }}
     >
       <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
@@ -672,12 +663,12 @@ function IssueTableRow({
       sx={{
         height: 40,
         borderBottom: '1px solid',
-        borderColor: 'var(--border-muted)',
-        bg: expanded ? 'var(--accent-subtle)' : tracked ? 'var(--accent-subtle)' : 'var(--bg-canvas)',
+        borderColor: 'border.muted',
+        bg: expanded ? 'accent.muted' : tracked ? 'accent.subtle' : 'canvas.default',
         borderLeft: '3px solid',
-        borderLeftColor: tracked ? 'var(--accent-emphasis)' : 'transparent',
+        borderLeftColor: tracked ? 'accent.emphasis' : 'transparent',
         cursor: 'pointer',
-        '&:hover': { bg: tracked ? 'var(--accent-subtle)' : 'var(--bg-subtle)' },
+        '&:hover': { bg: tracked ? 'accent.muted' : 'canvas.subtle' },
         '&:last-child': { borderBottom: 'none' },
       }}
     >

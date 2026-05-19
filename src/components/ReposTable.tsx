@@ -152,7 +152,7 @@ export default function ReposTable({
             color: trackedOnly ? 'var(--attention-emphasis)' : 'var(--fg-default)',
             cursor: 'pointer',
             fontSize: '14px',
-            fontWeight: 400,
+            fontWeight: 500,
             lineHeight: '20px',
             userSelect: 'none',
             '&:hover': { borderColor: 'var(--border-strong)' },
