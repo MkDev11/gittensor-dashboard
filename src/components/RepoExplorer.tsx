@@ -95,6 +95,75 @@ function relatedPopoverOffset(layout: RelatedPopoverLayout) {
     : { top: '100%', mt: 1 };
 }
 
+function trimNumber(value: number, maxDigits = 2): string {
+  return value
+    .toFixed(maxDigits)
+    .replace(/\.?0+$/, '');
+}
+
+function formatPolicyPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return 'Not set';
+  const percent = value * 100;
+  const digits = percent > 0 && percent < 10 ? 2 : 1;
+  return `${trimNumber(percent, digits)}%`;
+}
+
+function formatPolicyScore(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return 'Not set';
+  return trimNumber(value, 2);
+}
+
+function formatPolicyThreshold(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return 'Not set';
+  return trimNumber(value, 1);
+}
+
+function policyTooltip(label: string, value: string, detail: string): string {
+  return `${label}: ${value}. ${detail}`;
+}
+
+function RepoPolicyChip({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
+  return (
+    <Box
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        minHeight: 24,
+        maxWidth: '100%',
+        px: '10px',
+        border: '1px solid',
+        borderColor: 'var(--border-default)',
+        borderRadius: 999,
+        bg: 'var(--bg-canvas)',
+        color: 'var(--fg-default)',
+        fontSize: '11px',
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+      }}
+      title={title ?? `${label}: ${value}`}
+      aria-label={title ?? `${label}: ${value}`}
+    >
+      <Text as="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+        {label}
+      </Text>
+      <Text as="span" sx={{ color: 'var(--fg-muted)', mx: 1 }}>
+        ·
+      </Text>
+      <Text as="span" sx={{ color: 'var(--fg-default)', fontFamily: 'mono', fontSize: '11px', flexShrink: 0 }}>
+        {value}
+      </Text>
+    </Box>
+  );
+}
+
 function useRelatedPopoverLayout(
   open: boolean,
   rowCount: number,
@@ -128,8 +197,114 @@ const EMPTY_REPO: Sn74Repo = {
   owner: '',
   name: '',
   weight: 0,
+  issueDiscoveryShare: null,
+  maintainerCut: null,
+  fixedBaseScore: null,
+  excessivePrPenaltyThreshold: null,
+  openIssueSpamThreshold: null,
+  minCredibility: null,
+  minIssueCredibility: null,
+  defaultLabelMultiplier: null,
+  trustedLabelPipeline: null,
+  additionalAcceptableBranches: null,
+  labelMultipliers: null,
   inactiveAt: null,
 };
+
+function RepoPolicyPanel({ repo }: { repo: Sn74Repo }) {
+  if (!repo.fullName) return null;
+  const excessivePrThreshold = repo.excessivePrPenaltyThreshold ?? 2;
+  const openIssueThreshold = repo.openIssueSpamThreshold ?? 2;
+  const minPrCredibility = repo.minCredibility ?? 0.8;
+  const minIssueCredibility = repo.minIssueCredibility ?? 0.8;
+
+  return (
+    <Box
+      sx={{
+        mb: 3,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        flexWrap: 'wrap',
+      }}
+    >
+      <RepoPolicyChip
+        label="Emission"
+        value={formatPolicyPercent(repo.weight)}
+        title={policyTooltip(
+          'Emission',
+          formatPolicyPercent(repo.weight),
+          'Share of the SN74 repository reward pool assigned to this repository.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Issue discovery"
+        value={formatPolicyPercent(repo.issueDiscoveryShare)}
+        title={policyTooltip(
+          'Issue discovery',
+          formatPolicyPercent(repo.issueDiscoveryShare),
+          'Portion of this repository reward pool reserved for discovering valid issues. The rest goes to pull request rewards.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Maintainer cut"
+        value={formatPolicyPercent(repo.maintainerCut)}
+        title={policyTooltip(
+          'Maintainer cut',
+          formatPolicyPercent(repo.maintainerCut),
+          'Share reserved for repository maintainers before the remaining pool is distributed to contributors.',
+        )}
+      />
+      {repo.fixedBaseScore !== null && (
+        <RepoPolicyChip
+          label="Fixed base"
+          value={formatPolicyScore(repo.fixedBaseScore)}
+          title={policyTooltip(
+            'Fixed base score',
+            formatPolicyScore(repo.fixedBaseScore),
+            'Overrides the normal token-derived base score for this repository when configured.',
+          )}
+        />
+      )}
+      <RepoPolicyChip
+        label="Excessive PR threshold"
+        value={formatPolicyThreshold(excessivePrThreshold)}
+        title={policyTooltip(
+          'Excessive PR penalty threshold',
+          formatPolicyThreshold(excessivePrThreshold),
+          'Base number of open PRs a contributor can have in this repo before the open-PR spam penalty suppresses PR rewards. High token score can add bonus slots up to the configured maximum.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Open issue threshold"
+        value={formatPolicyThreshold(openIssueThreshold)}
+        title={policyTooltip(
+          'Open issue spam threshold',
+          formatPolicyThreshold(openIssueThreshold),
+          'Base number of open issues a contributor can have in this repo before issue-discovery spam suppression applies. Solved issue token score can add bonus slots up to the configured maximum.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Min PR cred"
+        value={formatPolicyPercent(minPrCredibility)}
+        title={policyTooltip(
+          'Minimum PR credibility',
+          formatPolicyPercent(minPrCredibility),
+          'Minimum merged-versus-closed PR credibility required for a contributor to receive PR rewards in this repository.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Min issue cred"
+        value={formatPolicyPercent(minIssueCredibility)}
+        title={policyTooltip(
+          'Minimum issue credibility',
+          formatPolicyPercent(minIssueCredibility),
+          'Minimum solved-versus-closed issue credibility required for a contributor to receive issue-discovery rewards in this repository.',
+        )}
+      />
+    </Box>
+  );
+}
 
 export default function RepoExplorer() {
   const { tracked, toggle: toggleTrack } = useTrackedRepos();
@@ -441,7 +616,24 @@ export default function RepoExplorer() {
       .filter((u) => !sn74Set.has(u.full_name))
       .map((u) => {
         const [owner, name] = u.full_name.split('/');
-        return { fullName: u.full_name, owner, name, weight: u.weight, inactiveAt: null };
+        return {
+          fullName: u.full_name,
+          owner,
+          name,
+          weight: u.weight,
+          issueDiscoveryShare: null,
+          maintainerCut: null,
+          fixedBaseScore: null,
+          excessivePrPenaltyThreshold: null,
+          openIssueSpamThreshold: null,
+          minCredibility: null,
+          minIssueCredibility: null,
+          defaultLabelMultiplier: null,
+          trustedLabelPipeline: null,
+          additionalAcceptableBranches: null,
+          labelMultipliers: null,
+          inactiveAt: null,
+        };
       });
     return [...sn74Repos, ...userExtras];
   }, [sn74Repos, userReposData]);
@@ -1261,7 +1453,7 @@ export default function RepoExplorer() {
                 color: trackedOnly ? 'var(--attention-emphasis)' : 'var(--fg-default)',
                 cursor: 'pointer',
                 fontSize: '14px',
-                fontWeight: 500,
+                fontWeight: 400,
                 userSelect: 'none',
               }}
               title="Show only tracked repos"
@@ -1509,6 +1701,8 @@ export default function RepoExplorer() {
               </Box>
             )}
           </Box>
+
+          <RepoPolicyPanel repo={selected} />
 
           {/* Tabs */}
           <Box sx={{ display: 'flex', gap: 4, mb: '-1px' }}>

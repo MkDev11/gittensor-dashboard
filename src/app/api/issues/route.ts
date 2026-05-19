@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getReadDb, IssueRow } from '@/lib/db';
-import { getLiveReposAsyncServer } from '@/lib/repos-server';
+import { getIssueDiscoveryDisabledReposAsyncServer, getLiveReposAsyncServer } from '@/lib/repos-server';
 import { backfillPrIssueLinksIfNeeded } from '@/lib/refresh';
-import { authorCredibilityForLogin, getGittensorCredibilityMap } from '@/lib/gittensor-credibility';
+import { authorCredibilityForRepo, getGittensorCredibilityIndex } from '@/lib/gittensor-credibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -308,7 +308,13 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const credibilityMap = rows.length > 0 ? await getGittensorCredibilityMap() : null;
+  const rowRepoNames = rows.map((r) => r.repo_full_name);
+  const [credibilityIndex, issueDiscoveryDisabledRepos] = rows.length > 0
+    ? await Promise.all([
+        getGittensorCredibilityIndex(rowRepoNames),
+        getIssueDiscoveryDisabledReposAsyncServer(rowRepoNames),
+      ])
+    : [null, new Set<string>()];
   const totalPages = Math.max(1, Math.ceil(totals.count / pageSize));
 
   return NextResponse.json({
@@ -326,7 +332,9 @@ export async function GET(req: NextRequest) {
         labels: parseLabels(r.labels),
         merged_pr_count: linkedPrs.filter((pr) => pr.merged === 1).length,
         linked_prs: linkedPrs,
-        author_credibility: authorCredibilityForLogin(credibilityMap, r.author_login),
+        author_credibility: authorCredibilityForRepo(credibilityIndex, r.author_login, r.repo_full_name, {
+          issueDiscoveryDisabled: issueDiscoveryDisabledRepos.has(r.repo_full_name.toLowerCase()),
+        }),
       };
     }),
   });

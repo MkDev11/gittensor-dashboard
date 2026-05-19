@@ -25,6 +25,28 @@ export interface Sn74Repo {
   owner: string;
   name: string;
   weight: number;
+  /** Fraction of this repo's emission allocated to issue discovery. Null when unknown. */
+  issueDiscoveryShare: number | null;
+  /** Fraction of this repo's emission reserved for registered maintainers. Null when unknown. */
+  maintainerCut: number | null;
+  /** Fixed PR/issue base score override. Null when not configured or unknown. */
+  fixedBaseScore: number | null;
+  /** Open-PR count threshold before the excessive-PR penalty applies. Null when unknown. */
+  excessivePrPenaltyThreshold: number | null;
+  /** Open-issue count threshold before issue-discovery spam suppression applies. Null when unknown. */
+  openIssueSpamThreshold: number | null;
+  /** Minimum PR credibility required for PR rewards. Null when unknown. */
+  minCredibility: number | null;
+  /** Minimum issue credibility required for issue-discovery rewards. Null when unknown. */
+  minIssueCredibility: number | null;
+  /** Multiplier used when no configured scoring label matches. Null when unknown. */
+  defaultLabelMultiplier: number | null;
+  /** Whether scoring-label application is trusted for this repo. Null when unknown. */
+  trustedLabelPipeline: boolean | null;
+  /** Extra branch patterns accepted in addition to the repository default branch. Null when unknown. */
+  additionalAcceptableBranches: string[] | null;
+  /** Per-label score multipliers configured for this repo. Null when none or unknown. */
+  labelMultipliers: Record<string, number> | null;
   /** SN74's authoritative "this repo is inactive" timestamp. Absent on active repos. */
   inactiveAt: string | null;
 }
@@ -181,6 +203,7 @@ export interface Miner {
 export interface AuthorCredibility {
   credibility: number | null;
   issue_credibility: number | null;
+  issue_discovery_disabled?: boolean;
 }
 
 export interface MinersResponse {

@@ -16,13 +16,20 @@ const REMOTE_URL =
 const REFRESH_MS = 5 * 60 * 1000;
 
 // Upstream replaced `weight` with `emission_share` plus a set of scoring
-// knobs. We map `emission_share` → internal `weight` and ignore the rest
-// until the UI needs them.
+// knobs. We map `emission_share` → internal `weight` and surface the current
+// scoring policy so the explorer can explain how a repo's pool is configured.
 interface MasterRepoEntry {
   emission_share?: number;
   issue_discovery_share?: number;
+  maintainer_cut?: number;
   eligibility_mode?: boolean;
   fixed_base_score?: number;
+  eligibility?: {
+    min_credibility?: number;
+    min_issue_credibility?: number;
+    excessive_pr_penalty_base_threshold?: number;
+    open_issue_spam_base_threshold?: number;
+  };
   label_multipliers?: Record<string, number>;
   default_label_multiplier?: number;
   trusted_label_pipeline?: boolean;
@@ -33,10 +40,76 @@ interface MasterRepoEntry {
   inactive_at?: string | null;
 }
 
+type LiveRepoMeta = {
+  fullName: string;
+  weight: number;
+  issueDiscoveryShare: number | null;
+  maintainerCut: number | null;
+  fixedBaseScore: number | null;
+  excessivePrPenaltyThreshold: number | null;
+  openIssueSpamThreshold: number | null;
+  minCredibility: number | null;
+  minIssueCredibility: number | null;
+  defaultLabelMultiplier: number | null;
+  trustedLabelPipeline: boolean | null;
+  additionalAcceptableBranches: string[] | null;
+  labelMultipliers: Record<string, number> | null;
+  inactiveAt: string | null;
+};
+
+const DEFAULT_MIN_CREDIBILITY = 0.8;
+const DEFAULT_MIN_ISSUE_CREDIBILITY = 0.8;
+const DEFAULT_EXCESSIVE_PR_PENALTY_THRESHOLD = 2;
+const DEFAULT_OPEN_ISSUE_SPAM_THRESHOLD = 2;
+
 function entryWeight(ent: MasterRepoEntry): number {
   if (typeof ent.emission_share === 'number') return ent.emission_share;
   if (typeof ent.weight === 'number') return ent.weight;
   return 0;
+}
+
+function entryIssueDiscoveryShare(ent: MasterRepoEntry): number | null {
+  return typeof ent.issue_discovery_share === 'number' ? ent.issue_discovery_share : null;
+}
+
+function entryMaintainerCut(ent: MasterRepoEntry): number | null {
+  return typeof ent.maintainer_cut === 'number' ? ent.maintainer_cut : 0;
+}
+
+function entryFixedBaseScore(ent: MasterRepoEntry): number | null {
+  return typeof ent.fixed_base_score === 'number' ? ent.fixed_base_score : null;
+}
+
+function entryEligibilityNumber(
+  ent: MasterRepoEntry,
+  key: keyof NonNullable<MasterRepoEntry['eligibility']>,
+  fallback: number,
+): number | null {
+  const value = ent.eligibility?.[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return fallback;
+}
+
+function entryDefaultLabelMultiplier(ent: MasterRepoEntry): number | null {
+  return typeof ent.default_label_multiplier === 'number' ? ent.default_label_multiplier : 1;
+}
+
+function entryTrustedLabelPipeline(ent: MasterRepoEntry): boolean | null {
+  return typeof ent.trusted_label_pipeline === 'boolean' ? ent.trusted_label_pipeline : false;
+}
+
+function entryAdditionalAcceptableBranches(ent: MasterRepoEntry): string[] | null {
+  if (!Array.isArray(ent.additional_acceptable_branches)) return [];
+  return ent.additional_acceptable_branches.filter((branch): branch is string => typeof branch === 'string' && branch.trim() !== '');
+}
+
+function entryLabelMultipliers(ent: MasterRepoEntry): Record<string, number> | null {
+  if (!ent.label_multipliers) return null;
+  const entries = Object.entries(ent.label_multipliers).filter((entry): entry is [string, number] => {
+    const [label, multiplier] = entry;
+    return label.trim() !== '' && typeof multiplier === 'number' && Number.isFinite(multiplier);
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
 }
 
 function entryInactiveAt(ent: MasterRepoEntry): string | null {
@@ -61,7 +134,7 @@ const FETCH_TIMEOUT_MS = 10_000;
 // The DB persists weights across restarts, but `inactive_at` lives only here
 // (the `repo_weights` table doesn't carry it). Repopulated on every live
 // fetch; empty until the first fetch resolves.
-const liveByLc = new Map<string, { fullName: string; weight: number; inactiveAt: string | null }>();
+const liveByLc = new Map<string, LiveRepoMeta>();
 
 async function refreshLiveIfStale(): Promise<void> {
   // Honor the 5-minute window after a successful fetch, and a shorter
@@ -90,6 +163,25 @@ async function refreshLiveIfStale(): Promise<void> {
         liveByLc.set(fn.toLowerCase(), {
           fullName: fn,
           weight: entryWeight(ent),
+          issueDiscoveryShare: entryIssueDiscoveryShare(ent),
+          maintainerCut: entryMaintainerCut(ent),
+          fixedBaseScore: entryFixedBaseScore(ent),
+          excessivePrPenaltyThreshold: entryEligibilityNumber(
+            ent,
+            'excessive_pr_penalty_base_threshold',
+            DEFAULT_EXCESSIVE_PR_PENALTY_THRESHOLD,
+          ),
+          openIssueSpamThreshold: entryEligibilityNumber(
+            ent,
+            'open_issue_spam_base_threshold',
+            DEFAULT_OPEN_ISSUE_SPAM_THRESHOLD,
+          ),
+          minCredibility: entryEligibilityNumber(ent, 'min_credibility', DEFAULT_MIN_CREDIBILITY),
+          minIssueCredibility: entryEligibilityNumber(ent, 'min_issue_credibility', DEFAULT_MIN_ISSUE_CREDIBILITY),
+          defaultLabelMultiplier: entryDefaultLabelMultiplier(ent),
+          trustedLabelPipeline: entryTrustedLabelPipeline(ent),
+          additionalAcceptableBranches: entryAdditionalAcceptableBranches(ent),
+          labelMultipliers: entryLabelMultipliers(ent),
           inactiveAt: entryInactiveAt(ent),
         });
       }
@@ -160,7 +252,24 @@ function readAll(): Sn74Repo[] {
     if (lastFetchedAt === 0) {
       return rows.map((r) => {
         const [owner, name] = r.full_name.split('/');
-        return { fullName: r.full_name, owner, name, weight: r.weight, inactiveAt: null };
+        return {
+          fullName: r.full_name,
+          owner,
+          name,
+          weight: r.weight,
+          issueDiscoveryShare: null,
+          maintainerCut: null,
+          fixedBaseScore: null,
+          excessivePrPenaltyThreshold: null,
+          openIssueSpamThreshold: null,
+          minCredibility: null,
+          minIssueCredibility: null,
+          defaultLabelMultiplier: null,
+          trustedLabelPipeline: null,
+          additionalAcceptableBranches: null,
+          labelMultipliers: null,
+          inactiveAt: null,
+        };
       });
     }
     // Steady state: surface only rows present in the CURRENT live snapshot.
@@ -177,6 +286,17 @@ function readAll(): Sn74Repo[] {
           owner,
           name,
           weight: r.weight,
+          issueDiscoveryShare: live?.issueDiscoveryShare ?? null,
+          maintainerCut: live?.maintainerCut ?? null,
+          fixedBaseScore: live?.fixedBaseScore ?? null,
+          excessivePrPenaltyThreshold: live?.excessivePrPenaltyThreshold ?? null,
+          openIssueSpamThreshold: live?.openIssueSpamThreshold ?? null,
+          minCredibility: live?.minCredibility ?? null,
+          minIssueCredibility: live?.minIssueCredibility ?? null,
+          defaultLabelMultiplier: live?.defaultLabelMultiplier ?? null,
+          trustedLabelPipeline: live?.trustedLabelPipeline ?? null,
+          additionalAcceptableBranches: live?.additionalAcceptableBranches ?? null,
+          labelMultipliers: live?.labelMultipliers ?? null,
           inactiveAt: live?.inactiveAt ?? null,
         };
       });
@@ -208,4 +328,14 @@ export async function getLiveReposAsyncServer(): Promise<{
     source: lastFetchedAt > 0 ? 'live' : 'empty',
     fetchedAt: lastFetchedAt,
   };
+}
+
+export async function getIssueDiscoveryDisabledReposAsyncServer(repoFullNames: Iterable<string>): Promise<Set<string>> {
+  await refreshLiveIfStale();
+  const disabled = new Set<string>();
+  for (const repoFullName of repoFullNames) {
+    const live = liveByLc.get(repoFullName.toLowerCase());
+    if (live?.issueDiscoveryShare === 0) disabled.add(repoFullName.toLowerCase());
+  }
+  return disabled;
 }

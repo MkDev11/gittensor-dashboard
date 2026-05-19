@@ -28,10 +28,14 @@ export default function AuthorCredibilityNote({
     : credibility.credibility ?? credibility.issue_credibility;
   if (value === null) return null;
   const color = tone(value);
+  const issueDiscoveryDisabled = variant === 'issues' && credibility.issue_discovery_disabled;
+  const title = issueDiscoveryDisabled
+    ? `Issue discovery is disabled for this repo · PR credibility ${percent(credibility.credibility)} · Issue credibility ${percent(credibility.issue_credibility)}`
+    : `PR credibility ${percent(credibility.credibility)} · Issue credibility ${percent(credibility.issue_credibility)}`;
 
   return (
     <span
-      title={`PR credibility ${percent(credibility.credibility)} · Issue credibility ${percent(credibility.issue_credibility)}`}
+      title={title}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -49,6 +53,8 @@ export default function AuthorCredibilityNote({
         fontSize: '10px',
         fontWeight: 700,
         lineHeight: '18px',
+        textDecoration: issueDiscoveryDisabled ? 'line-through' : 'none',
+        textDecorationThickness: issueDiscoveryDisabled ? '1.5px' : undefined,
         whiteSpace: 'nowrap',
         flexShrink: 0,
       }}

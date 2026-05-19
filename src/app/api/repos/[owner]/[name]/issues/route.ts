@@ -3,7 +3,8 @@ import { getDb, getReadDb, IssueRow } from '@/lib/db';
 import { refreshIssuesIfStale, backfillPrIssueLinksIfNeeded } from '@/lib/refresh';
 import { buildEtag, etagNotModified, withEtagHeaders } from '@/lib/etag';
 import { getSessionFromCookies } from '@/lib/auth';
-import { authorCredibilityForLogin, getGittensorCredibilityMap } from '@/lib/gittensor-credibility';
+import { authorCredibilityForRepo, getGittensorCredibilityIndex } from '@/lib/gittensor-credibility';
+import { getIssueDiscoveryDisabledReposAsyncServer } from '@/lib/repos-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -379,7 +380,13 @@ export async function GET(
     for (const r of rows2) user_validations[r.issue_number] = r.status;
   }
 
-  const credibilityMap = rows.length > 0 ? await getGittensorCredibilityMap() : null;
+  const [credibilityIndex, issueDiscoveryDisabledRepos] = rows.length > 0
+    ? await Promise.all([
+        getGittensorCredibilityIndex([full]),
+        getIssueDiscoveryDisabledReposAsyncServer([full]),
+      ])
+    : [null, new Set<string>()];
+  const issueDiscoveryDisabled = issueDiscoveryDisabledRepos.has(full.toLowerCase());
 
   return NextResponse.json(
     {
@@ -392,7 +399,9 @@ export async function GET(
       issues: rows.map((r) => ({
         ...r,
         labels: r.labels ? JSON.parse(r.labels) : [],
-        author_credibility: authorCredibilityForLogin(credibilityMap, r.author_login),
+        author_credibility: authorCredibilityForRepo(credibilityIndex, r.author_login, r.repo_full_name, {
+          issueDiscoveryDisabled,
+        }),
       })),
       linked_prs_by_issue,
       page_author_stats,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getReadDb, PullRow } from '@/lib/db';
-import { getLiveReposAsyncServer } from '@/lib/repos-server';
-import { authorCredibilityForLogin, getGittensorCredibilityMap } from '@/lib/gittensor-credibility';
+import { getIssueDiscoveryDisabledReposAsyncServer, getLiveReposAsyncServer } from '@/lib/repos-server';
+import { authorCredibilityForRepo, getGittensorCredibilityIndex } from '@/lib/gittensor-credibility';
 import type { AuthorCredibility } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
@@ -288,15 +288,22 @@ export async function GET(req: NextRequest) {
     )
     .all(...filteredWhere.args, pageSize, offset) as PullRow[];
 
-  const [scoreMap, credibilityMap] = rows.length > 0
-    ? await Promise.all([getGittensorScoreMap(), getGittensorCredibilityMap()])
-    : [null, null];
+  const rowRepoNames = rows.map((r) => r.repo_full_name);
+  const [scoreMap, credibilityIndex, issueDiscoveryDisabledRepos] = rows.length > 0
+    ? await Promise.all([
+        getGittensorScoreMap(),
+        getGittensorCredibilityIndex(rowRepoNames),
+        getIssueDiscoveryDisabledReposAsyncServer(rowRepoNames),
+      ])
+    : [null, null, new Set<string>()];
 
   const totalPages = Math.max(1, Math.ceil(totals.count / pageSize));
   const pulls: AggPullRow[] = rows.map((r) => ({
     ...r,
     score: scoreMap?.get(scoreKey(r.repo_full_name, r.number)) ?? null,
-    author_credibility: authorCredibilityForLogin(credibilityMap, r.author_login),
+    author_credibility: authorCredibilityForRepo(credibilityIndex, r.author_login, r.repo_full_name, {
+      issueDiscoveryDisabled: issueDiscoveryDisabledRepos.has(r.repo_full_name.toLowerCase()),
+    }),
   }));
 
   return NextResponse.json({
