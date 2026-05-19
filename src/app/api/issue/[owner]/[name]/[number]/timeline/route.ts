@@ -19,6 +19,9 @@ const NO_STORE_HEADERS = {
   Expires: '0',
 };
 
+const TIMELINE_CACHE_TTL_MS = 2 * 60_000;
+const TIMELINE_CACHE_MAX = 250;
+
 type TimelineSubject = {
   number: number | null;
   title: string | null;
@@ -57,6 +60,54 @@ type TimelineEventDto = {
 };
 
 type RawTimelineEvent = Record<string, unknown>;
+type TimelineKind = 'issue' | 'pull';
+type TimelinePayload = {
+  repo: string;
+  issue_number: number;
+  count: number;
+  events: TimelineEventDto[];
+  source: 'github';
+};
+
+const timelineCache = new Map<string, { expiresAt: number; payload: TimelinePayload }>();
+const inFlightTimelineFetches = new Map<string, Promise<TimelinePayload>>();
+
+function timelineCacheKey(owner: string, repo: string, issueNumber: number, kind: TimelineKind): string {
+  return `${kind}:${owner.toLowerCase()}/${repo.toLowerCase()}#${issueNumber}`;
+}
+
+function pruneTimelineCache(now = Date.now()) {
+  for (const [key, entry] of timelineCache) {
+    if (entry.expiresAt <= now) timelineCache.delete(key);
+  }
+  while (timelineCache.size > TIMELINE_CACHE_MAX) {
+    const oldest = timelineCache.keys().next().value as string | undefined;
+    if (!oldest) break;
+    timelineCache.delete(oldest);
+  }
+}
+
+async function cachedTimelinePayload(key: string, load: () => Promise<TimelinePayload>): Promise<TimelinePayload> {
+  const now = Date.now();
+  const cached = timelineCache.get(key);
+  if (cached && cached.expiresAt > now) return cached.payload;
+
+  const inFlight = inFlightTimelineFetches.get(key);
+  if (inFlight) return inFlight;
+
+  const promise = load()
+    .then((payload) => {
+      timelineCache.delete(key);
+      timelineCache.set(key, { expiresAt: Date.now() + TIMELINE_CACHE_TTL_MS, payload });
+      pruneTimelineCache();
+      return payload;
+    })
+    .finally(() => {
+      inFlightTimelineFetches.delete(key);
+    });
+  inFlightTimelineFetches.set(key, promise);
+  return promise;
+}
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -647,6 +698,111 @@ async function graphqlReferenceEvents(
   return out;
 }
 
+async function loadTimelinePayload(
+  owner: string,
+  name: string,
+  issueNumber: number,
+  itemKind: TimelineKind,
+): Promise<TimelinePayload> {
+  const repoFullName = `${owner}/${name}`;
+  const events = await withRotation(async (octokit) => {
+    const out: TimelineEventDto[] = [];
+    const perPage = 100;
+    for (let page = 1; page <= 5; page += 1) {
+      const resp = await octokit.issues.listEventsForTimeline({
+        owner,
+        repo: name,
+        issue_number: issueNumber,
+        per_page: perPage,
+        page,
+        headers: GITHUB_HEADERS,
+      });
+      const items = resp.data as unknown as RawTimelineEvent[];
+      out.push(...items.map((raw, index) => normalizeTimelineEvent(raw, index, repoFullName, issueNumber)));
+      if (items.length < perPage) break;
+    }
+
+    // Timeline responses can vary by repository permissions/API shape. The
+    // comments endpoint is the authoritative backstop for conversation
+    // cards, so merge it in and dedupe by GitHub's comment id.
+    for (let page = 1; page <= 5; page += 1) {
+      const resp = await octokit.issues.listComments({
+        owner,
+        repo: name,
+        issue_number: issueNumber,
+        per_page: perPage,
+        page,
+        headers: GITHUB_HEADERS,
+      });
+      const items = resp.data as unknown as RawTimelineEvent[];
+      out.push(...items.map((raw, index) => normalizeTimelineEvent({ ...raw, event: 'commented' }, index, repoFullName, issueNumber)));
+      if (items.length < perPage) break;
+    }
+
+    if (itemKind === 'issue') {
+      try {
+        out.push(...await graphqlReferenceEvents(octokit, owner, name, issueNumber));
+      } catch (err) {
+        console.warn(
+          `[timeline] GraphQL cross-reference fallback failed for ${repoFullName}#${issueNumber}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        // REST timeline is the primary source. GraphQL is an exact
+        // cross-reference completeness fallback, so failure should not hide
+        // the rest of the issue conversation.
+      }
+
+      try {
+        out.push(...await searchReferenceEvents(octokit, owner, name, issueNumber));
+      } catch (err) {
+        console.warn(
+          `[timeline] Search cross-reference fallback failed for ${repoFullName}#${issueNumber}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        // Search is only a completeness fallback for GitHub cross-reference
+        // rows that occasionally differ between timeline API shapes.
+      }
+
+      out.push(...linkedPullReferenceEvents(repoFullName, issueNumber));
+    }
+
+    const merged = mergeTimelineEvents(out);
+    const commitEvents = merged.filter((event) =>
+      (event.event === 'referenced' || event.event === 'committed' || event.event === 'merged') && event.commit_id
+    );
+    for (const event of commitEvents) {
+      try {
+        const resp = await octokit.repos.getCommit({
+          owner,
+          repo: name,
+          ref: event.commit_id as string,
+          headers: GITHUB_HEADERS,
+        });
+        event.actor_avatar_url = event.actor_avatar_url ?? resp.data.author?.avatar_url ?? null;
+        event.actor_html_url = event.actor_html_url ?? resp.data.author?.html_url ?? null;
+        event.commit_message = event.commit_message ?? (resp.data.commit.message.split('\n')[0] || null);
+        event.commit_html_url = resp.data.html_url ?? null;
+        event.commit_verified = resp.data.commit.verification?.verified ?? null;
+      } catch {
+        // Keep the timeline usable with the SHA-only event if commit lookup
+        // fails due to permissions, pruning, or transient GitHub errors.
+      }
+    }
+
+    return merged;
+  });
+
+  return {
+    repo: repoFullName,
+    issue_number: issueNumber,
+    count: events.length,
+    events,
+    source: 'github',
+  };
+}
+
 export async function GET(
   req: NextRequest,
   ctx: { params: Promise<{ owner: string; name: string; number: string }> },
@@ -658,107 +814,12 @@ export async function GET(
   }
 
   try {
-    const itemKind = new URL(req.url).searchParams.get('kind') === 'pull' ? 'pull' : 'issue';
-    const repoFullName = `${params.owner}/${params.name}`;
-    const events = await withRotation(async (octokit) => {
-      const out: TimelineEventDto[] = [];
-      const perPage = 100;
-      for (let page = 1; page <= 5; page += 1) {
-        const resp = await octokit.issues.listEventsForTimeline({
-          owner: params.owner,
-          repo: params.name,
-          issue_number: issueNumber,
-          per_page: perPage,
-          page,
-          headers: GITHUB_HEADERS,
-        });
-        const items = resp.data as unknown as RawTimelineEvent[];
-        out.push(...items.map((raw, index) => normalizeTimelineEvent(raw, index, repoFullName, issueNumber)));
-        if (items.length < perPage) break;
-      }
-
-      // Timeline responses can vary by repository permissions/API shape. The
-      // comments endpoint is the authoritative backstop for conversation
-      // cards, so merge it in and dedupe by GitHub's comment id.
-      for (let page = 1; page <= 5; page += 1) {
-        const resp = await octokit.issues.listComments({
-          owner: params.owner,
-          repo: params.name,
-          issue_number: issueNumber,
-          per_page: perPage,
-          page,
-          headers: GITHUB_HEADERS,
-        });
-        const items = resp.data as unknown as RawTimelineEvent[];
-        out.push(...items.map((raw, index) => normalizeTimelineEvent({ ...raw, event: 'commented' }, index, repoFullName, issueNumber)));
-        if (items.length < perPage) break;
-      }
-
-      if (itemKind === 'issue') {
-        try {
-          out.push(...await graphqlReferenceEvents(octokit, params.owner, params.name, issueNumber));
-        } catch (err) {
-          console.warn(
-            `[timeline] GraphQL cross-reference fallback failed for ${repoFullName}#${issueNumber}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-          // REST timeline is the primary source. GraphQL is an exact
-          // cross-reference completeness fallback, so failure should not hide
-          // the rest of the issue conversation.
-        }
-
-        try {
-          out.push(...await searchReferenceEvents(octokit, params.owner, params.name, issueNumber));
-        } catch (err) {
-          console.warn(
-            `[timeline] Search cross-reference fallback failed for ${repoFullName}#${issueNumber}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-          // Search is only a completeness fallback for GitHub cross-reference
-          // rows that occasionally differ between timeline API shapes.
-        }
-
-        out.push(...linkedPullReferenceEvents(repoFullName, issueNumber));
-      }
-
-      const merged = mergeTimelineEvents(out);
-      const commitEvents = merged.filter((event) =>
-        (event.event === 'referenced' || event.event === 'committed' || event.event === 'merged') && event.commit_id
-      );
-      for (const event of commitEvents) {
-        try {
-          const resp = await octokit.repos.getCommit({
-            owner: params.owner,
-            repo: params.name,
-            ref: event.commit_id as string,
-            headers: GITHUB_HEADERS,
-          });
-          event.actor_avatar_url = event.actor_avatar_url ?? resp.data.author?.avatar_url ?? null;
-          event.actor_html_url = event.actor_html_url ?? resp.data.author?.html_url ?? null;
-          event.commit_message = event.commit_message ?? (resp.data.commit.message.split('\n')[0] || null);
-          event.commit_html_url = resp.data.html_url ?? null;
-          event.commit_verified = resp.data.commit.verification?.verified ?? null;
-        } catch {
-          // Keep the timeline usable with the SHA-only event if commit lookup
-          // fails due to permissions, pruning, or transient GitHub errors.
-        }
-      }
-
-      return merged;
-    });
-
-    return NextResponse.json(
-      {
-        repo: `${params.owner}/${params.name}`,
-        issue_number: issueNumber,
-        count: events.length,
-        events,
-        source: 'github',
-      },
-      { headers: NO_STORE_HEADERS },
+    const itemKind: TimelineKind = new URL(req.url).searchParams.get('kind') === 'pull' ? 'pull' : 'issue';
+    const key = timelineCacheKey(params.owner, params.name, issueNumber, itemKind);
+    const payload = await cachedTimelinePayload(key, () =>
+      loadTimelinePayload(params.owner, params.name, issueNumber, itemKind),
     );
+    return NextResponse.json(payload, { headers: NO_STORE_HEADERS });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: msg }, { status: 502, headers: NO_STORE_HEADERS });

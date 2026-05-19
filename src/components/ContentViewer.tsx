@@ -257,9 +257,8 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
     setTimelineEvents([]);
     setTimelineLoaded(false);
     setTimelineError(null);
-    fetch(`/api/issue/${activeTimelineTarget.owner}/${activeTimelineTarget.name}/${activeTimelineTarget.number}/timeline?kind=${activeTimelineTarget.kind}&v=${TIMELINE_FETCH_VERSION}&t=${Date.now()}`, {
+    fetch(`/api/issue/${activeTimelineTarget.owner}/${activeTimelineTarget.name}/${activeTimelineTarget.number}/timeline?kind=${activeTimelineTarget.kind}&v=${TIMELINE_FETCH_VERSION}`, {
       signal: ctrl.signal,
-      cache: 'no-store',
     })
       .then(async (r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
