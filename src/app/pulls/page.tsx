@@ -514,7 +514,7 @@ function PullTableRow({
       sx={{
         borderBottom: '1px solid',
         borderColor: 'border.muted',
-        bg: expanded ? 'accent.muted' : mine ? 'rgba(242, 201, 76, 0.08)' : 'transparent',
+        bg: expanded ? 'accent.muted' : mine ? 'var(--attention-subtle)' : 'transparent',
         borderLeft: '3px solid',
         borderLeftColor: mine ? 'var(--attention-emphasis)' : 'transparent',
         cursor: 'pointer',

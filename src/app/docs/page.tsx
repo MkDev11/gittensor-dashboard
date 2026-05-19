@@ -323,7 +323,7 @@ export default function DocsPage() {
                 <Li><strong>Issue / PR content display</strong>: modal / side panel / inline accordion</Li>
                 <Li><strong>Render markdown</strong>: on/off for issue & PR bodies</Li>
                 <Li><strong>Default issue state filter</strong> and <strong>repo sort order</strong></Li>
-                <Li><strong>Page size</strong>: 10/25/50/100/All for paginated tables</Li>
+                <Li><strong>Page size</strong>: 10/25/50/100 for paginated tables</Li>
                 <Li><strong>Notifications</strong>: enable/disable + UI tick interval</Li>
               </Ul>
             </Article>

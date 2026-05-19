@@ -25,7 +25,7 @@ import {
 } from '@primer/octicons-react';
 import type { RepoEntry } from '@/lib/repos';
 import { weightBand } from '@/lib/repos';
-import { useTrackedRepos } from '@/lib/tracked-repos';
+import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import { formatRelativeTime, isRecent } from '@/lib/format';
 
 export interface RepoStats {
@@ -79,7 +79,7 @@ export default function ReposTable({
     const q = query.trim().toLowerCase();
     let list = repos.filter((r) => !q || r.fullName.toLowerCase().includes(q));
     list = list.filter((r) => {
-      if (trackedOnly && !tracked.has(r.fullName)) return false;
+      if (trackedOnly && !repoIsTracked(tracked, r.fullName)) return false;
       if (band === 'all') return true;
       if (band === 'flagship') return r.weight >= 0.5;
       if (band === 'high') return r.weight >= 0.3 && r.weight < 0.5;
@@ -208,7 +208,7 @@ export default function ReposTable({
               <RepoRow
                 key={repo.fullName}
                 repo={repo}
-                tracked={tracked.has(repo.fullName)}
+                tracked={repoIsTracked(tracked, repo.fullName)}
                 onToggleTrack={() => toggleTrack(repo.fullName)}
                 isCustom={userRepoNames?.has(repo.fullName) ?? false}
                 stats={stats?.get(repo.fullName)}

@@ -4,13 +4,29 @@ import { useEffect, useState, useCallback } from 'react';
 
 const STORAGE_KEY = 'gittensor.trackedRepos';
 
+function repoKey(fullName: string): string {
+  return fullName.trim().toLowerCase();
+}
+
+function dedupe(names: string[]): Set<string> {
+  const byKey = new Map<string, string>();
+  for (const raw of names) {
+    if (typeof raw !== 'string') continue;
+    const name = raw.trim();
+    const key = repoKey(name);
+    if (!key || byKey.has(key)) continue;
+    byKey.set(key, name);
+  }
+  return new Set(byKey.values());
+}
+
 function readStorage(): Set<string> {
   if (typeof window === 'undefined') return new Set();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return new Set();
     const arr = JSON.parse(raw);
-    return new Set(Array.isArray(arr) ? arr : []);
+    return dedupe(Array.isArray(arr) ? arr : []);
   } catch {
     return new Set();
   }
@@ -37,19 +53,27 @@ export function useTrackedRepos() {
   }, []);
 
   const toggle = useCallback((fullName: string) => {
-    const next = new Set(readStorage());
-    if (next.has(fullName)) next.delete(fullName);
-    else next.add(fullName);
+    const key = repoKey(fullName);
+    if (!key) return;
+    const next = readStorage();
+    const existing = Array.from(next).find((name) => repoKey(name) === key);
+    if (existing) next.delete(existing);
+    else next.add(fullName.trim());
     writeStorage(next);
   }, []);
 
   const clear = useCallback(() => writeStorage(new Set()), []);
 
-  const setMany = useCallback((names: string[]) => writeStorage(new Set(names)), []);
+  const setMany = useCallback((names: string[]) => writeStorage(dedupe(names)), []);
 
   return { tracked, toggle, clear, setMany };
 }
 
 export function isTracked(set: Set<string>, fullName: string): boolean {
-  return set.has(fullName);
+  const key = repoKey(fullName);
+  if (!key) return false;
+  for (const name of set) {
+    if (repoKey(name) === key) return true;
+  }
+  return false;
 }

@@ -69,7 +69,7 @@ export default function TopProgressBar() {
           background:
             'linear-gradient(90deg, var(--accent-emphasis) 0%, var(--accent-fg) 50%, var(--accent-emphasis) 100%)',
           backgroundSize: '200% 100%',
-          boxShadow: '0 0 10px rgba(94, 106, 210, 0.55), 0 0 4px rgba(94, 106, 210, 0.4)',
+          boxShadow: '0 0 10px var(--accent-glow), 0 0 4px var(--accent-glow)',
           borderTopRightRadius: 2,
           borderBottomRightRadius: 2,
           transition: 'width 200ms ease',

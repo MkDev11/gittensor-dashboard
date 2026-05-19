@@ -8,6 +8,7 @@ import {
   GhComment,
   GhIssue,
   GhPull,
+  withRotation,
 } from './github';
 import { extractLinkedIssues } from './pr-linking';
 
@@ -201,10 +202,47 @@ const LINKED_PRS_STALE_MS = 6 * 60 * 60_000;
 const lastLinkedPrsFetch = new Map<string, number>();
 const inFlightLinkedPrs = new Map<string, Promise<void>>();
 
+async function hydrateMissingLinkedPulls(owner: string, repo: string, prNums: number[]): Promise<void> {
+  if (prNums.length === 0) return;
+  const fullName = `${owner}/${repo}`;
+  const placeholders = prNums.map(() => '?').join(',');
+  const existing = getDb()
+    .prepare(`SELECT number FROM pulls WHERE repo_full_name = ? AND number IN (${placeholders})`)
+    .all(fullName, ...prNums) as Array<{ number: number }>;
+  const existingNums = new Set(existing.map((row) => row.number));
+  const missing = prNums.filter((prNum) => !existingNums.has(prNum));
+  for (const prNum of missing) {
+    try {
+      const data = await withRotation(async (octokit) => {
+        const resp = await octokit.pulls.get({ owner, repo, pull_number: prNum });
+        return resp.data;
+      });
+      upsertPull(fullName, {
+        number: data.number,
+        title: data.title,
+        body: data.body ?? null,
+        state: data.state,
+        draft: Boolean(data.draft),
+        user: data.user ? { login: data.user.login } : null,
+        author_association: data.author_association ?? 'NONE',
+        created_at: data.created_at,
+        updated_at: data.updated_at,
+        closed_at: data.closed_at,
+        merged_at: data.merged_at,
+        html_url: data.html_url,
+      });
+    } catch {
+      // The link row is still useful; a later repo sync or detail fetch can
+      // fill the PR metadata.
+    }
+  }
+}
+
 /**
  * Fill in any UI-linked / parenthetical-referenced PRs for a single issue
- * that the body-regex extractor would otherwise miss. Idempotent and rate-
- * limited per `(repo, issueNumber)`. Fire-and-forget at call sites.
+ * that the body-regex extractor would otherwise miss. Idempotent, rate-
+ * limited per `(repo, issueNumber)`, and safe to await on responses that
+ * depend on fresh link rows.
  */
 export async function refreshIssueLinkedPrsIfStale(
   owner: string,
@@ -228,6 +266,7 @@ export async function refreshIssueLinkedPrsIfStale(
         for (const prNum of prNums) insert.run(fullName, prNum, issueNumber);
       });
       tx();
+      await hydrateMissingLinkedPulls(owner, repo, prNums);
       lastLinkedPrsFetch.set(key, Date.now());
     } catch {
       // Don't poison the throttle on transient errors — a future call will

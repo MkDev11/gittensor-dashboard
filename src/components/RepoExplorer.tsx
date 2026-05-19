@@ -2,7 +2,7 @@
 
 import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { keepPreviousData, useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   TextInput,
@@ -23,7 +23,6 @@ import {
   SkipIcon,
   GitPullRequestIcon,
   PersonIcon,
-  MarkGithubIcon,
   XIcon,
   EyeIcon,
   ChevronRightIcon,
@@ -34,7 +33,7 @@ import {
   CheckIcon,
 } from '@primer/octicons-react';
 import { ALL_REPOS, type RepoEntry } from '@/lib/repos';
-import { useTrackedRepos } from '@/lib/tracked-repos';
+import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import { IssueStatusBadge, PullStatusBadge } from '@/components/StatusBadge';
 import { formatRelativeTime, isRecent } from '@/lib/format';
 import { useMinerLogin } from '@/lib/use-miner';
@@ -43,6 +42,7 @@ import ContentViewer from '@/components/ContentViewer';
 import { IssueLabels } from '@/components/IssueLabels';
 import SearchInput from '@/components/SearchInput';
 import AuthorFilter from '@/components/AuthorFilter';
+import AuthorSidebar from '@/components/AuthorSidebar';
 import { useSettings } from '@/lib/settings';
 import { useToast } from '@/lib/toast';
 import { pullStatus } from '@/lib/api-types';
@@ -200,11 +200,6 @@ export default function RepoExplorer() {
   const [expandedIssue, setExpandedIssue] = useState<number | null>(null);
   const [expandedPull, setExpandedPull] = useState<number | null>(null);
   const { settings, update, hydrated: settingsReady } = useSettings();
-  // pageSize === 0 means the user picked "All (no pagination)" → infinite-scroll
-  // mode. Hoisted up here so the URL-state effects below can read it.
-  const issuesAllMode = settings.pageSize === 0;
-  const pullsAllMode = settings.pageSize === 0;
-  const INFINITE_CHUNK = 100;
   const me = useMinerLogin();
 
   // App-level baseline for per-repo new-content badges in the left rail.
@@ -379,17 +374,16 @@ export default function RepoExplorer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Persist current page numbers in the URL so reload restores them. In
-  // infinite-scroll mode the page concept doesn't apply, so we strip the param.
+  // Persist current page numbers in the URL so reload restores them.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const url = new URL(window.location.href);
-    if (issuesAllMode || issuesPage <= 1) url.searchParams.delete('ipage');
+    if (issuesPage <= 1) url.searchParams.delete('ipage');
     else url.searchParams.set('ipage', String(issuesPage));
-    if (pullsAllMode || pullsPage <= 1) url.searchParams.delete('ppage');
+    if (pullsPage <= 1) url.searchParams.delete('ppage');
     else url.searchParams.set('ppage', String(pullsPage));
     window.history.replaceState({}, '', url.toString());
-  }, [issuesPage, pullsPage, issuesAllMode, pullsAllMode]);
+  }, [issuesPage, pullsPage]);
 
   useEffect(() => {
     if (!authorTarget) {
@@ -595,12 +589,12 @@ export default function RepoExplorer() {
   const filteredRepos = useMemo(() => {
     const q = repoQuery.trim().toLowerCase();
     let list = allRepos.filter((r) => !q || r.fullName.toLowerCase().includes(q));
-    if (trackedOnly) list = list.filter((r) => tracked.has(r.fullName));
+    if (trackedOnly) list = list.filter((r) => repoIsTracked(tracked, r.fullName));
     return [...list].sort((a, b) => {
       // Tracked (starred) repos always float to the top so the user's pinned
       // selection is one click away regardless of the chosen secondary sort.
-      const at = tracked.has(a.fullName) ? 1 : 0;
-      const bt = tracked.has(b.fullName) ? 1 : 0;
+      const at = repoIsTracked(tracked, a.fullName) ? 1 : 0;
+      const bt = repoIsTracked(tracked, b.fullName) ? 1 : 0;
       if (at !== bt) return bt - at;
       // Inactive repos sink to the bottom of each tracked/untracked group.
       const ai = a.inactiveAt != null ? 1 : 0;
@@ -611,8 +605,7 @@ export default function RepoExplorer() {
     });
   }, [allRepos, repoQuery, repoSort, trackedOnly, tracked]);
 
-  // issuesAllMode + INFINITE_CHUNK are hoisted to the top of the component.
-  const issuesPageSize = issuesAllMode ? INFINITE_CHUNK : (settings.pageSize > 0 ? settings.pageSize : 50);
+  const issuesPageSize = settings.pageSize > 0 ? settings.pageSize : 50;
   // `selected.fullName === ''` is the `EMPTY_REPO` placeholder we hold before
   // `allRepos` arrives. Gating queries on this prevents firing `/api/repos//…`
   // requests with empty owner/name path segments — the server would just
@@ -639,7 +632,6 @@ export default function RepoExplorer() {
     return `/api/repos/${selected.owner}/${selected.name}/issues?${sp.toString()}`;
   };
 
-  // Paged-mode query — fires when settings.pageSize is a finite number.
   const issuesPaged = useQuery<IssuesResponse>({
     queryKey: [
       'issues',
@@ -662,49 +654,11 @@ export default function RepoExplorer() {
     staleTime: 10000,
     placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
-    enabled: queriesReady && shouldLoadIssues && !issuesAllMode,
+    enabled: queriesReady && shouldLoadIssues,
   });
 
-  // All-mode infinite query — appends rows as the user scrolls past the
-  // sentinel near the table bottom. queryKey omits page; useInfiniteQuery
-  // tracks pages internally.
-  const issuesInfinite = useInfiniteQuery<IssuesResponse, Error, { pages: IssuesResponse[]; pageParams: number[] }, readonly unknown[], number>({
-    queryKey: [
-      'issues-inf',
-      selected.owner,
-      selected.name,
-      debouncedIssueQuery,
-      issueState,
-      issueAuthor,
-      issueSortKey,
-      issueSortDir,
-    ],
-    queryFn: async ({ pageParam, signal }) => {
-      const r = await fetch(buildIssuesUrl(pageParam, INFINITE_CHUNK), { signal });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const loaded = allPages.reduce((acc, p) => acc + p.issues.length, 0);
-      return loaded < lastPage.count ? allPages.length + 1 : undefined;
-    },
-    refetchInterval: 60000,
-    staleTime: 10000,
-    refetchOnWindowFocus: false,
-    enabled: queriesReady && shouldLoadIssues && issuesAllMode,
-  });
-
-  // Unified shape so the rest of the component doesn't care which branch is active.
-  const issuesData: IssuesResponse | undefined = issuesAllMode
-    ? (issuesInfinite.data
-        ? {
-            ...issuesInfinite.data.pages[0],
-            issues: issuesInfinite.data.pages.flatMap((p) => p.issues),
-          }
-        : undefined)
-    : issuesPaged.data;
-  const issuesLoading = issuesAllMode ? issuesInfinite.isLoading : issuesPaged.isLoading;
+  const issuesData = issuesPaged.data;
+  const issuesLoading = issuesPaged.isLoading;
 
   // Repo-wide author list + per-author counts. Refresh slowly because these
   // change much less often than the listing itself.
@@ -956,7 +910,7 @@ export default function RepoExplorer() {
     setStickyBadges({});
   };
 
-  const pullsPageSize = pullsAllMode ? INFINITE_CHUNK : (settings.pageSize > 0 ? settings.pageSize : 50);
+  const pullsPageSize = settings.pageSize > 0 ? settings.pageSize : 50;
   const pullsState = prMineOnly ? 'mine' : prState;
   const shouldLoadPulls = tab === 'pulls';
 
@@ -996,46 +950,11 @@ export default function RepoExplorer() {
     staleTime: 10000,
     placeholderData: keepPreviousData,
     refetchOnWindowFocus: false,
-    enabled: queriesReady && !pullsAllMode && shouldLoadPulls,
+    enabled: queriesReady && shouldLoadPulls,
   });
 
-  const pullsInfinite = useInfiniteQuery<PullsResponse, Error, { pages: PullsResponse[]; pageParams: number[] }, readonly unknown[], number>({
-    queryKey: [
-      'pulls-inf',
-      selected.owner,
-      selected.name,
-      debouncedPrQuery,
-      pullsState,
-      prAuthor,
-      pullSortKey,
-      pullSortDir,
-      me,
-    ],
-    queryFn: async ({ pageParam, signal }) => {
-      const r = await fetch(buildPullsUrl(pageParam, INFINITE_CHUNK), { signal });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    },
-    initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const loaded = allPages.reduce((acc, p) => acc + p.pulls.length, 0);
-      return loaded < lastPage.count ? allPages.length + 1 : undefined;
-    },
-    refetchInterval: 60000,
-    staleTime: 10000,
-    refetchOnWindowFocus: false,
-    enabled: queriesReady && pullsAllMode && shouldLoadPulls,
-  });
-
-  const pullsData: PullsResponse | undefined = pullsAllMode
-    ? (pullsInfinite.data
-        ? {
-            ...pullsInfinite.data.pages[0],
-            pulls: pullsInfinite.data.pages.flatMap((p) => p.pulls),
-          }
-        : undefined)
-    : pullsPaged.data;
-  const pullsLoading = pullsAllMode ? pullsInfinite.isLoading : pullsPaged.isLoading;
+  const pullsData = pullsPaged.data;
+  const pullsLoading = pullsPaged.isLoading;
 
   const openLinkedPullRequest = useCallback(
     async (prNumber: number) => {
@@ -1091,52 +1010,6 @@ export default function RepoExplorer() {
     },
     [settings.contentDisplay],
   );
-
-  // Infinite-scroll sentinels. When the sentinel intersects the viewport
-  // (with a 200px buffer so we kick the next fetch slightly before the user
-  // hits the bottom), we fetch the next chunk. Inactive in paged mode.
-  const issuesSentinelRef = useRef<HTMLDivElement>(null);
-  const pullsSentinelRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!issuesAllMode) return;
-    const node = issuesSentinelRef.current;
-    if (!node) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (
-          entries[0]?.isIntersecting &&
-          issuesInfinite.hasNextPage &&
-          !issuesInfinite.isFetchingNextPage
-        ) {
-          void issuesInfinite.fetchNextPage();
-        }
-      },
-      { rootMargin: '200px' },
-    );
-    obs.observe(node);
-    return () => obs.disconnect();
-  }, [issuesAllMode, issuesInfinite.hasNextPage, issuesInfinite.isFetchingNextPage, issuesInfinite.fetchNextPage]);
-
-  useEffect(() => {
-    if (!pullsAllMode) return;
-    const node = pullsSentinelRef.current;
-    if (!node) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        if (
-          entries[0]?.isIntersecting &&
-          pullsInfinite.hasNextPage &&
-          !pullsInfinite.isFetchingNextPage
-        ) {
-          void pullsInfinite.fetchNextPage();
-        }
-      },
-      { rootMargin: '200px' },
-    );
-    obs.observe(node);
-    return () => obs.disconnect();
-  }, [pullsAllMode, pullsInfinite.hasNextPage, pullsInfinite.isFetchingNextPage, pullsInfinite.fetchNextPage]);
 
   const { data: pullsMeta, isFetching: pullsMetaFetching } = useQuery<PullsMetaResponse>({
     queryKey: ['pulls-meta', selected.owner, selected.name, me, prAuthorsRequested],
@@ -1270,6 +1143,14 @@ export default function RepoExplorer() {
   const pagedIssues = filteredIssues;
   const pagedPulls = filteredPulls;
 
+  useEffect(() => {
+    if (issuesData && issuesPage > issueTotalPages) setIssuesPage(issueTotalPages);
+  }, [issuesData, issuesPage, issueTotalPages]);
+
+  useEffect(() => {
+    if (pullsData && pullsPage > pullTotalPages) setPullsPage(pullTotalPages);
+  }, [pullsData, pullsPage, pullTotalPages]);
+
   const renderedRepos = hydrated ? filteredRepos : [];
   const renderedRepoCount = hydrated ? filteredRepos.length : 0;
   const renderedAllRepoCount = hydrated ? allRepos.length : 0;
@@ -1383,7 +1264,7 @@ export default function RepoExplorer() {
         <Box sx={{ flex: 1, overflowY: 'auto' }}>
           {renderedRepos.map((repo) => {
             const isSelected = repo.fullName === selected.fullName;
-            const isTracked = tracked.has(repo.fullName);
+            const isTracked = repoIsTracked(tracked, repo.fullName);
             const sticky = stickyBadges[repo.fullName];
             const inactive = repo.inactiveAt != null;
             const inactiveAt = repo.inactiveAt;
@@ -1610,7 +1491,7 @@ export default function RepoExplorer() {
             >
               {selected.fullName}
             </PrimerLink>
-            {tracked.has(selected.fullName) && (
+            {repoIsTracked(tracked, selected.fullName) && (
               <Box sx={{ color: 'var(--attention-emphasis)', display: 'inline-flex', alignItems: 'center', gap: 1, fontSize: 0 }}>
                 <StarFillIcon size={12} />
                 <Text>Tracked</Text>
@@ -1700,7 +1581,7 @@ export default function RepoExplorer() {
                   }}
                 >
                   {issuesLoading && <Spinner size="sm" tone="muted" />}
-                  {issueTotalCount > 0 && !issuesAllMode && (
+                  {issueTotalCount > 0 && (
                     <InlinePagination
                       page={safeIssuesPage}
                       totalPages={issueTotalPages}
@@ -1713,14 +1594,6 @@ export default function RepoExplorer() {
                       }}
                       rawPageSize={settings.pageSize}
                     />
-                  )}
-                  {issueTotalCount > 0 && issuesAllMode && (
-                    <>
-                      <Text sx={{ fontFamily: 'mono' }}>
-                        Loaded <strong>{pagedIssues.length}</strong> of <strong>{issueTotalCount}</strong>
-                      </Text>
-                      <PageSizeDropdown value={settings.pageSize} onChange={(n) => update('pageSize', n)} />
-                    </>
                   )}
                   {issuesData && (
                     <Text sx={{ width: ['100%', null, 'auto'], textAlign: ['right', null, 'left'], whiteSpace: 'nowrap' }}>
@@ -1832,20 +1705,21 @@ export default function RepoExplorer() {
                   </Box>
                 </Box>
               )}
-              {issuesAllMode && issueTotalCount > 0 && (
-                <>
-                  <Box ref={issuesSentinelRef} sx={{ height: 1 }} />
-                  {issuesInfinite.isFetchingNextPage && (
-                    <Box sx={{ p: 3, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 0 }}>
-                      Loading more…
-                    </Box>
-                  )}
-                  {!issuesInfinite.hasNextPage && pagedIssues.length >= issueTotalCount && (
-                    <Box sx={{ p: 3, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 0 }}>
-                      End of list — {issueTotalCount} issues
-                    </Box>
-                  )}
-                </>
+              {issueTotalCount > 0 && (
+                <Box sx={{ p: 3, display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid', borderColor: 'var(--border-default)' }}>
+                  <InlinePagination
+                    page={safeIssuesPage}
+                    totalPages={issueTotalPages}
+                    totalItems={issueTotalCount}
+                    pageSize={pageSize}
+                    onChange={setIssuesPage}
+                    onPageSizeChange={(n) => {
+                      update('pageSize', n);
+                      setIssuesPage(1);
+                    }}
+                    rawPageSize={settings.pageSize}
+                  />
+                </Box>
               )}
             </Box>
           </>
@@ -1950,7 +1824,7 @@ export default function RepoExplorer() {
                   }}
                 >
                   {pullsLoading && <Spinner size="sm" tone="muted" />}
-                  {pullTotalCount > 0 && !pullsAllMode && (
+                  {pullTotalCount > 0 && (
                     <InlinePagination
                       page={safePullsPage}
                       totalPages={pullTotalPages}
@@ -1963,14 +1837,6 @@ export default function RepoExplorer() {
                       }}
                       rawPageSize={settings.pageSize}
                     />
-                  )}
-                  {pullTotalCount > 0 && pullsAllMode && (
-                    <>
-                      <Text sx={{ fontFamily: 'mono' }}>
-                        Loaded <strong>{pagedPulls.length}</strong> of <strong>{pullTotalCount}</strong>
-                      </Text>
-                      <PageSizeDropdown value={settings.pageSize} onChange={(n) => update('pageSize', n)} />
-                    </>
                   )}
                   {pullsData && (
                     <Text sx={{ width: ['100%', null, 'auto'], textAlign: ['right', null, 'left'], whiteSpace: 'nowrap' }}>
@@ -2069,20 +1935,21 @@ export default function RepoExplorer() {
                   </Box>
                 </Box>
               )}
-              {pullsAllMode && pullTotalCount > 0 && (
-                <>
-                  <Box ref={pullsSentinelRef} sx={{ height: 1 }} />
-                  {pullsInfinite.isFetchingNextPage && (
-                    <Box sx={{ p: 3, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 0 }}>
-                      Loading more…
-                    </Box>
-                  )}
-                  {!pullsInfinite.hasNextPage && pagedPulls.length >= pullTotalCount && (
-                    <Box sx={{ p: 3, textAlign: 'center', color: 'var(--fg-muted)', fontSize: 0 }}>
-                      End of list — {pullTotalCount} pull requests
-                    </Box>
-                  )}
-                </>
+              {pullTotalCount > 0 && (
+                <Box sx={{ p: 3, display: 'flex', justifyContent: 'flex-end', borderTop: '1px solid', borderColor: 'var(--border-default)' }}>
+                  <InlinePagination
+                    page={safePullsPage}
+                    totalPages={pullTotalPages}
+                    totalItems={pullTotalCount}
+                    pageSize={pageSize}
+                    onChange={setPullsPage}
+                    onPageSizeChange={(n) => {
+                      update('pageSize', n);
+                      setPullsPage(1);
+                    }}
+                    rawPageSize={settings.pageSize}
+                  />
+                </Box>
               )}
             </Box>
           </>
@@ -2120,7 +1987,7 @@ export default function RepoExplorer() {
               display: 'flex',
               flexDirection: 'column',
               overflow: 'hidden',
-              boxShadow: '-18px 0 36px rgba(1, 4, 9, 0.36)',
+              boxShadow: 'var(--shadow-panel-overlay)',
               transform: authorPanelActive ? 'translateX(0)' : 'translateX(100%)',
               transition: 'transform 220ms cubic-bezier(0.2, 0, 0, 1)',
               zIndex: 30,
@@ -2162,7 +2029,7 @@ export default function RepoExplorer() {
             flexDirection: 'column',
             overflow: 'hidden',
             zIndex: 25,
-            boxShadow: '-12px 0 24px rgba(1, 4, 9, 0.28)',
+            boxShadow: 'var(--shadow-panel-overlay)',
           }}
         >
           <Box
@@ -2357,270 +2224,6 @@ function OwnerCommentsTab({
   );
 }
 
-interface AuthorIssuesResponse {
-  repo: string;
-  author: {
-    login: string;
-    association: string | null;
-    avatar_url: string;
-    html_url: string;
-  };
-  stats: {
-    total: number;
-    open: number;
-    completed: number;
-    not_planned: number;
-    closed: number;
-    last_updated_at: string | null;
-  };
-  issues: Array<IssueDto & { merged_pr_count: number }>;
-}
-
-function AuthorSidebar({
-  owner,
-  name,
-  repoFullName,
-  login,
-  initialAssociation,
-  onClose,
-  onIssueClick,
-}: {
-  owner: string;
-  name: string;
-  repoFullName: string;
-  login: string;
-  initialAssociation: string | null;
-  onClose: () => void;
-  onIssueClick: (issue: IssueDto) => void;
-}) {
-  const { data, isLoading, isError } = useQuery<AuthorIssuesResponse>({
-    queryKey: ['author-issues', owner, name, login],
-    queryFn: async () => {
-      const r = await fetch(
-        `/api/repos/${owner}/${name}/authors/${encodeURIComponent(login)}/issues?limit=100`,
-      );
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    },
-    staleTime: 30000,
-    refetchInterval: 60000,
-  });
-
-  const association = data?.author.association ?? initialAssociation;
-  const showAssociation = association && association !== 'NONE';
-  const stats = data?.stats;
-  const issues = data?.issues ?? [];
-
-  return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-      <Box
-        sx={{
-          p: 3,
-          borderBottom: '1px solid',
-          borderColor: 'var(--border-default)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 3,
-          flexShrink: 0,
-        }}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={data?.author.avatar_url ?? `https://github.com/${login}.png?size=96`}
-          alt={login}
-          loading="lazy"
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: '50%',
-            border: '1px solid var(--border-default)',
-            flexShrink: 0,
-          }}
-        />
-        <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
-            <Text
-              sx={{
-                color: 'var(--fg-default)',
-                fontWeight: 700,
-                fontSize: 2,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {login}
-            </Text>
-            {showAssociation && (
-              <Label variant="secondary" sx={{ fontSize: '10px', flexShrink: 0 }}>
-                {association.toLowerCase()}
-              </Label>
-            )}
-          </Box>
-          <Text sx={{ color: 'var(--fg-muted)', fontSize: 0, display: 'block', mt: 1 }}>
-            {repoFullName}
-          </Text>
-        </Box>
-        <PrimerLink
-          href={data?.author.html_url ?? `https://github.com/${login}`}
-          target="_blank"
-          rel="noreferrer"
-          sx={{ color: 'var(--fg-muted)', display: 'inline-flex', '&:hover': { color: 'var(--accent-fg)' } }}
-          title="Open GitHub profile"
-        >
-          <MarkGithubIcon size={16} />
-        </PrimerLink>
-        <Box
-          as="button"
-          type="button"
-          onClick={onClose}
-          title="Close"
-          sx={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 28,
-            height: 28,
-            border: '1px solid',
-            borderColor: 'var(--border-default)',
-            borderRadius: 2,
-            bg: 'var(--bg-canvas)',
-            color: 'var(--fg-muted)',
-            cursor: 'pointer',
-            '&:hover': { color: 'var(--fg-default)', borderColor: 'var(--border-strong)' },
-          }}
-        >
-          <XIcon size={14} />
-        </Box>
-      </Box>
-
-      <Box sx={{ px: 3, py: 2, borderBottom: '1px solid', borderColor: 'var(--border-muted)', flexShrink: 0 }}>
-        {isLoading && !data ? (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--fg-muted)', fontSize: 0 }}>
-            <Spinner size="sm" tone="muted" />
-            <Text>Loading author…</Text>
-          </Box>
-        ) : isError ? (
-          <Text sx={{ color: 'var(--danger-fg)', fontSize: 0 }}>Could not load author issues.</Text>
-        ) : (
-          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 2, textAlign: 'center' }}>
-            <Metric label="Total" value={stats?.total ?? issues.length} fg="var(--fg-default)" bg="var(--bg-emphasis)" />
-            <Metric label="Open" value={stats?.open ?? 0} fg="var(--success-fg)" bg="var(--success-subtle)" />
-            <Metric label="Done" value={stats?.completed ?? 0} fg="var(--done-fg)" bg="var(--done-subtle)" />
-            <Metric label="NP" value={stats?.not_planned ?? 0} fg="var(--fg-muted)" bg="var(--bg-emphasis)" />
-            <Metric label="CL" value={stats?.closed ?? 0} fg="var(--danger-fg)" bg="var(--danger-subtle)" />
-          </Box>
-        )}
-      </Box>
-
-      <Box sx={{ px: 3, py: 2, color: 'var(--fg-muted)', fontSize: 0, flexShrink: 0 }}>
-        Latest issues{stats?.last_updated_at ? ` · updated ${formatRelativeTime(stats.last_updated_at)}` : ''}
-      </Box>
-
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
-        {isLoading && !data ? (
-          <TableRowsSkeleton
-            rows={6}
-            cols={[
-              { width: 80 },
-              { width: 40 },
-              { flex: 1 },
-              { width: 80 },
-            ]}
-          />
-        ) : !isLoading && !isError && issues.length === 0 ? (
-          <Box sx={{ p: 4, textAlign: 'center', color: 'var(--fg-muted)' }}>
-            No cached issues by {login} in this repo.
-          </Box>
-        ) : (
-          <Box as="table" sx={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: 0 }}>
-            <Box as="thead" sx={{ position: 'sticky', top: 0, bg: 'var(--bg-subtle)', zIndex: 1 }}>
-              <Box as="tr">
-                <Box as="th" sx={{ ...tableHeaderSx, width: 96 }}>State</Box>
-                <Box as="th" sx={{ ...tableHeaderSx, width: 56 }}>No</Box>
-                <Box as="th" sx={tableHeaderSx}>Issue</Box>
-                <Box as="th" sx={{ ...tableHeaderSx, width: 112 }}>Updated</Box>
-              </Box>
-            </Box>
-            <Box as="tbody">
-              {issues.map((issue, index) => {
-                return (
-                  <Box
-                    as="tr"
-                    key={issue.id}
-                    onClick={() => onIssueClick(issue)}
-                    sx={{
-                      borderBottom: '1px solid',
-                      borderColor: 'var(--border-muted)',
-                      cursor: 'pointer',
-                      '&:hover': { bg: 'var(--bg-subtle)' },
-                    }}
-                  >
-                    <Box as="td" sx={tableCellSx}>
-                      <IssueStatusBadge issue={issue} mergedPRCount={issue.merged_pr_count} />
-                    </Box>
-                    <Box
-                      as="td"
-                      sx={{
-                        ...tableCellSx,
-                        color: 'var(--fg-muted)',
-                        fontFamily: 'mono',
-                        fontVariantNumeric: 'tabular-nums',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {index + 1}
-                    </Box>
-                    <Box as="td" sx={{ ...tableCellSx, minWidth: 0 }}>
-                      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap', minWidth: 0 }}>
-                        <Text
-                          sx={{
-                            color: 'var(--fg-default)',
-                            fontWeight: 500,
-                            lineHeight: 1.35,
-                            whiteSpace: 'normal',
-                            wordBreak: 'break-word',
-                          }}
-                          title={issue.title}
-                        >
-                          {issue.title}
-                        </Text>
-                        <Text
-                          sx={{
-                            color: 'var(--fg-muted)',
-                            fontFamily: 'mono',
-                            fontVariantNumeric: 'tabular-nums',
-                            whiteSpace: 'nowrap',
-                            flexShrink: 0,
-                          }}
-                        >
-                          #{issue.number}
-                        </Text>
-                      </Box>
-                    </Box>
-                    <Box as="td" sx={tableTimeSx} title={issue.updated_at ?? undefined}>
-                      <RecentTime iso={issue.updated_at} />
-                    </Box>
-                  </Box>
-                );
-              })}
-            </Box>
-          </Box>
-        )}
-      </Box>
-    </Box>
-  );
-}
-
-function Metric({ label, value, fg, bg }: { label: string; value: number; fg: string; bg: string }) {
-  return (
-    <Box sx={{ minWidth: 0 }}>
-      <CountBadge n={value} fg={fg} bg={bg} />
-      <Text sx={{ display: 'block', color: 'var(--fg-muted)', fontSize: '10px', mt: 1 }}>{label}</Text>
-    </Box>
-  );
-}
-
 // Per-row valid / invalid picker. Two side-by-side toggle buttons — one for
 // each state — so a single click sets or clears it. Mutually exclusive: clicking
 // the opposite side of an already-set value flips directly to the new value.
@@ -2657,7 +2260,7 @@ function ValidationPicker({
           borderTopLeftRadius: 6,
           borderBottomLeftRadius: 6,
           borderRight: 'none',
-          background: value === 'valid' ? 'rgba(76, 183, 130, 0.28)' : 'var(--bg-emphasis)',
+          background: value === 'valid' ? 'var(--success-subtle)' : 'var(--bg-emphasis)',
           color: value === 'valid' ? 'var(--success-fg)' : 'var(--fg-muted)',
         }}
       >
@@ -2674,32 +2277,13 @@ function ValidationPicker({
           ...cellSx,
           borderTopRightRadius: 6,
           borderBottomRightRadius: 6,
-          background: value === 'invalid' ? 'rgba(235, 87, 87, 0.28)' : 'var(--bg-emphasis)',
+          background: value === 'invalid' ? 'var(--danger-subtle)' : 'var(--bg-emphasis)',
           color: value === 'invalid' ? 'var(--danger-fg)' : 'var(--fg-muted)',
         }}
       >
         <XIcon size={14} />
       </button>
     </Box>
-  );
-}
-
-function PageSizeDropdown({ value, onChange }: { value: number; onChange: (n: number) => void }) {
-  return (
-    <Dropdown
-      value={String(value)}
-      onChange={(v) => onChange(parseInt(v, 10))}
-      options={[
-        { value: '10', label: '10' },
-        { value: '25', label: '25' },
-        { value: '50', label: '50' },
-        { value: '100', label: '100' },
-        { value: '0', label: 'All' },
-      ]}
-      width={72}
-      size="small"
-      ariaLabel="Rows per page"
-    />
   );
 }
 
@@ -2747,14 +2331,13 @@ function InlinePagination({
       </Text>
       {onPageSizeChange && (
         <Dropdown
-          value={String(rawPageSize ?? pageSize)}
+          value={String(rawPageSize && rawPageSize > 0 ? rawPageSize : pageSize)}
           onChange={(v) => onPageSizeChange(parseInt(v, 10))}
           options={[
             { value: '10', label: '10' },
             { value: '25', label: '25' },
             { value: '50', label: '50' },
             { value: '100', label: '100' },
-            { value: '0', label: 'All' },
           ]}
           width={72}
           size="small"
@@ -2884,14 +2467,13 @@ function Pagination({
         <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
           <Text sx={{ color: 'var(--fg-muted)', fontSize: 0 }}>Rows per page</Text>
           <Dropdown
-            value={String(rawPageSize ?? pageSize)}
+            value={String(rawPageSize && rawPageSize > 0 ? rawPageSize : pageSize)}
             onChange={(v) => onPageSizeChange(parseInt(v, 10))}
             options={[
               { value: '10', label: '10' },
               { value: '25', label: '25' },
               { value: '50', label: '50' },
               { value: '100', label: '100' },
-              { value: '0', label: 'All' },
             ]}
             width={88}
             size="small"
@@ -3267,7 +2849,7 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
         height: 36,
         borderBottom: '1px solid',
         borderColor: 'var(--border-muted)',
-        bg: mine ? 'rgba(242, 201, 76, 0.08)' : 'transparent',
+        bg: mine ? 'var(--attention-subtle)' : 'transparent',
         borderLeft: '3px solid',
         borderLeftColor: mine ? 'var(--attention-emphasis)' : expanded ? 'var(--accent-emphasis)' : 'transparent',
         '&:hover': { bg: mine ? 'var(--attention-subtle, rgba(242, 201, 76, 0.14))' : 'var(--bg-subtle)' },
