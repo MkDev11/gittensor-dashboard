@@ -4,9 +4,9 @@ export const dynamic = 'force-dynamic';
 
 import React, { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PageLayout, Heading, Text, Box, TextInput, Label } from '@primer/react';
+import { PageLayout, Heading, Text, Box, Label } from '@primer/react';
+import SearchInput from '@/components/SearchInput';
 import {
-  SearchIcon,
   StarIcon,
   StarFillIcon,
   TableIcon,
@@ -202,12 +202,11 @@ export default function MinersPage() {
                   Miners <Text sx={{ color: 'fg.muted', fontWeight: 400 }}>({data?.count ?? 0})</Text>
                 </Heading>
                 <Box sx={{ flex: 1, minWidth: 240 }}>
-                  <TextInput
-                    leadingVisual={SearchIcon}
-                    placeholder="Search miners…"
+                  <SearchInput
                     value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    sx={{ width: '100%' }}
+                    onChange={setQuery}
+                    placeholder="Search miners…"
+                    width="100%"
                   />
                 </Box>
               </Box>

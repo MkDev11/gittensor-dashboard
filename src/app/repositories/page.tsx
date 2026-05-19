@@ -5,9 +5,9 @@ export const dynamic = 'force-dynamic';
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { PageLayout, Heading, Text, Box, TextInput, Label } from '@primer/react';
+import { PageLayout, Heading, Text, Box, Label } from '@primer/react';
+import SearchInput from '@/components/SearchInput';
 import {
-  SearchIcon,
   StarIcon,
   StarFillIcon,
   TableIcon,
@@ -226,12 +226,11 @@ export default function RepositoriesPage() {
             </Box>
 
             <Box sx={{ flex: 1, minWidth: [0, null, 240], width: ['100%', null, 'auto'] }}>
-              <TextInput
-                leadingVisual={SearchIcon}
-                placeholder="Search or enter owner/name…"
+              <SearchInput
                 value={query}
-                onChange={(e) => { setQuery(e.target.value); setPage(1); }}
-                sx={{ width: '100%' }}
+                onChange={(next) => { setQuery(next); setPage(1); }}
+                placeholder="Search or enter owner/name…"
+                width="100%"
               />
             </Box>
 
