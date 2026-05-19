@@ -40,7 +40,11 @@ interface RepoSummary {
   totalScore: number;
   mergedPrCount: number;
   contributorCount: number;
+  issueDiscoveryEnabled: boolean;
+  issueDiscoveryShare: number;
   closedIssueCount: number;
+  completedIssueCount: number;
+  otherClosedIssueCount: number;
   github: {
     description: string | null;
     isPrivate: boolean;
@@ -62,12 +66,20 @@ interface MinerRow {
   prCount: number;
   score: number;
   ossRank: number | null;
+  globalScore?: number | null;
   avatarUrl: string;
+  issueCount?: number;
+  completedIssueCount?: number;
+  otherClosedIssueCount?: number;
+  solvedIssueCount?: number;
+  candidateIssueCount?: number;
+  reason?: string | null;
 }
 
 interface MinersResp {
   fullName: string;
   ossContributions: MinerRow[];
+  issueDiscoveryEnabled: boolean;
   issueDiscoveries: MinerRow[];
   fetched_at: number;
 }
@@ -241,8 +253,15 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
             <SidebarSection title="Repository Stats">
               <KvRow label="Weight" value={summary.data?.weight != null ? summary.data.weight.toFixed(2) : '—'} />
               <KvRow label="Total Score" value={fmtScore(summary.data?.totalScore)} />
-              <KvRow label="Merged PRs" value={summary.data?.mergedPrCount ?? 0} />
-              <KvRow label="Closed Issues" value={summary.data?.closedIssueCount ?? 0} />
+              <KvRow label="Merged PRs" value={summary.data ? summary.data.mergedPrCount : '—'} />
+              <KvStatusRow
+                label="Issue Discovery"
+                value={summary.data ? (summary.data.issueDiscoveryEnabled ? 'Enabled' : 'Disabled') : '—'}
+                tone={summary.data?.issueDiscoveryEnabled ? 'success' : 'muted'}
+              />
+              <KvRow label="Closed Issues" value={summary.data ? summary.data.closedIssueCount : '—'} />
+              <KvSubRow label="Completed" value={summary.data ? summary.data.completedIssueCount : '—'} />
+              <KvSubRow label="Closed" value={summary.data ? summary.data.otherClosedIssueCount : '—'} />
             </SidebarSection>
 
             <TopMinersCard owner={params.owner} name={params.name} />
@@ -254,7 +273,8 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
 }
 
 function fmtScore(n: number | undefined): string {
-  if (n == null || n === 0) return '0';
+  if (n == null) return '—';
+  if (n === 0) return '0';
   if (n < 1) return n.toFixed(2);
   if (n < 100) return n.toFixed(1);
   return Math.round(n).toString();
@@ -305,6 +325,24 @@ function KvRow({ label, value }: { label: string; value: string | number }) {
     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: '6px' }}>
       <Text sx={{ color: 'fg.default', fontSize: 1 }}>{label}</Text>
       <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default' }}>{value}</Text>
+    </Box>
+  );
+}
+
+function KvSubRow({ label, value }: { label: string; value: string | number }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: '3px', pl: 3 }}>
+      <Text sx={{ color: 'fg.muted', fontSize: 0 }}>{label}</Text>
+      <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.muted', fontSize: 0 }}>{value}</Text>
+    </Box>
+  );
+}
+
+function KvStatusRow({ label, value, tone }: { label: string; value: string; tone: 'success' | 'muted' }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', py: '5px' }}>
+      <Text sx={{ color: 'fg.default', fontWeight: 600 }}>{label}</Text>
+      <Label variant={tone === 'success' ? 'success' : 'secondary'}>{value}</Label>
     </Box>
   );
 }
@@ -1311,8 +1349,11 @@ function TopMinersCard({ owner, name }: { owner: string; name: string }) {
     },
     refetchInterval: 60_000,
   });
+  const ossCount = data?.ossContributions?.length ?? 0;
+  const issueCount = data?.issueDiscoveries?.length ?? 0;
   const rows = (tab === 'oss' ? data?.ossContributions : data?.issueDiscoveries) ?? [];
-  const total = (data?.ossContributions?.length ?? 0) + (data?.issueDiscoveries?.length ?? 0);
+  const otherCount = tab === 'oss' ? issueCount : ossCount;
+  const total = rows.length;
 
   return (
     <Box>
@@ -1323,17 +1364,27 @@ function TopMinersCard({ owner, name }: { owner: string; name: string }) {
         </Heading>
       </Box>
       <Box sx={{ borderTop: '1px solid', borderColor: 'border.default', pt: 2 }}>
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 0, mb: 2, border: '1px solid', borderColor: 'border.default', borderRadius: 1, p: '2px' }}>
-          <MinerTabBtn active={tab === 'oss'} onClick={() => setTab('oss')}>OSS Contributions</MinerTabBtn>
-          <MinerTabBtn active={tab === 'issue'} onClick={() => setTab('issue')}>Issue Discovery</MinerTabBtn>
+        <Box
+          role="tablist"
+          aria-label="Miner contributor score type"
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)',
+            mb: 2,
+            borderBottom: '1px solid',
+            borderColor: 'border.default',
+          }}
+        >
+          <MinerTabBtn active={tab === 'oss'} count={ossCount} onClick={() => setTab('oss')}>OSS</MinerTabBtn>
+          <MinerTabBtn active={tab === 'issue'} count={issueCount} onClick={() => setTab('issue')}>Discovery</MinerTabBtn>
         </Box>
         <Box as="table" sx={{ width: '100%', borderCollapse: 'collapse', fontSize: 1 }}>
           <Box as="thead">
             <Box as="tr">
               <Box as="th" sx={{ textAlign: 'left', fontSize: '10px', color: 'fg.muted', fontWeight: 600, py: '6px', width: 22 }}>#</Box>
               <Box as="th" sx={{ textAlign: 'left', fontSize: '10px', color: 'fg.muted', fontWeight: 600, py: '6px' }}>MINER</Box>
-              <Box as="th" sx={{ textAlign: 'right', fontSize: '10px', color: 'fg.muted', fontWeight: 600, py: '6px' }}>{tab === 'oss' ? 'PRS' : 'ISSUES'}</Box>
-              <Box as="th" sx={{ textAlign: 'right', fontSize: '10px', color: 'fg.muted', fontWeight: 600, py: '6px' }}>SCORE</Box>
+              <Box as="th" sx={{ textAlign: 'right', fontSize: '10px', color: 'fg.muted', fontWeight: 600, py: '6px' }}>{tab === 'oss' ? 'PRS' : 'COMPLETED'}</Box>
+              <Box as="th" sx={{ textAlign: 'right', fontSize: '10px', color: 'fg.muted', fontWeight: 600, py: '6px' }}>{tab === 'oss' ? 'REPO SCORE' : 'CLOSED'}</Box>
             </Box>
           </Box>
           <Box as="tbody">
@@ -1347,7 +1398,7 @@ function TopMinersCard({ owner, name }: { owner: string; name: string }) {
             {!isLoading && rows.length === 0 && (
               <Box as="tr">
                 <Box as="td" colSpan={4} sx={{ p: 3, textAlign: 'center', color: 'fg.muted', fontSize: 0 }}>
-                  No miners yet.
+                  {emptyMinerMessage(tab, otherCount)}
                 </Box>
               </Box>
             )}
@@ -1367,19 +1418,24 @@ function TopMinersCard({ owner, name }: { owner: string; name: string }) {
                     />
                     <Box>
                       <Text sx={{ fontWeight: 600, color: 'fg.default', display: 'block' }}>{m.githubUsername}</Text>
-                      {m.ossRank != null && (
+                      {tab === 'oss' && m.ossRank != null && (
                         <Text sx={{ display: 'block', fontSize: 0, color: 'fg.muted' }}>
-                          {tab === 'oss' ? 'OSS' : 'Issue'} Rank #{m.ossRank}
+                          Global #{m.ossRank}{m.globalScore != null ? ` - ${m.globalScore.toFixed(2)}` : ''}
+                        </Text>
+                      )}
+                      {tab === 'issue' && m.reason && (
+                        <Text sx={{ display: 'block', fontSize: 0, color: issueReasonColor(m), maxWidth: 155 }}>
+                          {m.reason}
                         </Text>
                       )}
                     </Box>
                   </Box>
                 </Box>
                 <Box as="td" sx={{ py: '8px', textAlign: 'right', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default', verticalAlign: 'top' }}>
-                  {m.prCount}
+                  {tab === 'oss' ? m.prCount : m.completedIssueCount ?? m.solvedIssueCount ?? 0}
                 </Box>
                 <Box as="td" sx={{ py: '8px', textAlign: 'right', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: m.score > 0 ? 'fg.default' : 'fg.muted', verticalAlign: 'top' }}>
-                  {m.score.toFixed(2)}
+                  {tab === 'oss' ? m.score.toFixed(2) : m.otherClosedIssueCount ?? Math.max(0, (m.issueCount ?? 0) - (m.completedIssueCount ?? 0))}
                 </Box>
               </Box>
             ))}
@@ -1390,26 +1446,70 @@ function TopMinersCard({ owner, name }: { owner: string; name: string }) {
   );
 }
 
-function MinerTabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function emptyMinerMessage(tab: 'oss' | 'issue', otherCount: number): string {
+  if (tab === 'oss') {
+    return otherCount > 0 ? `No OSS contributors yet. Issue Discovery has ${otherCount}.` : 'No OSS contributors yet.';
+  }
+  return otherCount > 0 ? `No issue-discovery candidates yet. OSS Contributions has ${otherCount}.` : 'No issue-discovery candidates yet.';
+}
+
+function issueReasonColor(row: MinerRow): 'success.fg' | 'attention.fg' | 'danger.fg' | 'fg.muted' {
+  if ((row.candidateIssueCount ?? 0) > 0) return 'success.fg';
+  const reason = (row.reason ?? '').toLowerCase();
+  if (reason.includes('owner') || reason.includes('maintainer')) return 'danger.fg';
+  if (reason.includes('same author') || reason.includes('first issue')) return 'attention.fg';
+  return 'fg.muted';
+}
+
+function MinerTabBtn({ active, count, onClick, children }: { active: boolean; count: number; onClick: () => void; children: React.ReactNode }) {
   return (
     <Box
       as="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
       sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 2,
+        minWidth: 0,
+        width: '100%',
         px: 2,
-        py: '2px',
-        bg: active ? 'canvas.default' : 'transparent',
+        py: '8px',
+        mb: '-1px',
+        bg: 'transparent',
         color: active ? 'fg.default' : 'fg.muted',
-        border: 'none',
-        borderRadius: 1,
-        fontSize: '11px',
-        fontWeight: 600,
+        border: 0,
+        borderBottom: '2px solid',
+        borderColor: active ? 'accent.emphasis' : 'transparent',
+        borderRadius: 0,
+        fontSize: '12px',
+        fontWeight: 700,
         cursor: 'pointer',
         fontFamily: 'inherit',
-        '&:hover': { color: 'fg.default' },
+        '&:hover': { color: 'fg.default', bg: 'canvas.subtle' },
       }}
     >
-      {children}
+      <Text sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{children}</Text>
+      <Text
+        sx={{
+          flexShrink: 0,
+          minWidth: 18,
+          px: '6px',
+          py: '1px',
+          borderRadius: 999,
+          bg: active ? 'accent.subtle' : 'neutral.subtle',
+          color: active ? 'accent.fg' : 'fg.muted',
+          fontFamily: 'mono',
+          fontSize: '10px',
+          fontWeight: 700,
+          lineHeight: 1.25,
+          textAlign: 'center',
+        }}
+      >
+        {count}
+      </Text>
     </Box>
   );
 }
