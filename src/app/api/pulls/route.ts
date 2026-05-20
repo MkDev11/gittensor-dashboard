@@ -3,7 +3,7 @@ import { getReadDb, PullRow } from '@/lib/db';
 import { getIssueDiscoveryDisabledReposAsyncServer, getLiveReposAsyncServer } from '@/lib/repos-server';
 import { authorCredibilityForRepo, getGittensorCredibilityIndex } from '@/lib/gittensor-credibility';
 import { getGittensorPrScoreMap, pullScoreKey } from '@/lib/gittensor-pr-scores';
-import type { AuthorCredibility, PullScore } from '@/types/entities';
+import type { AuthorCredibility, LinkedIssueReference, PullScore } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,6 +16,10 @@ type SortDir = 'asc' | 'desc';
 interface AggPullRow extends Omit<PullRow, 'body'> {
   score: PullScore | null;
   author_credibility: AuthorCredibility | null;
+}
+
+function pullIssueMapKey(repoFullName: string, prNumber: number): string {
+  return `${repoFullName}#${prNumber}`;
 }
 
 function positiveInt(value: string | null, fallback: number): number {
@@ -165,6 +169,7 @@ export async function GET(req: NextRequest) {
       authors: [],
       author_count: 0,
       pulls: [],
+      linked_issues_by_pull: {},
     });
   }
 
@@ -230,6 +235,43 @@ export async function GET(req: NextRequest) {
       ])
     : [null, null, new Set<string>()];
 
+  const linked_issues_by_pull: Record<string, LinkedIssueReference[]> = {};
+  if (rows.length > 0) {
+    const uniquePulls = Array.from(
+      new Map(rows.map((r) => [pullIssueMapKey(r.repo_full_name, r.number), r])).values(),
+    );
+    const where = uniquePulls.map(() => '(l.repo_full_name = ? AND l.pr_number = ?)').join(' OR ');
+    const args = uniquePulls.flatMap((r) => [r.repo_full_name, r.number]);
+    const linkRows = db
+      .prepare(
+        `SELECT l.repo_full_name, l.pr_number, i.number AS issue_number, i.title, i.state, i.state_reason, i.author_login
+         FROM pr_issue_links l
+         JOIN issues i ON i.repo_full_name = l.repo_full_name AND i.number = l.issue_number
+         WHERE ${where}
+         ORDER BY LOWER(l.repo_full_name) ASC, l.pr_number DESC, i.number ASC`,
+      )
+      .all(...args) as Array<{
+        repo_full_name: string;
+        pr_number: number;
+        issue_number: number;
+        title: string;
+        state: string;
+        state_reason: string | null;
+        author_login: string | null;
+      }>;
+    for (const lr of linkRows) {
+      const key = pullIssueMapKey(lr.repo_full_name, lr.pr_number);
+      if (!linked_issues_by_pull[key]) linked_issues_by_pull[key] = [];
+      linked_issues_by_pull[key].push({
+        number: lr.issue_number,
+        title: lr.title,
+        state: lr.state,
+        state_reason: lr.state_reason,
+        author_login: lr.author_login,
+      });
+    }
+  }
+
   const totalPages = Math.max(1, Math.ceil(totals.count / pageSize));
   const pulls: AggPullRow[] = rows.map((r) => ({
     ...r,
@@ -248,5 +290,6 @@ export async function GET(req: NextRequest) {
     authors: authorRows,
     author_count: authorRows.length,
     pulls,
+    linked_issues_by_pull,
   });
 }

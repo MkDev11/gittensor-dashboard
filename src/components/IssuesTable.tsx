@@ -476,7 +476,7 @@ export default function IssuesTable() {
             sx={{
               position: 'fixed',
               inset: 0,
-              zIndex: 109,
+              zIndex: 219,
               bg: 'rgba(1, 4, 9, 0.28)',
             }}
           />
@@ -486,8 +486,8 @@ export default function IssuesTable() {
               top: 'var(--header-height)',
               right: 0,
               bottom: 0,
-              width: ['calc(100vw - 24px)', null, 'min(760px, 52vw)'],
-              maxWidth: 'calc(100vw - 24px)',
+              width: ['100vw', null, 'min(760px, 52vw)'],
+              maxWidth: ['100vw', null, 'calc(100vw - 24px)'],
               borderLeft: '1px solid',
               borderColor: 'var(--border-default)',
               bg: 'var(--bg-canvas)',
@@ -495,7 +495,7 @@ export default function IssuesTable() {
               flexDirection: 'column',
               overflow: 'hidden',
               boxShadow: '-18px 0 36px rgba(1, 4, 9, 0.36)',
-              zIndex: 110,
+              zIndex: 220,
             }}
           >
             <AuthorActivitySidebar

@@ -360,6 +360,14 @@ export interface PullScore {
   collateral_score: number | null;
 }
 
+export interface LinkedIssueReference {
+  number: number;
+  title: string;
+  state: string;
+  state_reason: string | null;
+  author_login: string | null;
+}
+
 export interface PullStateCounts {
   open: number;
   draft: number;
@@ -376,16 +384,7 @@ export interface PullsResponse {
   last_error: string | null;
   pulls: Pull[];
   /** Linked issues (closes/fixes/sidebar-linked) for PRs on this page only. */
-  linked_issues_by_pull?: Record<
-    number,
-    Array<{
-      number: number;
-      title: string;
-      state: string;
-      state_reason: string | null;
-      author_login: string | null;
-    }>
-  >;
+  linked_issues_by_pull?: Record<string, LinkedIssueReference[]>;
 }
 
 export interface PullsMetaResponse {

@@ -24,7 +24,8 @@ import AuthorFilter from '@/components/AuthorFilter';
 import AuthorActivitySidebar from '@/components/AuthorActivitySidebar';
 import AuthorCredibilityNote from '@/components/AuthorCredibilityNote';
 import PullScoreCell from '@/components/PullScoreCell';
-import type { Issue, Pull, PullScore } from '@/types/entities';
+import RelatedIssuesCell from '@/components/RelatedIssuesCell';
+import type { Issue, LinkedIssueReference, Pull, PullScore } from '@/types/entities';
 import ContentViewer from '@/components/ContentViewer';
 import { useSettings } from '@/lib/settings';
 import { useSn74Repos, lookupWeight } from '@/lib/use-sn74-repos';
@@ -44,6 +45,7 @@ interface PullsResp {
   authors: Array<{ login: string; count: number }>;
   author_count: number;
   pulls: AggPull[];
+  linked_issues_by_pull?: Record<string, LinkedIssueReference[]>;
 }
 
 interface UserReposResp {
@@ -57,6 +59,7 @@ type SortKey = 'updated' | 'opened' | 'closed' | 'repo' | 'weight' | 'number';
 type SortDir = 'asc' | 'desc';
 
 const PULLS_CONTENT_MAX_WIDTH = 1480;
+const EMPTY_ISSUES: LinkedIssueReference[] = [];
 const pullRowCellSx = {
   px: 2,
   py: 0,
@@ -65,6 +68,10 @@ const pullRowCellSx = {
   verticalAlign: 'middle' as const,
   lineHeight: '20px',
 };
+
+function pullIssueMapKey(pr: Pick<Pull, 'repo_full_name' | 'number'>): string {
+  return `${pr.repo_full_name}#${pr.number}`;
+}
 
 export default function AllPullsPage() {
   const { repos: sn74Repos, weights: repoWeights, isSuccess: sn74ReposReady } = useSn74Repos();
@@ -211,6 +218,20 @@ export default function AllPullsPage() {
     setOpenIssue(issue);
   };
 
+  const openLinkedIssue = async (pr: AggPull, issueNumber: number) => {
+    const [owner, name] = pr.repo_full_name.split('/');
+    setAuthorTarget(null);
+    setOpenPull(null);
+    setExpandedKey(null);
+    try {
+      const r = await fetch(`/api/issue/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${issueNumber}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      setOpenIssue((await r.json()) as Issue);
+    } catch (err) {
+      console.warn('[pulls] could not open linked issue:', err);
+    }
+  };
+
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -324,18 +345,30 @@ export default function AllPullsPage() {
             </Box>
           </Box>
 
-          <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflowX: 'auto', overflowY: 'hidden', bg: 'canvas.default' }}>
-            <Box as="table" sx={{ width: '100%', minWidth: 1120, borderCollapse: 'collapse', fontSize: 1 }}>
-              <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
+          <Box
+            sx={{
+              border: '1px solid',
+              borderColor: 'var(--border-default)',
+              borderRadius: 2,
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              bg: 'var(--bg-canvas)',
+              scrollbarWidth: 'none',
+              msOverflowStyle: 'none',
+              '&::-webkit-scrollbar': { display: 'none' },
+            }}
+          >
+            <Box as="table" sx={{ width: '100%', minWidth: 1200, borderCollapse: 'collapse', fontSize: 1 }}>
+              <Box as="thead" sx={{ bg: 'var(--bg-subtle)', borderBottom: '1px solid', borderColor: 'var(--border-default)' }}>
                 <Box as="tr">
                   <Box as="th" sx={{ ...headerCellSx, width: 44, textAlign: 'center' }} aria-label="Tracked repository" />
                   <HeaderCell label="State" />
                   <HeaderCell label="Pull Request" />
                   <HeaderCell label="Repository" onClick={() => toggleSort('repo')} active={sortKey === 'repo'} dir={sortDir} />
                   <HeaderCell label="Weight" onClick={() => toggleSort('weight')} active={sortKey === 'weight'} dir={sortDir} align="right" />
-                  <Box as="th" sx={{ ...headerCellSx, py: '4px' }}>
-                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-                      <Box sx={{ color: authorFilter !== 'all' && !mineOnly ? 'accent.fg' : 'inherit' }}>Author</Box>
+                  <Box as="th" sx={{ ...headerCellSx, py: '4px', width: 220, maxWidth: 220 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
+                      <Box sx={{ color: authorFilter !== 'all' && !mineOnly ? 'var(--accent-fg)' : 'inherit', flexShrink: 0 }}>Author</Box>
                       <AuthorFilter
                         value={mineOnly ? me || 'all' : authorFilter}
                         onChange={(next) => {
@@ -344,7 +377,7 @@ export default function AllPullsPage() {
                         }}
                         authors={authorOptions}
                         totalAuthors={data?.author_count ?? authorOptions.length}
-                        width={260}
+                        width={220}
                         ariaLabel="Filter by author"
                       />
                     </Box>
@@ -353,12 +386,13 @@ export default function AllPullsPage() {
                   <HeaderCell label="Opened" onClick={() => toggleSort('opened')} active={sortKey === 'opened'} dir={sortDir} />
                   <HeaderCell label="Updated" onClick={() => toggleSort('updated')} active={sortKey === 'updated'} dir={sortDir} />
                   <HeaderCell label="Closed" onClick={() => toggleSort('closed')} active={sortKey === 'closed'} dir={sortDir} />
+                  <Box as="th" sx={{ ...headerCellSx, textAlign: 'center' }}>Issues</Box>
                 </Box>
               </Box>
               <Box as="tbody">
                 {isLoading && rows.length === 0 && (
                   <Box as="tr">
-                    <Box as="td" colSpan={10} sx={{ p: 0 }}>
+                    <Box as="td" colSpan={11} sx={{ p: 0 }}>
                       <TableRowsSkeleton
                         rows={12}
                         cols={[
@@ -372,6 +406,7 @@ export default function AllPullsPage() {
                           { width: 60 },
                           { width: 60 },
                           { width: 60 },
+                          { width: 54 },
                         ]}
                       />
                     </Box>
@@ -379,7 +414,7 @@ export default function AllPullsPage() {
                 )}
                 {!isLoading && rows.length === 0 && (
                   <Box as="tr">
-                    <Box as="td" colSpan={10} sx={{ p: 4, textAlign: 'center', color: 'fg.muted' }}>
+                    <Box as="td" colSpan={11} sx={{ p: 4, textAlign: 'center', color: 'var(--fg-muted)' }}>
                       {data && data.count === 0
                         ? hasActiveFilters
                           ? 'No PRs match these filters.'
@@ -392,6 +427,7 @@ export default function AllPullsPage() {
                   const k = `${pr.repo_full_name}#${pr.number}`;
                   const expanded = expandedKey === k;
                   const [o, n] = pr.repo_full_name.split('/');
+                  const linkedIssues = data?.linked_issues_by_pull?.[pullIssueMapKey(pr)] ?? EMPTY_ISSUES;
                   return (
                     <React.Fragment key={k}>
                       <PullTableRow
@@ -403,10 +439,12 @@ export default function AllPullsPage() {
                         onAuthorClick={() => openAuthorDetails(pr)}
                         expanded={expanded}
                         weight={lookupWeight(displayWeights, pr.repo_full_name) ?? 0}
+                        linkedIssues={linkedIssues}
+                        onIssueClick={(issueNumber) => openLinkedIssue(pr, issueNumber)}
                       />
                       {expanded && settings.contentDisplay === 'accordion' && (
                         <Box as="tr">
-                          <Box as="td" colSpan={10} sx={{ p: 0 }}>
+                          <Box as="td" colSpan={11} sx={{ p: 0 }}>
                             <ContentViewer
                               target={{ kind: 'pull', owner: o, name: n, number: pr.number, preloaded: pr }}
                               mode="inline"
@@ -459,7 +497,7 @@ export default function AllPullsPage() {
             sx={{
               position: 'fixed',
               inset: 0,
-              zIndex: 109,
+              zIndex: 219,
               bg: 'rgba(1, 4, 9, 0.28)',
             }}
           />
@@ -469,8 +507,8 @@ export default function AllPullsPage() {
               top: 'var(--header-height)',
               right: 0,
               bottom: 0,
-              width: ['calc(100vw - 24px)', null, 'min(760px, 52vw)'],
-              maxWidth: 'calc(100vw - 24px)',
+              width: ['100vw', null, 'min(760px, 52vw)'],
+              maxWidth: ['100vw', null, 'calc(100vw - 24px)'],
               borderLeft: '1px solid',
               borderColor: 'var(--border-default)',
               bg: 'var(--bg-canvas)',
@@ -478,7 +516,7 @@ export default function AllPullsPage() {
               flexDirection: 'column',
               overflow: 'hidden',
               boxShadow: '-18px 0 36px rgba(1, 4, 9, 0.36)',
-              zIndex: 110,
+              zIndex: 220,
             }}
           >
             <AuthorActivitySidebar
@@ -617,7 +655,7 @@ const headerCellSx = {
   textAlign: 'left' as const,
   fontWeight: 600,
   fontSize: 0,
-  color: 'fg.muted',
+  color: 'var(--fg-muted)',
   textTransform: 'uppercase' as const,
   letterSpacing: '0.5px',
   whiteSpace: 'nowrap' as const,
@@ -645,7 +683,7 @@ function HeaderCell({
         textAlign: align,
         cursor: onClick ? 'pointer' : 'default',
         userSelect: 'none',
-        '&:hover': onClick ? { color: 'fg.default' } : undefined,
+        '&:hover': onClick ? { color: 'var(--fg-default)' } : undefined,
       }}
     >
       <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
@@ -663,8 +701,10 @@ function PullTableRow({
   onToggleTrack,
   onRowClick,
   onAuthorClick,
+  onIssueClick,
   expanded,
   weight,
+  linkedIssues,
 }: {
   pr: AggPull;
   mine: boolean;
@@ -672,8 +712,10 @@ function PullTableRow({
   onToggleTrack?: () => void;
   onRowClick?: () => void;
   onAuthorClick?: () => void;
+  onIssueClick?: (issueNumber: number) => void | Promise<void>;
   expanded?: boolean;
   weight: number;
+  linkedIssues: LinkedIssueReference[];
 }) {
   const [owner, name] = pr.repo_full_name.split('/');
 
@@ -685,12 +727,12 @@ function PullTableRow({
       sx={{
         height: 40,
         borderBottom: '1px solid',
-        borderColor: 'border.muted',
-        bg: expanded ? 'accent.muted' : tracked ? 'accent.subtle' : 'canvas.default',
+        borderColor: 'var(--border-muted)',
+        bg: expanded ? 'var(--accent-subtle)' : tracked ? 'var(--accent-subtle)' : 'var(--bg-canvas)',
         borderLeft: '3px solid',
-        borderLeftColor: tracked ? 'accent.emphasis' : 'transparent',
+        borderLeftColor: tracked ? 'var(--accent-emphasis)' : 'transparent',
         cursor: 'pointer',
-        '&:hover': { bg: tracked ? 'accent.muted' : 'canvas.subtle' },
+        '&:hover': { bg: tracked ? 'var(--accent-subtle)' : 'var(--bg-subtle)' },
         '&:last-child': { borderBottom: 'none' },
       }}
     >
@@ -714,11 +756,11 @@ function PullTableRow({
             border: 'none',
             borderRadius: 1,
             bg: 'transparent',
-            color: tracked ? 'attention.fg' : 'fg.muted',
+            color: tracked ? 'var(--attention-fg)' : 'var(--fg-muted)',
             cursor: 'pointer',
             '&:hover': {
-              bg: 'canvas.inset',
-              color: 'attention.fg',
+              bg: 'var(--bg-inset)',
+              color: 'var(--attention-fg)',
             },
           }}
         >
@@ -746,20 +788,20 @@ function PullTableRow({
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
             sx={{
-              color: 'fg.default',
+              color: 'var(--fg-default)',
               fontWeight: 500,
               display: 'block',
               minWidth: 0,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              '&:hover': { color: 'accent.fg' },
+              '&:hover': { color: 'var(--accent-fg)' },
             }}
             title={pr.title}
           >
             {pr.title}
           </PrimerLink>
-          <Text sx={{ color: 'fg.muted', fontSize: 0, flexShrink: 0 }}>#{pr.number}</Text>
+          <Text sx={{ color: 'var(--fg-muted)', fontSize: 0, flexShrink: 0 }}>#{pr.number}</Text>
         </Box>
       </Box>
       <Box as="td" sx={pullRowCellSx}>
@@ -769,7 +811,7 @@ function PullTableRow({
           style={{ textDecoration: 'none' }}
           onClick={(e) => e.stopPropagation()}
         >
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: 'accent.fg', maxWidth: '100%', '&:hover': { textDecoration: 'underline' } }}>
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: 'var(--accent-fg)', maxWidth: '100%', '&:hover': { textDecoration: 'underline' } }}>
             <RepoIcon size={12} />
             <Text sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {pr.repo_full_name}
@@ -788,19 +830,19 @@ function PullTableRow({
           fontWeight: weight >= 0.3 ? 700 : weight >= 0.15 ? 600 : weight >= 0.05 ? 500 : 400,
           color:
             weight >= 0.5
-              ? 'success.fg'
+              ? 'var(--success-fg)'
               : weight >= 0.3
-              ? 'accent.fg'
+              ? 'var(--accent-fg)'
               : weight >= 0.15
-              ? 'attention.fg'
+              ? 'var(--attention-fg)'
               : weight >= 0.05
-              ? 'fg.default'
-              : 'fg.muted',
+              ? 'var(--fg-default)'
+              : 'var(--fg-muted)',
         }}
       >
         {weight.toFixed(4)}
       </Box>
-      <Box as="td" sx={{ ...pullRowCellSx, fontSize: 0 }}>
+      <Box as="td" sx={{ ...pullRowCellSx, width: 220, maxWidth: 220, minWidth: 0, overflow: 'hidden', fontSize: 0 }}>
         {pr.author_login ? (
           <button
             type="button"
@@ -820,8 +862,10 @@ function PullTableRow({
               padding: 0,
               font: 'inherit',
               cursor: 'pointer',
+              width: '100%',
               maxWidth: '100%',
               minWidth: 0,
+              overflow: 'hidden',
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -834,12 +878,13 @@ function PullTableRow({
             <Text
               sx={{
                 fontWeight: 500,
-                color: mine ? 'var(--attention-emphasis)' : 'fg.default',
+                color: mine ? 'var(--attention-emphasis)' : 'var(--fg-default)',
                 minWidth: 0,
+                flex: '1 1 auto',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
-                '&:hover': { color: 'accent.fg' },
+                '&:hover': { color: 'var(--accent-fg)' },
               }}
             >
               {pr.author_login}
@@ -852,7 +897,7 @@ function PullTableRow({
             )}
           </button>
         ) : (
-          <Text sx={{ fontWeight: 500, color: 'fg.muted' }}>-</Text>
+          <Text sx={{ fontWeight: 500, color: 'var(--fg-muted)' }}>-</Text>
         )}
       </Box>
       <Box as="td" sx={{ ...pullRowCellSx, fontSize: 0, whiteSpace: 'nowrap' }}>
@@ -866,6 +911,9 @@ function PullTableRow({
       </Box>
       <Box as="td" sx={{ ...pullRowCellSx, fontSize: 0, whiteSpace: 'nowrap' }} title={pr.merged_at ?? pr.closed_at ?? undefined}>
         <RecentTime iso={pr.merged_at ?? pr.closed_at} />
+      </Box>
+      <Box as="td" sx={{ ...pullRowCellSx, textAlign: 'center', whiteSpace: 'nowrap' }} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+        <RelatedIssuesCell issues={linkedIssues} onIssueClick={onIssueClick} />
       </Box>
     </Box>
   );

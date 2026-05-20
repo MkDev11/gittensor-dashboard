@@ -169,7 +169,10 @@ export default function AuthorFilter({
           fontWeight: 500,
           fontFamily: 'inherit',
           cursor: 'pointer',
+          minWidth: 0,
           maxWidth: 200,
+          flexShrink: 1,
+          overflow: 'hidden',
           boxShadow: open ? '0 0 0 3px var(--accent-glow)' : 'none',
         }}
       >
@@ -181,16 +184,16 @@ export default function AuthorFilter({
               alt={selectedAuthor.login}
               style={{ width: 16, height: 16, borderRadius: '50%', flexShrink: 0 }}
             />
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {triggerLabel}
             </span>
           </>
         ) : isFiltered && selectedExtra ? (
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {triggerLabel}
           </span>
         ) : (
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {triggerLabel}
           </span>
         )}

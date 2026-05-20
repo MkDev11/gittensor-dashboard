@@ -19,8 +19,6 @@ import {
   ClockIcon,
   CommentIcon,
   IssueOpenedIcon,
-  IssueClosedIcon,
-  SkipIcon,
   GitPullRequestIcon,
   PersonIcon,
   XIcon,
@@ -39,6 +37,7 @@ import ContentViewer from '@/components/ContentViewer';
 import AuthorCredibilityNote from '@/components/AuthorCredibilityNote';
 import PullScoreCell from '@/components/PullScoreCell';
 import RelatedPRsCell, { type LinkedPullReference } from '@/components/RelatedPRsCell';
+import RelatedIssuesCell from '@/components/RelatedIssuesCell';
 import { IssueLabels } from '@/components/IssueLabels';
 import SearchInput from '@/components/SearchInput';
 import AuthorFilter from '@/components/AuthorFilter';
@@ -46,7 +45,7 @@ import AuthorActivitySidebar from '@/components/AuthorActivitySidebar';
 import { useSettings } from '@/lib/settings';
 import { useToast } from '@/lib/toast';
 import { pullStatus } from '@/types/entities';
-import type { AuthorCredibility, Issue, IssuesResponse, IssuesMetaResponse, Pull, PullsResponse, PullsMetaResponse } from '@/types/entities';
+import type { AuthorCredibility, Issue, IssuesResponse, IssuesMetaResponse, LinkedIssueReference, Pull, PullsResponse, PullsMetaResponse } from '@/types/entities';
 import { RepoListSkeleton, TableRowsSkeleton } from '@/components/Skeleton';
 import { tableHeaderSx, tableCellSx, tableTimeSx } from '@/components/repo-explorer/styles';
 import { weightColor, weightFontWeight } from '@/components/repo-explorer/weights';
@@ -67,7 +66,6 @@ import {
 type RepoSort = 'weight' | 'name' | 'tracked';
 type Tab = 'issues' | 'pulls';
 type AuthorTarget = { login: string; association?: string | null; initialTab: 'issues' | 'pulls' };
-type RelatedPopoverLayout = { placement: 'down' | 'up'; maxHeight: number };
 type StickyBadge = { issues: number; pulls: number; priority?: boolean };
 interface RepoBadgesResponse {
   repo: string;
@@ -81,26 +79,7 @@ interface RepoBadgesResponse {
 // rows with no linked PRs (otherwise `?? []` creates a fresh reference each
 // render, defeating prop equality).
 const EMPTY_PRS: LinkedPullReference[] = [];
-const EMPTY_ISSUES: Array<{ number: number; title: string; state: string; state_reason: string | null; author_login: string | null }> = [];
-
-const DEFAULT_RELATED_POPOVER_LAYOUT: RelatedPopoverLayout = { placement: 'down', maxHeight: 420 };
-
-function relatedPopoverLayout(anchor: HTMLElement | null, rowCount: number): RelatedPopoverLayout {
-  if (!anchor || typeof window === 'undefined') return DEFAULT_RELATED_POPOVER_LAYOUT;
-  const rect = anchor.getBoundingClientRect();
-  const estimatedHeight = Math.min(480, 36 + rowCount * 32);
-  const spaceBelow = window.innerHeight - rect.bottom - 44;
-  const spaceAbove = rect.top - 8;
-  const placement = spaceBelow >= estimatedHeight || spaceBelow >= spaceAbove ? 'down' : 'up';
-  const available = Math.max(120, placement === 'down' ? spaceBelow : spaceAbove);
-  return { placement, maxHeight: Math.min(480, available) };
-}
-
-function relatedPopoverOffset(layout: RelatedPopoverLayout) {
-  return layout.placement === 'up'
-    ? { bottom: '100%', mb: 1 }
-    : { top: '100%', mt: 1 };
-}
+const EMPTY_ISSUES: LinkedIssueReference[] = [];
 
 function trimNumber(value: number, maxDigits = 2): string {
   return value
@@ -169,30 +148,6 @@ function RepoPolicyChip({
       </Text>
     </Box>
   );
-}
-
-function useRelatedPopoverLayout(
-  open: boolean,
-  rowCount: number,
-  anchorRef: React.RefObject<HTMLDivElement | null>,
-) {
-  const [layout, setLayout] = useState<RelatedPopoverLayout>(DEFAULT_RELATED_POPOVER_LAYOUT);
-  const update = useCallback(() => {
-    setLayout(relatedPopoverLayout(anchorRef.current, rowCount));
-  }, [anchorRef, rowCount]);
-
-  useEffect(() => {
-    if (!open) return;
-    update();
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-    };
-  }, [open, update]);
-
-  return [layout, update] as const;
 }
 
 // Placeholder used while the live SN74 list is loading. We can't render with a
@@ -2189,7 +2144,7 @@ export default function RepoExplorer() {
             sx={{
               position: 'absolute',
               inset: 0,
-              zIndex: 29,
+              zIndex: 219,
               bg: 'transparent',
               pointerEvents: 'auto',
             }}
@@ -2204,9 +2159,9 @@ export default function RepoExplorer() {
               top: 0,
               right: 0,
               bottom: 0,
-              width: '50vw',
-              minWidth: 'min(760px, calc(100vw - 24px))',
-              maxWidth: 'calc(100vw - 24px)',
+              width: ['100%', null, '50vw'],
+              minWidth: ['100%', null, 'min(760px, calc(100vw - 24px))'],
+              maxWidth: ['100%', null, 'calc(100vw - 24px)'],
               borderLeft: '1px solid',
               borderColor: 'var(--border-default)',
               bg: 'var(--bg-canvas)',
@@ -2216,7 +2171,7 @@ export default function RepoExplorer() {
               boxShadow: 'var(--shadow-panel-overlay)',
               transform: authorPanelActive ? 'translateX(0)' : 'translateX(100%)',
               transition: 'transform 220ms cubic-bezier(0.2, 0, 0, 1)',
-              zIndex: 30,
+              zIndex: 220,
               willChange: 'transform',
             }}
           >
@@ -2594,7 +2549,7 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
   mine: boolean;
   expanded: boolean;
   onView: () => void;
-  linkedIssues: Array<{ number: number; title: string; state: string; state_reason: string | null; author_login: string | null }>;
+  linkedIssues: LinkedIssueReference[];
   onAuthorClick: (login: string, association?: string | null) => void;
   onIssueClick: (issueNumber: number) => void;
 }) {
@@ -2833,207 +2788,3 @@ const ExplorerIssueRow = React.memo(function ExplorerIssueRow({
   prev.onPRClick === next.onPRClick &&
   prev.onAuthorClick === next.onAuthorClick,
 );
-
-/** Inline cell for the PR table: shows a count badge with a popover listing
- *  the issues this PR closes/fixes/references. Mirrors RelatedPRsCell so the
- *  two columns feel consistent. */
-function RelatedIssuesCell({
-  issues,
-  onIssueClick,
-}: {
-  issues: Array<{ number: number; title: string; state: string; state_reason: string | null; author_login: string | null }>;
-  onIssueClick?: (issueNumber: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [popoverLayout, updatePopoverLayout] = useRelatedPopoverLayout(open, issues.length, wrapRef);
-
-  useEffect(() => {
-    if (!open) return;
-    const onMouseDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  if (issues.length === 0) {
-    return <Text sx={{ color: 'var(--fg-muted)', fontFamily: 'mono', fontSize: 0 }}>—</Text>;
-  }
-
-  // Tone the badge based on the dominant state so a glance tells you whether
-  // the linked issues are still open (green) or all resolved (purple).
-  const openIssues = issues.filter((i) => i.state === 'open').length;
-  const tone = openIssues > 0 ? 'var(--success-emphasis)' : 'var(--done-emphasis)';
-
-  return (
-    <Box
-      ref={wrapRef as unknown as React.Ref<HTMLDivElement>}
-      sx={{ position: 'relative', display: 'inline-block' }}
-      onClick={(e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!open) updatePopoverLayout();
-        setOpen((v) => !v);
-      }}
-    >
-      <Box
-        as="button"
-        title={`${issues.length} linked issue${issues.length === 1 ? '' : 's'}`}
-        sx={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 1,
-          px: '8px',
-          py: '3px',
-          border: '1px solid',
-          borderColor: 'var(--border-default)',
-          borderRadius: '999px',
-          bg: 'var(--bg-canvas)',
-          color: tone,
-          fontSize: '12px',
-          fontWeight: 700,
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          '&:hover': { borderColor: tone },
-        }}
-      >
-        <IssueOpenedIcon size={11} />
-        {issues.length}
-      </Box>
-      {open && (
-        <Box
-          sx={{
-            position: 'absolute',
-            ...relatedPopoverOffset(popoverLayout),
-            right: 0,
-            minWidth: 280,
-            maxWidth: 360,
-            maxHeight: popoverLayout.maxHeight,
-            overflowY: 'auto',
-            bg: 'var(--bg-subtle)',
-            border: '1px solid',
-            borderColor: 'var(--border-default)',
-            borderRadius: 2,
-            boxShadow: 'var(--shadow-overlay)',
-            zIndex: 50,
-            py: 1,
-            textAlign: 'left',
-          }}
-        >
-          <Text sx={{ px: 2, py: 1, fontSize: 0, color: 'var(--fg-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block' }}>
-            Linked issues
-          </Text>
-          {issues.map((iss) => {
-            // Effective state mirroring the issues-table coloring: open/done/np/closed.
-            const reason = (iss.state_reason ?? '').toUpperCase();
-            const status =
-              iss.state === 'open' ? 'open' :
-              reason === 'NOT_PLANNED' ? 'not_planned' :
-              reason === 'COMPLETED' ? 'done' :
-              'closed';
-            const statusColor =
-              status === 'open' ? 'var(--success-fg)' :
-              status === 'done' ? 'var(--done-fg)' :
-              status === 'not_planned' ? 'var(--fg-muted)' :
-              'var(--danger-fg)';
-            const StatusIcon =
-              status === 'open' ? IssueOpenedIcon :
-              status === 'not_planned' ? SkipIcon :
-              IssueClosedIcon;
-            return (
-              <button
-                key={iss.number}
-                onClick={(e: React.MouseEvent) => {
-                  e.stopPropagation();
-                  setOpen(false);
-                  onIssueClick?.(iss.number);
-                }}
-                onMouseEnter={highlightRelatedRow}
-                onMouseLeave={unhighlightRelatedRow}
-                style={relatedPopoverRowStyle}
-              >
-                <span style={{ color: statusColor, display: 'inline-flex', flexShrink: 0 }}>
-                  <StatusIcon size={12} />
-                </span>
-                {iss.author_login && (
-                  <span style={relatedPopoverAuthorStyle}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`https://github.com/${iss.author_login}.png?size=32`}
-                      alt={iss.author_login}
-                      loading="lazy"
-                      style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--border-muted)', display: 'block', flexShrink: 0 }}
-                    />
-                    <span style={relatedPopoverAuthorTextStyle}>
-                      {iss.author_login}
-                    </span>
-                  </span>
-                )}
-                <span style={relatedPopoverTitleStyle}>
-                  #{iss.number} {iss.title}
-                </span>
-              </button>
-            );
-          })}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-const relatedPopoverRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  width: '100%',
-  padding: '6px 8px',
-  border: 'none',
-  background: 'transparent',
-  color: 'inherit',
-  fontFamily: 'inherit',
-  fontSize: 'inherit',
-  textAlign: 'left',
-  cursor: 'pointer',
-};
-
-const relatedPopoverAuthorStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-  flexShrink: 0,
-  minWidth: 0,
-  maxWidth: 110,
-};
-
-const relatedPopoverAuthorTextStyle: React.CSSProperties = {
-  color: 'var(--fg-default)',
-  fontSize: 12,
-  fontWeight: 500,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-};
-
-const relatedPopoverTitleStyle: React.CSSProperties = {
-  color: 'var(--fg-default)',
-  fontSize: 12,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-  flex: 1,
-};
-
-function highlightRelatedRow(e: React.MouseEvent<HTMLButtonElement>) {
-  e.currentTarget.style.background = 'var(--bg-emphasis)';
-}
-
-function unhighlightRelatedRow(e: React.MouseEvent<HTMLButtonElement>) {
-  e.currentTarget.style.background = 'transparent';
-}
