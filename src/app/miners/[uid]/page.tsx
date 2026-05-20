@@ -231,11 +231,11 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
   // When `selectedRepo === null`, these are identical to the in-period
   // arrays; when a repo is selected they narrow to that one repo.
   const prsFiltered = useMemo(
-    () => (selectedRepo ? prsInPeriod.filter((p) => p.repository === selectedRepo) : prsInPeriod),
+    () => (selectedRepo ? prsInPeriod.filter((p) => p.repository.toLowerCase() === selectedRepo.toLowerCase()) : prsInPeriod),
     [prsInPeriod, selectedRepo],
   );
   const discoveredFiltered = useMemo(
-    () => (selectedRepo ? discoveredInPeriod.filter((i) => i.repo === selectedRepo) : discoveredInPeriod),
+    () => (selectedRepo ? discoveredInPeriod.filter((i) => i.repo.toLowerCase() === selectedRepo.toLowerCase()) : discoveredInPeriod),
     [discoveredInPeriod, selectedRepo],
   );
   const prAgg = useMemo(() => {
