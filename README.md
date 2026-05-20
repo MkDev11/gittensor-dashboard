@@ -43,7 +43,7 @@ Anyone with a GitHub account can sign in — there is no admin-approval gate. Ad
 | `GITHUB_PATS` | Comma-separated PATs, rotated automatically |
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | OAuth app credentials |
 | `ADMIN_GITHUB_LOGINS` | Comma-separated logins auto-granted admin on first sign-in |
-| `SESSION_SECRET` | Auto-generated on first run if missing |
+| `SESSION_SECRET` | Optional; auto-generated on first run if omitted, or set to a 32+ character secret |
 | `PORT` | HTTP port (default `12074`) |
 
 ## Production

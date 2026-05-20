@@ -29,11 +29,11 @@ import { IssueLabels } from '@/components/IssueLabels';
 import { formatRelativeTime } from '@/lib/format';
 import { normalizeGitHubBodyMarkdown, renderMarkdownToHtml } from '@/lib/markdown';
 import { useSettings } from '@/lib/settings';
-import type { IssueDto, PullDto } from '@/lib/api-types';
+import type { Issue, Pull } from '@/types/entities';
 
 type ContentTarget =
-  | { kind: 'issue'; owner: string; name: string; number: number; preloaded?: IssueDto }
-  | { kind: 'pull'; owner: string; name: string; number: number; preloaded?: PullDto };
+  | { kind: 'issue'; owner: string; name: string; number: number; preloaded?: Issue }
+  | { kind: 'pull'; owner: string; name: string; number: number; preloaded?: Pull };
 
 interface ContentViewerProps {
   target: ContentTarget;
@@ -42,7 +42,7 @@ interface ContentViewerProps {
   width?: number;
 }
 
-function preserveExistingBody<T extends IssueDto | PullDto>(next: T, current: T | null): T {
+function preserveExistingBody<T extends Issue | Pull>(next: T, current: T | null): T {
   const currentBody = current?.body?.trim() ? current.body : null;
   const nextHasBody = !!next.body?.trim();
   const withBody = !nextHasBody && currentBody ? { ...next, body: currentBody } : next;
@@ -61,7 +61,7 @@ type ActiveTab = { kind: 'issue' } | { kind: 'pull'; number: number };
 
 const TIMELINE_FETCH_VERSION = '7';
 
-type RelatedIssueDto = IssueDto & { source?: string };
+type RelatedIssue = Issue & { source?: string };
 
 type TimelineSubject = {
   number: number | null;
@@ -105,14 +105,14 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
   const targetKey = `${target.kind}:${target.owner}/${target.name}#${target.number}`;
   const bodyScrollRef = useRef<HTMLDivElement | null>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
-  const [issueData, setIssueData] = useState<IssueDto | null>(
-    target.kind === 'issue' ? ((target.preloaded as IssueDto | undefined) ?? null) : null
+  const [issueData, setIssueData] = useState<Issue | null>(
+    target.kind === 'issue' ? ((target.preloaded as Issue | undefined) ?? null) : null
   );
-  const [pullData, setPullData] = useState<PullDto | null>(
-    target.kind === 'pull' ? ((target.preloaded as PullDto | undefined) ?? null) : null
+  const [pullData, setPullData] = useState<Pull | null>(
+    target.kind === 'pull' ? ((target.preloaded as Pull | undefined) ?? null) : null
   );
-  const [linkedIssueData, setLinkedIssueData] = useState<RelatedIssueDto | null>(null);
-  const [relatedPRs, setRelatedPRs] = useState<PullDto[]>([]);
+  const [linkedIssueData, setLinkedIssueData] = useState<RelatedIssue | null>(null);
+  const [relatedPRs, setRelatedPRs] = useState<Pull[]>([]);
   const [relatedPRsLoaded, setRelatedPRsLoaded] = useState(false);
   const [timelineEvents, setTimelineEvents] = useState<IssueTimelineEvent[]>([]);
   const [timelineLoaded, setTimelineLoaded] = useState(false);
@@ -131,12 +131,12 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
   // Reset all state when the underlying target changes
   useEffect(() => {
     if (target.kind === 'issue') {
-      setIssueData((target.preloaded as IssueDto | undefined) ?? null);
+      setIssueData((target.preloaded as Issue | undefined) ?? null);
       setPullData(null);
       setActiveTab({ kind: 'issue' });
     } else {
       setIssueData(null);
-      setPullData((target.preloaded as PullDto | undefined) ?? null);
+      setPullData((target.preloaded as Pull | undefined) ?? null);
       setActiveTab({ kind: 'pull', number: target.number });
     }
     setLinkedIssueData(null);
@@ -184,9 +184,9 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
       .then((j) => {
         if (fetchedForRef.current !== key) return; // user moved to another target
         if (target.kind === 'issue') {
-          setIssueData((current) => preserveExistingBody(j as IssueDto, current));
+          setIssueData((current) => preserveExistingBody(j as Issue, current));
         } else {
-          setPullData((current) => preserveExistingBody(j as PullDto, current));
+          setPullData((current) => preserveExistingBody(j as Pull, current));
         }
       })
       .catch((e) => {
@@ -205,7 +205,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
     setRelatedPRsLoaded(false);
     fetch(`/api/related-prs/${target.owner}/${target.name}/${target.number}`)
       .then((r) => r.json())
-      .then((j) => setRelatedPRs(Array.isArray(j.pulls) ? (j.pulls as PullDto[]) : []))
+      .then((j) => setRelatedPRs(Array.isArray(j.pulls) ? (j.pulls as Pull[]) : []))
       .catch(() => setRelatedPRs([]))
       .finally(() => setRelatedPRsLoaded(true));
   }, [targetKey]);
@@ -218,8 +218,8 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
     fetch(`/api/related-issues/${target.owner}/${target.name}/${target.number}`, { cache: 'no-store' })
       .then((r) => r.json())
       .then((j) => {
-        const issues = Array.isArray(j.issues) ? (j.issues as RelatedIssueDto[]) : [];
-        const pulls = Array.isArray(j.related_pulls) ? (j.related_pulls as PullDto[]) : [];
+        const issues = Array.isArray(j.issues) ? (j.issues as RelatedIssue[]) : [];
+        const pulls = Array.isArray(j.related_pulls) ? (j.related_pulls as Pull[]) : [];
         setLinkedIssueData(issues[0] ?? null);
         setRelatedPRs(pulls);
       })
@@ -314,7 +314,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
     activeTab.kind === 'issue'
       ? { kind: 'issue', owner: target.owner, name: target.name, number: activeIssueNumber ?? target.number }
       : { kind: 'pull', owner: target.owner, name: target.name, number: activeTab.number };
-  const viewData: IssueDto | PullDto | null =
+  const viewData: Issue | Pull | null =
     activeTab.kind === 'issue' ? issueData ?? linkedIssueData : activePR;
 
   const inner = (
@@ -458,7 +458,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
   return portalRoot ? createPortal(modal, portalRoot) : null;
 }
 
-function mergeActivePull(related: PullDto | null, detailed: PullDto | null): PullDto | null {
+function mergeActivePull(related: Pull | null, detailed: Pull | null): Pull | null {
   if (!related) return detailed;
   if (!detailed) return related;
   if (related.number !== detailed.number || related.repo_full_name !== detailed.repo_full_name) return related;
@@ -560,7 +560,7 @@ function TabStrip({
   onChange,
 }: {
   issueNumber: number | null;
-  relatedPRs: PullDto[];
+  relatedPRs: Pull[];
   activeTab: ActiveTab;
   onChange: (next: ActiveTab) => void;
 }) {
@@ -712,7 +712,7 @@ function Header({
   mode,
 }: {
   target: ContentTarget;
-  data: IssueDto | PullDto | null;
+  data: Issue | Pull | null;
   mergedPRCount: number | null;
   onClose: () => void;
   showCloseIcon: boolean;
@@ -758,12 +758,12 @@ function Header({
   const statusNode =
     target.kind === 'issue' ? (
       data && 'state_reason' in data ? (
-        <IssueStatusBadge issue={data as IssueDto} mergedPRCount={mergedPRCount} />
+        <IssueStatusBadge issue={data as Issue} mergedPRCount={mergedPRCount} />
       ) : (
         <IssueOpenedIcon size={16} />
       )
     ) : data ? (
-      <PullStatusBadge pr={data as PullDto} />
+      <PullStatusBadge pr={data as Pull} />
     ) : (
       <GitPullRequestIcon size={16} />
     );
@@ -852,8 +852,8 @@ function Header({
                 {(() => {
                   const assoc =
                     target.kind === 'issue'
-                      ? (data as IssueDto).author_association
-                      : (data as PullDto).author_association;
+                      ? (data as Issue).author_association
+                      : (data as Pull).author_association;
                   if (!assoc || assoc === 'NONE') return null;
                   return (
                     <Label variant="secondary" sx={{ ml: 1, fontSize: '10px' }}>
@@ -867,23 +867,23 @@ function Header({
               <ClockIcon size={12} />
               opened {formatRelativeTime(data.created_at)}
             </Box>
-            {target.kind === 'pull' && (data as PullDto).merged_at && (
-              <Text sx={{ color: 'var(--success-fg)' }}>· merged {formatRelativeTime((data as PullDto).merged_at)}</Text>
+            {target.kind === 'pull' && (data as Pull).merged_at && (
+              <Text sx={{ color: 'var(--success-fg)' }}>· merged {formatRelativeTime((data as Pull).merged_at)}</Text>
             )}
-            {data.closed_at && !(target.kind === 'pull' && (data as PullDto).merged_at) && (
+            {data.closed_at && !(target.kind === 'pull' && (data as Pull).merged_at) && (
               <Text>· closed {formatRelativeTime(data.closed_at)}</Text>
             )}
-            {target.kind === 'issue' && (data as IssueDto).comments > 0 && (
+            {target.kind === 'issue' && (data as Issue).comments > 0 && (
               <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
                 <CommentIcon size={12} />
-                {(data as IssueDto).comments}
+                {(data as Issue).comments}
               </Box>
             )}
           </Box>
         )}
-        {data && target.kind === 'issue' && (data as IssueDto).labels && (data as IssueDto).labels.length > 0 && (
+        {data && target.kind === 'issue' && (data as Issue).labels && (data as Issue).labels.length > 0 && (
           <Box sx={{ display: 'flex', gap: 1, mt: 2, flexWrap: 'wrap' }}>
-            <IssueLabels labels={(data as IssueDto).labels} maxVisible={8} maxLabelWidth={180} wrap />
+            <IssueLabels labels={(data as Issue).labels} maxVisible={8} maxLabelWidth={180} wrap />
           </Box>
         )}
       </Box>
@@ -900,10 +900,10 @@ function TimelineBody({
   timelineLoaded,
   timelineError,
 }: {
-  data: IssueDto | PullDto;
+  data: Issue | Pull;
   renderMarkdown: boolean;
   kind: 'issue' | 'pull';
-  relatedPRs: PullDto[];
+  relatedPRs: Pull[];
   timelineEvents: IssueTimelineEvent[];
   timelineLoaded: boolean;
   timelineError: string | null;
@@ -911,7 +911,7 @@ function TimelineBody({
   const body = normalizeGitHubBodyMarkdown((data.body ?? '').trim());
   const author = data.author_login ?? 'unknown';
   const mergedRelatedPR = kind === 'issue' ? relatedPRs.find((pr) => pr.merged === 1) ?? null : null;
-  const closedAt = kind === 'pull' && (data as PullDto).merged_at ? (data as PullDto).merged_at : data.closed_at;
+  const closedAt = kind === 'pull' && (data as Pull).merged_at ? (data as Pull).merged_at : data.closed_at;
   const closedActor = mergedRelatedPR?.author_login ?? data.author_login;
 
   return (
@@ -995,8 +995,8 @@ function TimelineBody({
 
       {kind === 'pull' && closedAt && timelineLoaded && !timelineHasPullCloseEvent(timelineEvents) && (
         <TimelineEvent
-          icon={(data as PullDto).merged_at ? <GitMergeIcon size={14} /> : <GitPullRequestClosedIcon size={14} />}
-          tone={(data as PullDto).merged_at ? 'success' : 'muted'}
+          icon={(data as Pull).merged_at ? <GitMergeIcon size={14} /> : <GitPullRequestClosedIcon size={14} />}
+          tone={(data as Pull).merged_at ? 'success' : 'muted'}
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, flexWrap: 'wrap' }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexWrap: 'wrap' }}>
@@ -1008,7 +1008,7 @@ function TimelineBody({
                 mergedRelatedPR={mergedRelatedPR}
               />
             </Box>
-            <PullStatusBadge pr={data as PullDto} />
+            <PullStatusBadge pr={data as Pull} />
           </Box>
         </TimelineEvent>
       )}
@@ -1026,13 +1026,13 @@ function ClosedTimelineText({
   closedAt,
   mergedRelatedPR,
 }: {
-  data: IssueDto | PullDto;
+  data: Issue | Pull;
   kind: 'issue' | 'pull';
   closedAt: string;
-  mergedRelatedPR: PullDto | null;
+  mergedRelatedPR: Pull | null;
 }) {
   if (kind === 'pull') {
-    const pr = data as PullDto;
+    const pr = data as Pull;
     return (
       <Text sx={{ color: 'var(--fg-muted)', fontSize: 0 }}>
         {pr.merged_at ? 'merged this pull request' : 'closed this pull request'} {formatRelativeTime(closedAt)}
@@ -1040,7 +1040,7 @@ function ClosedTimelineText({
     );
   }
 
-  const issue = data as IssueDto;
+  const issue = data as Issue;
   if (mergedRelatedPR) {
     return (
       <Text sx={{ color: 'var(--fg-muted)', fontSize: 0 }}>
@@ -1089,13 +1089,13 @@ function DetailTimeline({
   renderMarkdown,
   relatedPRs,
 }: {
-  data: IssueDto | PullDto;
+  data: Issue | Pull;
   kind: 'issue' | 'pull';
   events: IssueTimelineEvent[];
   loading: boolean;
   error: string | null;
   renderMarkdown: boolean;
-  relatedPRs: PullDto[];
+  relatedPRs: Pull[];
 }) {
   if (loading) {
     return (
@@ -1146,10 +1146,10 @@ function IssueTimelineItem({
   relatedPRs,
 }: {
   event: IssueTimelineEvent;
-  data: IssueDto | PullDto;
+  data: Issue | Pull;
   kind: 'issue' | 'pull';
   renderMarkdown: boolean;
-  relatedPRs: PullDto[];
+  relatedPRs: Pull[];
 }) {
   if (event.event === 'reviewed') {
     if (event.body !== null) {
@@ -1164,10 +1164,10 @@ function IssueTimelineItem({
     return <LabelTimelineEvent event={event} />;
   }
   if (event.event === 'closed' && kind === 'issue') {
-    return <ClosedIssueTimelineEvent event={event} issue={data as IssueDto} relatedPRs={relatedPRs} />;
+    return <ClosedIssueTimelineEvent event={event} issue={data as Issue} relatedPRs={relatedPRs} />;
   }
   if ((event.event === 'closed' || event.event === 'merged') && kind === 'pull') {
-    return <ClosedPullTimelineEvent event={event} pr={data as PullDto} />;
+    return <ClosedPullTimelineEvent event={event} pr={data as Pull} />;
   }
   if (event.event === 'reopened') {
     return (
@@ -1320,7 +1320,7 @@ function PullReviewTimelineEvent({ event }: { event: IssueTimelineEvent }) {
   );
 }
 
-function ClosedPullTimelineEvent({ event, pr }: { event: IssueTimelineEvent; pr: PullDto }) {
+function ClosedPullTimelineEvent({ event, pr }: { event: IssueTimelineEvent; pr: Pull }) {
   const merged = event.event === 'merged' || pr.merged === 1 || !!pr.merged_at;
   return (
     <TimelineEvent
@@ -1362,8 +1362,8 @@ function ClosedIssueTimelineEvent({
   relatedPRs,
 }: {
   event: IssueTimelineEvent;
-  issue: IssueDto;
-  relatedPRs: PullDto[];
+  issue: Issue;
+  relatedPRs: Pull[];
 }) {
   const reason = event.state_reason ?? issue.state_reason;
   const normalizedReason = reason?.toUpperCase() ?? null;
@@ -1412,9 +1412,9 @@ function ReferenceTimelineEvent({
   relatedPRs,
 }: {
   event: IssueTimelineEvent;
-  data: IssueDto | PullDto;
+  data: Issue | Pull;
   kind: 'issue' | 'pull';
-  relatedPRs: PullDto[];
+  relatedPRs: Pull[];
 }) {
   const subject = event.source ?? event.subject;
   const matchedPr =
@@ -1789,7 +1789,7 @@ function isBotLogin(login: string): boolean {
   return login.endsWith('[bot]') || login.toLowerCase().includes('-bot');
 }
 
-function TimelinePullLink({ pr, repoFullName }: { pr: PullDto; repoFullName: string }) {
+function TimelinePullLink({ pr, repoFullName }: { pr: Pull; repoFullName: string }) {
   return (
     <PrimerLink
       href={pr.html_url ?? `https://github.com/${repoFullName}/pull/${pr.number}`}
@@ -1868,7 +1868,7 @@ function TimelineSubjectLink({ subject, fallbackRepo }: { subject: TimelineSubje
   );
 }
 
-function ReferenceSubjectIcon({ subject, pr = null }: { subject: TimelineSubject; pr?: PullDto | null }) {
+function ReferenceSubjectIcon({ subject, pr = null }: { subject: TimelineSubject; pr?: Pull | null }) {
   const normalizedState = (subject.state ?? '').toLowerCase();
   const normalizedReason = (subject.state_reason ?? '').toLowerCase();
   const isDraft = subject.is_pull_request && (pr?.draft === 1 || subject.draft === true);
@@ -1947,7 +1947,7 @@ function ReferenceSubjectIcon({ subject, pr = null }: { subject: TimelineSubject
   );
 }
 
-function pullFromSubject(subject: TimelineSubject, fallbackRepo: string): PullDto {
+function pullFromSubject(subject: TimelineSubject, fallbackRepo: string): Pull {
   return {
     id: 0,
     repo_full_name: subject.repo_full_name ?? fallbackRepo,

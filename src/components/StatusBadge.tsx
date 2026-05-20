@@ -12,8 +12,8 @@ import {
   SkipIcon,
   type Icon,
 } from '@primer/octicons-react';
-import type { IssueDto, PullDto } from '@/lib/api-types';
-import { pullStatus } from '@/lib/api-types';
+import type { Issue, Pull } from '@/types/entities';
+import { pullStatus } from '@/types/entities';
 
 const ISSUE_STYLE = {
   open: { bg: 'open.emphasis', fg: 'fg.onEmphasis', icon: IssueOpenedIcon, label: 'Open' },
@@ -51,7 +51,7 @@ export type EffectiveIssueState = 'open' | 'completed' | 'not_planned' | 'duplic
  * pass a concrete count from the server and keep the strict mining buckets.
  */
 export function effectiveIssueState(
-  issue: IssueDto,
+  issue: Issue,
   mergedPRCount: number | null,
 ): EffectiveIssueState {
   if (issue.state === 'open') return 'open';
@@ -66,13 +66,13 @@ export const IssueStatusBadge = React.memo(function IssueStatusBadge({
   issue,
   mergedPRCount = null,
 }: {
-  issue: IssueDto;
+  issue: Issue;
   mergedPRCount?: number | null;
 }) {
   return <Pill style={ISSUE_STYLE[effectiveIssueState(issue, mergedPRCount)]} />;
 });
 
-export const PullStatusBadge = React.memo(function PullStatusBadge({ pr }: { pr: PullDto }) {
+export const PullStatusBadge = React.memo(function PullStatusBadge({ pr }: { pr: Pull }) {
   const s = pullStatus(pr);
   return <Pill style={PR_STYLE[s]} />;
 });

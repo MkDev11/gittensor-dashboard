@@ -1,15 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db';
 import { getSessionFromCookies, getUserById } from '@/lib/auth';
+import type { UserRepo } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
-
-interface UserRepoRow {
-  full_name: string;
-  weight: number;
-  notes: string | null;
-  added_at: string;
-}
 
 async function requireAdmin() {
   const sess = await getSessionFromCookies();
@@ -23,7 +17,7 @@ export async function GET() {
   const db = getDb();
   const rows = db
     .prepare('SELECT full_name, weight, notes, added_at FROM user_repos ORDER BY added_at DESC')
-    .all() as UserRepoRow[];
+    .all() as UserRepo[];
   return NextResponse.json({ count: rows.length, repos: rows });
 }
 

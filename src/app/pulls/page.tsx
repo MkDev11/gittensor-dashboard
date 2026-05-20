@@ -2,11 +2,17 @@
 
 export const dynamic = 'force-dynamic';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { PageLayout, Heading, Text, Box, Label, Link as PrimerLink } from '@primer/react';
-import { RepoIcon, IssueOpenedIcon, GitPullRequestIcon, TriangleUpIcon, TriangleDownIcon } from '@primer/octicons-react';
+import {
+  RepoIcon,
+  TriangleUpIcon,
+  TriangleDownIcon,
+  StarIcon,
+  StarFillIcon,
+} from '@primer/octicons-react';
 import { PullStatusBadge } from '@/components/StatusBadge';
 import { formatRelativeTime, isRecent } from '@/lib/format';
 import { useMinerLogin } from '@/lib/use-miner';
@@ -15,44 +21,162 @@ import { TableRowsSkeleton } from '@/components/Skeleton';
 import Dropdown from '@/components/Dropdown';
 import SearchInput from '@/components/SearchInput';
 import AuthorFilter from '@/components/AuthorFilter';
-import type { PullDto } from '@/lib/api-types';
-import { pullStatus } from '@/lib/api-types';
+import AuthorActivitySidebar from '@/components/AuthorActivitySidebar';
+import AuthorCredibilityNote from '@/components/AuthorCredibilityNote';
+import type { Issue, Pull } from '@/types/entities';
 import ContentViewer from '@/components/ContentViewer';
 import { useSettings } from '@/lib/settings';
 import { useSn74Repos, lookupWeight } from '@/lib/use-sn74-repos';
+import { useTrackedRepos } from '@/lib/tracked-repos';
+import { InlinePagination as TablePagination } from '@/components/repo-explorer/Pagination';
 
-interface AggPull extends PullDto {
-  linked_issues: Array<{ repo: string; number: number }>;
+interface PullScore {
+  score: number | null;
+  collateral_score: number | null;
+}
+
+interface AggPull extends Pull {
+  score: PullScore | null;
 }
 
 interface PullsResp {
   count: number;
   repo_count: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  authors: Array<{ login: string; count: number }>;
+  author_count: number;
   pulls: AggPull[];
 }
 
+interface UserReposResp {
+  count: number;
+  repos: Array<{ full_name: string; weight: number }>;
+}
+
+type AuthorTarget = { owner: string; name: string; repoFullName: string; login: string; association: string | null };
 type StateFilter = 'all' | 'open' | 'draft' | 'merged' | 'closed';
-type CloseFilter = 'all' | 'merged' | 'closed' | 'still_open';
 type SortKey = 'updated' | 'opened' | 'closed' | 'repo' | 'weight' | 'number';
 type SortDir = 'asc' | 'desc';
 
-const PAGE_INCREMENT = 50;
+const PULLS_CONTENT_MAX_WIDTH = 1480;
+const pullRowCellSx = {
+  px: 2,
+  py: 0,
+  height: 40,
+  maxHeight: 40,
+  verticalAlign: 'middle' as const,
+  lineHeight: '20px',
+};
 
 export default function AllPullsPage() {
+  const { repos: sn74Repos, weights: repoWeights, isSuccess: sn74ReposReady } = useSn74Repos();
+  const { tracked, toggle: toggleTrackedRepo } = useTrackedRepos();
+  const { settings, update } = useSettings();
+  const me = useMinerLogin();
+  const pageSize = settings.pageSize > 0 ? settings.pageSize : 25;
+
   const [query, setQuery] = useState('');
   const [stateFilter, setStateFilter] = useState<StateFilter>('all');
   const [mineOnly, setMineOnly] = useState(false);
+  const [trackedOnly, setTrackedOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('updated');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [visibleCount, setVisibleCount] = useState(PAGE_INCREMENT);
   const [authorFilter, setAuthorFilter] = useState<string>('all');
-  const [closeFilter, setCloseFilter] = useState<CloseFilter>('all');
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const me = useMinerLogin();
-  const { settings } = useSettings();
-  const { weights: repoWeights } = useSn74Repos();
+  const [page, setPage] = useState(1);
   const [openPull, setOpenPull] = useState<AggPull | null>(null);
+  const [openIssue, setOpenIssue] = useState<Issue | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [authorTarget, setAuthorTarget] = useState<AuthorTarget | null>(null);
+
+  const { data: userReposData, isSuccess: userReposReady } = useQuery<UserReposResp>({
+    queryKey: ['user-repos'],
+    queryFn: async ({ signal }) => {
+      const r = await fetch('/api/user-repos', { signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 4 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+  const currentRepoNames = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const repo of sn74Repos) names.set(repo.fullName.toLowerCase(), repo.fullName);
+    for (const repo of userReposData?.repos ?? []) {
+      if (!names.has(repo.full_name.toLowerCase())) names.set(repo.full_name.toLowerCase(), repo.full_name);
+    }
+    return names;
+  }, [sn74Repos, userReposData]);
+
+  const scopedTracked = useMemo(() => {
+    const trackedNames = Array.from(tracked);
+    if (!sn74ReposReady || !userReposReady) return trackedNames;
+    return trackedNames.filter((name) => currentRepoNames.has(name.toLowerCase()));
+  }, [currentRepoNames, sn74ReposReady, tracked, userReposReady]);
+
+  const scopedTrackedSet = useMemo(
+    () => new Set(scopedTracked.map((name) => name.toLowerCase())),
+    [scopedTracked],
+  );
+
+  const displayWeights = useMemo(() => {
+    const weights = new Map(repoWeights);
+    for (const repo of userReposData?.repos ?? []) weights.set(repo.full_name.toLowerCase(), repo.weight);
+    return weights;
+  }, [repoWeights, userReposData]);
+
+  const trackedRepoParam = useMemo(() => {
+    if (!trackedOnly) return null;
+    return scopedTracked
+      .map((name) => currentRepoNames.get(name.toLowerCase()) ?? name)
+      .sort((a, b) => a.localeCompare(b))
+      .join(',');
+  }, [currentRepoNames, scopedTracked, trackedOnly]);
+
+  const authorParam = mineOnly ? me || '__signed_out__' : authorFilter;
+  const pullsParams = useMemo(() => {
+    const sp = new URLSearchParams();
+    sp.set('page', String(page));
+    sp.set('pageSize', String(pageSize));
+    sp.set('sort', sortKey);
+    sp.set('dir', sortDir);
+    if (query.trim()) sp.set('q', query.trim());
+    if (stateFilter !== 'all') sp.set('state', stateFilter);
+    if (authorParam !== 'all') sp.set('author', authorParam);
+    if (trackedRepoParam !== null) sp.set('repos', trackedRepoParam);
+    return sp.toString();
+  }, [authorParam, page, pageSize, query, sortDir, sortKey, stateFilter, trackedRepoParam]);
+
+  const { data, isLoading, isFetching } = useQuery<PullsResp>({
+    queryKey: ['all-pulls', pullsParams],
+    queryFn: async ({ signal }) => {
+      const r = await fetch(`/api/pulls?${pullsParams}`, { signal });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+    refetchInterval: 30000,
+    placeholderData: keepPreviousData,
+  });
+
+  const rows = data?.pulls ?? [];
+  const totalItems = data?.count ?? 0;
+  const totalPages = data?.total_pages ?? page;
+  const safePage = Math.min(page, totalPages);
+  const authorOptions = data?.authors ?? [];
+  const myCount = authorOptions.find((a) => a.login.toLowerCase() === me.toLowerCase())?.count ?? 0;
+  const hasActiveFilters =
+    query.trim().length > 0 || stateFilter !== 'all' || mineOnly || trackedOnly || authorFilter !== 'all';
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, stateFilter, trackedOnly, trackedRepoParam, authorParam, sortKey, sortDir, pageSize]);
+
+  useEffect(() => {
+    if (data && page > data.total_pages) setPage(data.total_pages);
+  }, [data, page]);
 
   const handleRowClick = (pr: AggPull) => {
     if (settings.contentDisplay === 'modal' || settings.contentDisplay === 'side') {
@@ -63,273 +187,259 @@ export default function AllPullsPage() {
     }
   };
 
-  const { data, isLoading } = useQuery<PullsResp>({
-    queryKey: ['all-pulls'],
-    queryFn: async () => {
-      const r = await fetch('/api/pulls');
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    },
-    refetchInterval: 30000,
-  });
-
-  const filtered = useMemo(() => {
-    if (!data?.pulls) return [];
-    const q = query.trim().toLowerCase();
-    let list = data.pulls.filter((p) => {
-      if (q && !`${p.title} #${p.number} ${p.author_login ?? ''} ${p.repo_full_name}`.toLowerCase().includes(q)) return false;
-      if (mineOnly && p.author_login?.toLowerCase() !== me.toLowerCase()) return false;
-      if (authorFilter !== 'all' && p.author_login !== authorFilter) return false;
-      if (closeFilter === 'merged' && !p.merged) return false;
-      if (closeFilter === 'closed' && (p.merged || !p.closed_at)) return false;
-      if (closeFilter === 'still_open' && (p.closed_at || p.merged_at)) return false;
-      if (stateFilter === 'all') return true;
-      return pullStatus(p) === stateFilter;
+  const openAuthorDetails = (pr: AggPull) => {
+    if (!pr.author_login) return;
+    const [owner, name] = pr.repo_full_name.split('/');
+    setOpenPull(null);
+    setOpenIssue(null);
+    setExpandedKey(null);
+    setAuthorTarget({
+      owner,
+      name,
+      repoFullName: pr.repo_full_name,
+      login: pr.author_login,
+      association: pr.author_association ?? null,
     });
-    list = [...list].sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === 'updated') cmp = (a.updated_at ?? '').localeCompare(b.updated_at ?? '');
-      else if (sortKey === 'opened') cmp = (a.created_at ?? '').localeCompare(b.created_at ?? '');
-      else if (sortKey === 'closed') cmp = (a.closed_at ?? '').localeCompare(b.closed_at ?? '');
-      else if (sortKey === 'repo') cmp = a.repo_full_name.localeCompare(b.repo_full_name);
-      else if (sortKey === 'number') cmp = a.number - b.number;
-      else if (sortKey === 'weight') cmp = (lookupWeight(repoWeights, a.repo_full_name) ?? 0) - (lookupWeight(repoWeights, b.repo_full_name) ?? 0);
-      return sortDir === 'asc' ? cmp : -cmp;
-    });
-    return list;
-  }, [data, query, stateFilter, mineOnly, authorFilter, closeFilter, sortKey, sortDir, me, repoWeights]);
+  };
 
-  // Build the author option list from current data — sorted by frequency.
-  const authorOptions = useMemo(() => {
-    if (!data?.pulls) return [];
-    const counts = new Map<string, number>();
-    for (const p of data.pulls) {
-      const a = p.author_login;
-      if (!a) continue;
-      counts.set(a, (counts.get(a) ?? 0) + 1);
-    }
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([login, count]) => ({ login, count }));
-  }, [data]);
+  const openPullFromAuthor = (pull: Pull) => {
+    setAuthorTarget(null);
+    setExpandedKey(null);
+    setOpenPull({ ...pull, score: null });
+  };
 
-  useEffect(() => {
-    setVisibleCount(PAGE_INCREMENT);
-  }, [query, stateFilter, mineOnly, authorFilter, closeFilter, sortKey, sortDir]);
+  const openIssueFromAuthor = (issue: Issue) => {
+    setAuthorTarget(null);
+    setOpenPull(null);
+    setExpandedKey(null);
+    setOpenIssue(issue);
+  };
 
-  useEffect(() => {
-    const el = sentinelRef.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setVisibleCount((c) => Math.min(c + PAGE_INCREMENT, filtered.length));
-          }
-        }
-      },
-      { rootMargin: '400px 0px' }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, [filtered.length]);
-
-  const visible = useMemo(() => filtered.slice(0, visibleCount), [filtered, visibleCount]);
-  const hasMore = visibleCount < filtered.length;
 
   const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
       setSortKey(key);
       setSortDir(key === 'repo' || key === 'number' ? 'asc' : 'desc');
     }
   };
 
-  const myCount = data?.pulls.filter((p) => p.author_login?.toLowerCase() === me.toLowerCase()).length ?? 0;
-
   return (
     <PageLayout containerWidth="full" padding="normal">
       <PageLayout.Header>
-        <Heading sx={{ fontSize: 4, mb: 1 }}>Pull Requests</Heading>
-        <Text sx={{ color: 'fg.muted' }}>
-          Live aggregated view of every PR across all cached SN74 repositories, with linked issues parsed from PR bodies.
-        </Text>
+        <Box sx={{ width: '100%', maxWidth: PULLS_CONTENT_MAX_WIDTH, mx: 'auto' }}>
+          <Heading sx={{ fontSize: 4, mb: 1 }}>Pull Requests</Heading>
+          <Text sx={{ color: 'fg.muted' }}>
+            Live aggregated view across current SN74 and custom repositories. Star a repo to highlight its PRs; toggle{' '}
+            <strong>Tracked only</strong> to filter to your watchlist.
+          </Text>
+        </Box>
       </PageLayout.Header>
       <PageLayout.Content>
-        <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
-          <SearchInput
-            value={query}
-            onChange={setQuery}
-            placeholder="Filter by title, repo, #, author…"
-            width={380}
-            ariaLabel="Filter pull requests"
-          />
-          <Dropdown
-            value={stateFilter}
-            onChange={(v) => setStateFilter(v as StateFilter)}
-            options={[
-              { value: 'all', label: 'All states' },
-              { value: 'open', label: 'Open' },
-              { value: 'draft', label: 'Draft' },
-              { value: 'merged', label: 'Merged' },
-              { value: 'closed', label: 'Closed (unmerged)' },
-            ]}
-            width={180}
-            ariaLabel="Filter by state"
-          />
+        <Box sx={{ width: '100%', maxWidth: PULLS_CONTENT_MAX_WIDTH, mx: 'auto' }}>
           <Box
-            as="label"
             sx={{
-              display: 'inline-flex',
+              display: 'flex',
               alignItems: 'center',
-              gap: 2,
-              px: '12px',
-              height: 32,
+              justifyContent: 'space-between',
+              gap: 3,
+              mb: 3,
+              p: 2,
               border: '1px solid',
-              borderColor: mineOnly ? 'var(--attention-emphasis)' : 'var(--border-default)',
-              bg: mineOnly ? 'var(--attention-subtle, rgba(242, 201, 76, 0.16))' : 'var(--bg-canvas)',
-              color: mineOnly ? 'var(--attention-emphasis)' : 'var(--fg-default)',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: 500,
-              userSelect: 'none',
+              borderColor: 'var(--border-default)',
+              borderRadius: 2,
+              bg: 'var(--bg-subtle)',
+              flexWrap: 'wrap',
             }}
           >
-            <input
-              type="checkbox"
-              checked={mineOnly}
-              onChange={(e) => setMineOnly(e.target.checked)}
-              style={{ margin: 0, width: 14, height: 14, accentColor: 'var(--attention-emphasis)', cursor: 'pointer' }}
-            />
-            My PRs only
-            {myCount > 0 && (
-              <Box
-                sx={{
-                  px: '6px',
-                  bg: mineOnly ? 'var(--attention-emphasis)' : 'var(--bg-emphasis)',
-                  color: mineOnly ? '#ffffff' : 'var(--fg-default)',
-                  fontSize: '11px',
-                  fontWeight: 700,
-                  borderRadius: 999,
-                  lineHeight: '18px',
-                }}
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', minWidth: 0 }}>
+              <SearchInput
+                value={query}
+                onChange={setQuery}
+                placeholder="Filter by title, repo, #, author..."
+                width={380}
+                ariaLabel="Filter pull requests"
+              />
+              <Dropdown
+                value={stateFilter}
+                onChange={(v) => setStateFilter(v as StateFilter)}
+                options={[
+                  { value: 'all', label: 'All states' },
+                  { value: 'open', label: 'Open' },
+                  { value: 'draft', label: 'Draft' },
+                  { value: 'merged', label: 'Merged' },
+                  { value: 'closed', label: 'Closed' },
+                ]}
+                width={180}
+                ariaLabel="Filter by state"
+              />
+              <ToggleButton
+                active={trackedOnly}
+                onClick={() => setTrackedOnly((v) => !v)}
+                icon={trackedOnly ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
               >
-                {myCount}
-              </Box>
-            )}
-          </Box>
-          <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2, color: 'fg.muted', fontSize: 0 }}>
-            {isLoading && <Spinner size="sm" tone="muted" />}
-            {data && (
-              <Text>
-                {filtered.length} PRs across {new Set(filtered.map((p) => p.repo_full_name)).size} repos · live
-              </Text>
-            )}
-          </Box>
-        </Box>
+                Tracked only ({scopedTracked.length})
+              </ToggleButton>
+              <ToggleButton
+                active={mineOnly}
+                onClick={() => setMineOnly((v) => !v)}
+                tone="attention"
+              >
+                My PRs only{myCount > 0 ? ` (${myCount})` : ''}
+              </ToggleButton>
+            </Box>
 
-        <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflowX: 'auto', overflowY: 'hidden', bg: 'canvas.default' }}>
-          <Box as="table" sx={{ width: '100%', minWidth: 1100, borderCollapse: 'collapse', fontSize: 1 }}>
-            <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
-              <Box as="tr">
-                <HeaderCell label="State" />
-                <HeaderCell label="Pull Request" />
-                <HeaderCell label="Repository" onClick={() => toggleSort('repo')} active={sortKey === 'repo'} dir={sortDir} />
-                <HeaderCell label="Weight" onClick={() => toggleSort('weight')} active={sortKey === 'weight'} dir={sortDir} align="right" />
-                <Box as="th" sx={{ ...headerCellSx, py: '4px' }}>
-                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-                    <Box sx={{ color: authorFilter !== 'all' ? 'accent.fg' : 'inherit' }}>Author</Box>
-                    <AuthorFilter
-                      value={authorFilter}
-                      onChange={setAuthorFilter}
-                      authors={authorOptions}
-                      width={260}
-                      ariaLabel="Filter by author"
-                    />
-                  </Box>
-                </Box>
-                <HeaderCell label="Linked issue" />
-                <HeaderCell label="Opened" onClick={() => toggleSort('opened')} active={sortKey === 'opened'} dir={sortDir} />
-                <HeaderCell label="Updated" onClick={() => toggleSort('updated')} active={sortKey === 'updated'} dir={sortDir} />
-                <FilterHeaderCell
-                  label="Merged / Closed"
-                  value={closeFilter}
-                  onChange={(v) => setCloseFilter(v as CloseFilter)}
-                  options={[
-                    { value: 'all', label: 'All' },
-                    { value: 'merged', label: 'Merged only' },
-                    { value: 'closed', label: 'Closed (unmerged) only' },
-                    { value: 'still_open', label: 'Still open' },
-                  ]}
-                  width={200}
-                  rightSort={{ active: sortKey === 'closed', dir: sortDir, onClick: () => toggleSort('closed') }}
-                />
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: ['space-between', null, 'flex-end'],
+                gap: 2,
+                color: 'fg.muted',
+                fontSize: 0,
+                flex: ['1 1 100%', null, '0 1 auto'],
+                minWidth: ['100%', null, 'auto'],
+                flexWrap: 'wrap',
+              }}
+            >
+              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2, whiteSpace: 'nowrap' }}>
+                {isFetching && <Spinner size="sm" tone="muted" />}
+                {data && (
+                  <Text>
+                    {data.count} PRs across {data.repo_count} repos · live
+                  </Text>
+                )}
               </Box>
-            </Box>
-            <Box as="tbody">
-              {isLoading && filtered.length === 0 && (
-                <Box as="tr">
-                  <Box as="td" colSpan={9} sx={{ p: 0 }}>
-                    <TableRowsSkeleton
-                      rows={12}
-                      cols={[
-                        { width: 24 },
-                        { width: 60 },
-                        { flex: 1 },
-                        { width: 100 },
-                        { width: 80 },
-                        { width: 60 },
-                        { width: 60 },
-                        { width: 60 },
-                        { width: 80 },
-                      ]}
-                    />
-                  </Box>
-                </Box>
+              {data && data.count > 0 && (
+                <TablePagination
+                  page={safePage}
+                  totalPages={totalPages}
+                  totalItems={totalItems}
+                  pageSize={pageSize}
+                  onChange={setPage}
+                  onPageSizeChange={(n) => {
+                    update('pageSize', n);
+                    setPage(1);
+                  }}
+                  rawPageSize={settings.pageSize}
+                />
               )}
-              {!isLoading && filtered.length === 0 && (
-                <Box as="tr">
-                  <Box as="td" colSpan={9} sx={{ p: 4, textAlign: 'center', color: 'fg.muted' }}>
-                    No PRs match these filters.
-                  </Box>
-                </Box>
-              )}
-              {visible.map((pr) => {
-                const k = `${pr.repo_full_name}#${pr.number}`;
-                const expanded = expandedKey === k;
-                const [o, n] = pr.repo_full_name.split('/');
-                return (
-                  <React.Fragment key={k}>
-                    <PullTableRow
-                      pr={pr}
-                      mine={pr.author_login?.toLowerCase() === me.toLowerCase()}
-                      onRowClick={() => handleRowClick(pr)}
-                      expanded={expanded}
-                      weight={lookupWeight(repoWeights, pr.repo_full_name) ?? 0}
-                    />
-                    {expanded && settings.contentDisplay === 'accordion' && (
-                      <Box as="tr">
-                        <Box as="td" colSpan={9} sx={{ p: 0 }}>
-                          <ContentViewer
-                            target={{ kind: 'pull', owner: o, name: n, number: pr.number, preloaded: pr }}
-                            mode="inline"
-                            onClose={() => setExpandedKey(null)}
-                          />
-                        </Box>
-                      </Box>
-                    )}
-                  </React.Fragment>
-                );
-              })}
             </Box>
           </Box>
-          {hasMore && (
-            <Box
-              ref={sentinelRef as unknown as React.Ref<HTMLDivElement>}
-              sx={{ p: 3, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'fg.muted', fontSize: 0 }}
-            >
-              <Spinner size="sm" tone="muted" inline label={`Loading more… (${visibleCount} / ${filtered.length})`} />
+
+          <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, overflowX: 'auto', overflowY: 'hidden', bg: 'canvas.default' }}>
+            <Box as="table" sx={{ width: '100%', minWidth: 1120, borderCollapse: 'collapse', fontSize: 1 }}>
+              <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
+                <Box as="tr">
+                  <Box as="th" sx={{ ...headerCellSx, width: 44, textAlign: 'center' }} aria-label="Tracked repository" />
+                  <HeaderCell label="State" />
+                  <HeaderCell label="Pull Request" />
+                  <HeaderCell label="Repository" onClick={() => toggleSort('repo')} active={sortKey === 'repo'} dir={sortDir} />
+                  <HeaderCell label="Weight" onClick={() => toggleSort('weight')} active={sortKey === 'weight'} dir={sortDir} align="right" />
+                  <Box as="th" sx={{ ...headerCellSx, py: '4px' }}>
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                      <Box sx={{ color: authorFilter !== 'all' && !mineOnly ? 'accent.fg' : 'inherit' }}>Author</Box>
+                      <AuthorFilter
+                        value={mineOnly ? me || 'all' : authorFilter}
+                        onChange={(next) => {
+                          setMineOnly(false);
+                          setAuthorFilter(next);
+                        }}
+                        authors={authorOptions}
+                        totalAuthors={data?.author_count ?? authorOptions.length}
+                        width={260}
+                        ariaLabel="Filter by author"
+                      />
+                    </Box>
+                  </Box>
+                  <HeaderCell label="Score" />
+                  <HeaderCell label="Opened" onClick={() => toggleSort('opened')} active={sortKey === 'opened'} dir={sortDir} />
+                  <HeaderCell label="Updated" onClick={() => toggleSort('updated')} active={sortKey === 'updated'} dir={sortDir} />
+                  <HeaderCell label="Closed" onClick={() => toggleSort('closed')} active={sortKey === 'closed'} dir={sortDir} />
+                </Box>
+              </Box>
+              <Box as="tbody">
+                {isLoading && rows.length === 0 && (
+                  <Box as="tr">
+                    <Box as="td" colSpan={10} sx={{ p: 0 }}>
+                      <TableRowsSkeleton
+                        rows={12}
+                        cols={[
+                          { width: 32 },
+                          { width: 60 },
+                          { flex: 1 },
+                          { width: 120 },
+                          { width: 60 },
+                          { width: 100 },
+                          { width: 80 },
+                          { width: 60 },
+                          { width: 60 },
+                          { width: 60 },
+                        ]}
+                      />
+                    </Box>
+                  </Box>
+                )}
+                {!isLoading && rows.length === 0 && (
+                  <Box as="tr">
+                    <Box as="td" colSpan={10} sx={{ p: 4, textAlign: 'center', color: 'fg.muted' }}>
+                      {data && data.count === 0
+                        ? hasActiveFilters
+                          ? 'No PRs match these filters.'
+                          : 'No pull requests cached for current repositories yet. Visit a repo page or run the poller to populate.'
+                        : 'No PRs match these filters.'}
+                    </Box>
+                  </Box>
+                )}
+                {rows.map((pr) => {
+                  const k = `${pr.repo_full_name}#${pr.number}`;
+                  const expanded = expandedKey === k;
+                  const [o, n] = pr.repo_full_name.split('/');
+                  return (
+                    <React.Fragment key={k}>
+                      <PullTableRow
+                        pr={pr}
+                        mine={!!me && pr.author_login?.toLowerCase() === me.toLowerCase()}
+                        tracked={scopedTrackedSet.has(pr.repo_full_name.toLowerCase())}
+                        onToggleTrack={() => toggleTrackedRepo(pr.repo_full_name)}
+                        onRowClick={() => handleRowClick(pr)}
+                        onAuthorClick={() => openAuthorDetails(pr)}
+                        expanded={expanded}
+                        weight={lookupWeight(displayWeights, pr.repo_full_name) ?? 0}
+                      />
+                      {expanded && settings.contentDisplay === 'accordion' && (
+                        <Box as="tr">
+                          <Box as="td" colSpan={10} sx={{ p: 0 }}>
+                            <ContentViewer
+                              target={{ kind: 'pull', owner: o, name: n, number: pr.number, preloaded: pr }}
+                              mode="inline"
+                              onClose={() => setExpandedKey(null)}
+                            />
+                          </Box>
+                        </Box>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
+              </Box>
+            </Box>
+          </Box>
+
+          {data && data.count > 0 && (
+            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+              <TablePagination
+                page={safePage}
+                totalPages={totalPages}
+                totalItems={totalItems}
+                pageSize={pageSize}
+                onChange={setPage}
+                onPageSizeChange={(n) => {
+                  update('pageSize', n);
+                  setPage(1);
+                }}
+                rawPageSize={settings.pageSize}
+              />
             </Box>
           )}
         </Box>
@@ -345,6 +455,49 @@ export default function AllPullsPage() {
           />
         );
       })()}
+
+      {authorTarget && (
+        <>
+          <Box
+            onMouseDown={() => setAuthorTarget(null)}
+            sx={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 109,
+              bg: 'rgba(1, 4, 9, 0.28)',
+            }}
+          />
+          <Box
+            sx={{
+              position: 'fixed',
+              top: 'var(--header-height)',
+              right: 0,
+              bottom: 0,
+              width: ['calc(100vw - 24px)', null, 'min(760px, 52vw)'],
+              maxWidth: 'calc(100vw - 24px)',
+              borderLeft: '1px solid',
+              borderColor: 'var(--border-default)',
+              bg: 'var(--bg-canvas)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '-18px 0 36px rgba(1, 4, 9, 0.36)',
+              zIndex: 110,
+            }}
+          >
+            <AuthorActivitySidebar
+              owner={authorTarget.owner}
+              name={authorTarget.name}
+              repoFullName={authorTarget.repoFullName}
+              login={authorTarget.login}
+              initialAssociation={authorTarget.association}
+              onClose={() => setAuthorTarget(null)}
+              onPullClick={openPullFromAuthor}
+              onIssueClick={openIssueFromAuthor}
+            />
+          </Box>
+        </>
+      )}
 
       {openPull && settings.contentDisplay === 'side' && (() => {
         const [o, n] = openPull.repo_full_name.split('/');
@@ -374,89 +527,105 @@ export default function AllPullsPage() {
           </Box>
         );
       })()}
+
+      {openIssue && settings.contentDisplay === 'side' && (() => {
+        const [o, n] = openIssue.repo_full_name.split('/');
+        return (
+          <Box
+            sx={{
+              position: 'fixed',
+              top: 'var(--header-height)',
+              right: 0,
+              bottom: 0,
+              width: 480,
+              maxWidth: '50vw',
+              borderLeft: '1px solid',
+              borderColor: 'var(--border-default)',
+              bg: 'var(--bg-canvas)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              zIndex: 90,
+            }}
+          >
+            <ContentViewer
+              target={{ kind: 'issue', owner: o, name: n, number: openIssue.number, preloaded: openIssue }}
+              mode="side"
+              onClose={() => setOpenIssue(null)}
+            />
+          </Box>
+        );
+      })()}
+
+      {openIssue && settings.contentDisplay !== 'side' && (() => {
+        const [o, n] = openIssue.repo_full_name.split('/');
+        return (
+          <ContentViewer
+            target={{ kind: 'issue', owner: o, name: n, number: openIssue.number, preloaded: openIssue }}
+            mode="modal"
+            onClose={() => setOpenIssue(null)}
+          />
+        );
+      })()}
     </PageLayout>
   );
 }
 
+function ToggleButton({
+  active,
+  onClick,
+  children,
+  icon,
+  tone = 'accent',
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  icon?: React.ReactNode;
+  tone?: 'accent' | 'attention';
+}) {
+  const emphasis = tone === 'attention' ? 'var(--attention-emphasis)' : 'var(--accent-emphasis)';
+  const subtle = tone === 'attention' ? 'var(--attention-subtle, rgba(242, 201, 76, 0.14))' : 'var(--accent-subtle)';
+  return (
+    <Box
+      as="button"
+      type="button"
+      onClick={onClick}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 1,
+        px: '12px',
+        py: '5px',
+        borderRadius: '6px',
+        border: '1px solid',
+        borderColor: active ? emphasis : 'var(--border-default)',
+        bg: active ? subtle : 'var(--bg-emphasis)',
+        color: active ? emphasis : 'var(--fg-default)',
+        cursor: 'pointer',
+        fontSize: '14px',
+        fontWeight: 500,
+        lineHeight: '20px',
+        userSelect: 'none',
+        '&:hover': { borderColor: 'var(--border-strong)' },
+      }}
+    >
+      {icon}
+      {children}
+    </Box>
+  );
+}
+
 const headerCellSx = {
-  px: 3,
-  py: 2,
+  p: 2,
   textAlign: 'left' as const,
   fontWeight: 600,
-  fontSize: '11px',
+  fontSize: 0,
   color: 'fg.muted',
   textTransform: 'uppercase' as const,
   letterSpacing: '0.5px',
   whiteSpace: 'nowrap' as const,
 };
-
-function FilterHeaderCell({
-  label,
-  value,
-  onChange,
-  options,
-  width,
-  rightSort,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  options: { value: string; label: string }[];
-  width: number;
-  rightSort?: { active: boolean; dir: SortDir; onClick: () => void };
-}) {
-  const isFiltered = value !== 'all';
-  return (
-    <Box as="th" sx={{ ...headerCellSx, py: '4px' }}>
-      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: isFiltered ? 'accent.fg' : 'inherit' }}>
-          {label}
-          {isFiltered && (
-            <Box
-              sx={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                bg: 'accent.emphasis',
-                display: 'inline-block',
-              }}
-              title="Filter active"
-            />
-          )}
-        </Box>
-        <Dropdown
-          value={value}
-          onChange={onChange}
-          options={options}
-          width={width}
-          size="small"
-          ariaLabel={`Filter by ${label}`}
-        />
-        {rightSort && (
-          <Box
-            as="button"
-            onClick={rightSort.onClick}
-            sx={{
-              cursor: 'pointer',
-              border: 'none',
-              bg: 'transparent',
-              color: rightSort.active ? 'fg.default' : 'fg.muted',
-              p: '2px',
-              ml: 1,
-              display: 'inline-flex',
-              alignItems: 'center',
-              borderRadius: 1,
-              '&:hover': { color: 'fg.default' },
-            }}
-            aria-label="Toggle sort"
-          >
-            {rightSort.dir === 'asc' ? <TriangleUpIcon size={12} /> : <TriangleDownIcon size={12} />}
-          </Box>
-        )}
-      </Box>
-    </Box>
-  );
-}
 
 function HeaderCell({
   label,
@@ -494,13 +663,19 @@ function HeaderCell({
 function PullTableRow({
   pr,
   mine,
+  tracked,
+  onToggleTrack,
   onRowClick,
+  onAuthorClick,
   expanded,
   weight,
 }: {
   pr: AggPull;
   mine: boolean;
+  tracked: boolean;
+  onToggleTrack?: () => void;
   onRowClick?: () => void;
+  onAuthorClick?: () => void;
   expanded?: boolean;
   weight: number;
 }) {
@@ -512,28 +687,73 @@ function PullTableRow({
       onClick={onRowClick}
       data-explorer-row="true"
       sx={{
+        height: 40,
         borderBottom: '1px solid',
         borderColor: 'border.muted',
-        bg: expanded ? 'accent.muted' : mine ? 'var(--attention-subtle)' : 'transparent',
+        bg: expanded ? 'accent.muted' : tracked ? 'accent.subtle' : 'canvas.default',
         borderLeft: '3px solid',
-        borderLeftColor: mine ? 'var(--attention-emphasis)' : 'transparent',
+        borderLeftColor: tracked ? 'accent.emphasis' : 'transparent',
         cursor: 'pointer',
-        '&:hover': { bg: mine ? 'var(--attention-subtle, rgba(242, 201, 76, 0.14))' : 'canvas.subtle' },
+        '&:hover': { bg: tracked ? 'accent.muted' : 'canvas.subtle' },
+        '&:last-child': { borderBottom: 'none' },
       }}
     >
-      <Box as="td" sx={{ px: 2, py: '6px', verticalAlign: 'middle' }}>
+      <Box as="td" sx={{ ...pullRowCellSx, width: 44, textAlign: 'center' }}>
+        <Box
+          as="button"
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleTrack?.();
+          }}
+          aria-label={tracked ? `Unstar ${pr.repo_full_name}` : `Star ${pr.repo_full_name}`}
+          title={tracked ? `Unstar ${pr.repo_full_name}` : `Star ${pr.repo_full_name}`}
+          sx={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 24,
+            height: 24,
+            p: 0,
+            border: 'none',
+            borderRadius: 1,
+            bg: 'transparent',
+            color: tracked ? 'attention.fg' : 'fg.muted',
+            cursor: 'pointer',
+            '&:hover': {
+              bg: 'canvas.inset',
+              color: 'attention.fg',
+            },
+          }}
+        >
+          {tracked ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
+        </Box>
+      </Box>
+      <Box as="td" sx={pullRowCellSx}>
         <PullStatusBadge pr={pr} />
       </Box>
-      <Box as="td" sx={{ px: 2, py: '6px', maxWidth: 320, verticalAlign: 'middle' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+      <Box as="td" sx={{ ...pullRowCellSx, maxWidth: 420 }}>
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            minWidth: 0,
+            maxWidth: '100%',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+          }}
+        >
           <PrimerLink
             href={pr.html_url ?? '#'}
             target="_blank"
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
             sx={{
-              fontWeight: 500,
               color: 'fg.default',
+              fontWeight: 500,
+              display: 'block',
+              minWidth: 0,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -546,127 +766,227 @@ function PullTableRow({
           <Text sx={{ color: 'fg.muted', fontSize: 0, flexShrink: 0 }}>#{pr.number}</Text>
         </Box>
       </Box>
-      <Box as="td" sx={{ px: 2, py: '6px', verticalAlign: 'middle' }}>
-        <Link href={`/?repo=${encodeURIComponent(pr.repo_full_name)}&tab=pulls`} prefetch={false} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: 'accent.fg', '&:hover': { textDecoration: 'underline' } }}>
+      <Box as="td" sx={pullRowCellSx}>
+        <Link
+          href={`/repos/${owner}/${name}`}
+          prefetch={false}
+          style={{ textDecoration: 'none' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: 'accent.fg', maxWidth: '100%', '&:hover': { textDecoration: 'underline' } }}>
             <RepoIcon size={12} />
-            <Text>{pr.repo_full_name}</Text>
+            <Text sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {pr.repo_full_name}
+            </Text>
           </Box>
         </Link>
       </Box>
       <Box
         as="td"
         sx={{
-          p: 2,
+          ...pullRowCellSx,
           textAlign: 'right',
           fontFamily: 'mono',
           fontVariantNumeric: 'tabular-nums',
           fontSize: 1,
           fontWeight: weight >= 0.3 ? 700 : weight >= 0.15 ? 600 : weight >= 0.05 ? 500 : 400,
           color:
-            weight >= 0.5 ? 'success.fg' : weight >= 0.3 ? 'accent.fg' : weight >= 0.15 ? 'attention.fg' : weight >= 0.05 ? 'fg.default' : 'fg.muted',
-          verticalAlign: 'middle',
+            weight >= 0.5
+              ? 'success.fg'
+              : weight >= 0.3
+              ? 'accent.fg'
+              : weight >= 0.15
+              ? 'attention.fg'
+              : weight >= 0.05
+              ? 'fg.default'
+              : 'fg.muted',
         }}
       >
         {weight.toFixed(4)}
       </Box>
-      <Box as="td" sx={{ px: 2, py: '6px', fontSize: 0, verticalAlign: 'middle' }}>
+      <Box as="td" sx={{ ...pullRowCellSx, fontSize: 0 }}>
         {pr.author_login ? (
-          <a
-            href={`https://github.com/${pr.author_login}`}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, textDecoration: 'none', color: 'inherit' }}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onAuthorClick?.();
+            }}
+            title={`View ${pr.author_login} details in ${pr.repo_full_name}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              textDecoration: 'none',
+              color: 'inherit',
+              border: 'none',
+              background: 'transparent',
+              padding: 0,
+              font: 'inherit',
+              cursor: 'pointer',
+              maxWidth: '100%',
+              minWidth: 0,
+            }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`https://github.com/${pr.author_login}.png?size=40`}
               alt={pr.author_login}
               loading="lazy"
-              style={{ width: 20, height: 20, borderRadius: '50%', border: '1px solid var(--border-muted)', flexShrink: 0 }}
+              style={{ width: 20, height: 20, borderRadius: '50%', border: '1px solid var(--border-muted)', flexShrink: 0, display: 'block' }}
             />
-            <Text sx={{ fontWeight: 500, color: mine ? 'var(--attention-emphasis)' : 'fg.default', '&:hover': { color: 'accent.fg' } }}>
+            <Text
+              sx={{
+                fontWeight: 500,
+                color: mine ? 'var(--attention-emphasis)' : 'fg.default',
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                '&:hover': { color: 'accent.fg' },
+              }}
+            >
               {pr.author_login}
             </Text>
+            <AuthorCredibilityNote credibility={pr.author_credibility} variant="pulls" />
             {pr.author_association && pr.author_association !== 'NONE' && (
               <Label variant="secondary" sx={{ fontSize: '10px', flexShrink: 0 }}>
                 {pr.author_association.toLowerCase()}
               </Label>
             )}
-          </a>
+          </button>
         ) : (
-          <Text sx={{ color: 'fg.muted' }}>—</Text>
+          <Text sx={{ fontWeight: 500, color: 'fg.muted' }}>-</Text>
         )}
       </Box>
-      <Box as="td" sx={{ px: 2, py: '6px', fontSize: 0, verticalAlign: 'middle' }}>
-        {pr.linked_issues.length > 0 ? (
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-            {pr.linked_issues.slice(0, 3).map((li) => {
-              const sameRepo = li.repo === pr.repo_full_name;
-              const target = sameRepo
-                ? `/?repo=${encodeURIComponent(pr.repo_full_name)}&tab=issues&issue=${li.number}`
-                : `/?repo=${encodeURIComponent(li.repo)}&tab=issues&issue=${li.number}`;
-              return (
-                <Link key={`${li.repo}#${li.number}`} href={target} prefetch={false} style={{ textDecoration: 'none' }} onClick={(e) => e.stopPropagation()}>
-                  <Box
-                    sx={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 1,
-                      px: '6px',
-                      py: '1px',
-                      bg: 'var(--bg-emphasis)',
-                      border: '1px solid',
-                      borderColor: 'border.default',
-                      borderRadius: 999,
-                      color: 'accent.fg',
-                      '&:hover': { borderColor: 'accent.emphasis' },
-                    }}
-                  >
-                    <IssueOpenedIcon size={11} />
-                    <Text>
-                      {sameRepo ? '' : `${li.repo} `}#{li.number}
-                    </Text>
-                  </Box>
-                </Link>
-              );
-            })}
-            {pr.linked_issues.length > 3 && (
-              <Text sx={{ color: 'fg.muted', fontSize: 0 }}>+{pr.linked_issues.length - 3}</Text>
-            )}
-          </Box>
-        ) : (
-          <Text sx={{ color: 'fg.muted' }}>—</Text>
-        )}
+      <Box as="td" sx={{ ...pullRowCellSx, fontSize: 0, whiteSpace: 'nowrap' }}>
+        <PullScoreCell pr={pr} />
       </Box>
-      <Box as="td" sx={{ px: 2, py: '6px', fontSize: 0, color: 'fg.muted', verticalAlign: 'middle', whiteSpace: 'nowrap' }} title={pr.created_at ?? undefined}>
-        {pr.created_at && isRecent(pr.created_at) ? (
-          <Text sx={{ color: 'success.fg', fontWeight: 700 }}>{formatRelativeTime(pr.created_at)}</Text>
-        ) : (
-          formatRelativeTime(pr.created_at)
-        )}
+      <Box as="td" sx={{ ...pullRowCellSx, fontSize: 0, whiteSpace: 'nowrap' }} title={pr.created_at ?? undefined}>
+        <RecentTime iso={pr.created_at} />
       </Box>
-      <Box as="td" sx={{ px: 2, py: '6px', fontSize: 0, color: 'fg.muted', verticalAlign: 'middle', whiteSpace: 'nowrap' }} title={pr.updated_at ?? undefined}>
-        {pr.updated_at && isRecent(pr.updated_at) ? (
-          <Text sx={{ color: 'success.fg', fontWeight: 700 }}>{formatRelativeTime(pr.updated_at)}</Text>
-        ) : (
-          formatRelativeTime(pr.updated_at)
-        )}
+      <Box as="td" sx={{ ...pullRowCellSx, fontSize: 0, whiteSpace: 'nowrap' }} title={pr.updated_at ?? undefined}>
+        <RecentTime iso={pr.updated_at} />
       </Box>
-      <Box as="td" sx={{ px: 2, py: '6px', fontSize: 0, verticalAlign: 'middle', whiteSpace: 'nowrap' }} title={pr.merged_at ?? pr.closed_at ?? undefined}>
-        {pr.merged_at ? (
-          <Text sx={{ color: 'success.fg', fontWeight: isRecent(pr.merged_at) ? 700 : 400 }}>
-            merged {formatRelativeTime(pr.merged_at)}
-          </Text>
-        ) : pr.closed_at ? (
-          <Text sx={{ color: 'danger.fg', fontWeight: isRecent(pr.closed_at) ? 700 : 400 }}>
-            closed {formatRelativeTime(pr.closed_at)}
-          </Text>
-        ) : (
-          <Text sx={{ color: 'fg.muted' }}>—</Text>
-        )}
+      <Box as="td" sx={{ ...pullRowCellSx, fontSize: 0, whiteSpace: 'nowrap' }} title={pr.merged_at ?? pr.closed_at ?? undefined}>
+        <RecentTime iso={pr.merged_at ?? pr.closed_at} />
       </Box>
     </Box>
   );
 }
+
+function PullScoreCell({ pr }: { pr: AggPull }) {
+  const score = pr.score;
+  if (!score || (score.score === null && score.collateral_score === null)) {
+    return <Text sx={{ color: 'fg.muted' }}>-</Text>;
+  }
+
+  if (pr.merged) {
+    return (
+      <ScoreValue
+        value={score.score}
+        title="Merged score"
+        valueColor="var(--done-fg)"
+      />
+    );
+  }
+
+  if (pr.state === 'open') {
+    return (
+      <Box
+        title={`Potential ${formatScore(score.score)} / Collateral ${formatScore(score.collateral_score)}`}
+        aria-label={`Potential score ${formatScore(score.score)}, collateral score ${formatScore(score.collateral_score)}`}
+        sx={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 1,
+          maxWidth: '100%',
+          overflow: 'hidden',
+        }}
+      >
+        <ScoreValue value={score.score} title="Potential score" valueColor="var(--fg-default)" />
+        <Text sx={{ color: 'fg.muted', fontSize: '11px' }}>/</Text>
+        <ScoreValue value={score.collateral_score} title="Collateral score" valueColor="var(--danger-fg)" />
+      </Box>
+    );
+  }
+
+  return <Text sx={{ color: 'fg.muted' }}>-</Text>;
+}
+
+function ScoreValue({
+  label,
+  value,
+  title,
+  valueColor,
+}: {
+  label?: string;
+  value: number | null;
+  title: string;
+  valueColor: string;
+}) {
+  return (
+    <Box
+      title={title}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'baseline',
+        gap: 1,
+        minWidth: 0,
+        fontFamily: 'mono',
+        fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label && (
+        <Text sx={{ color: 'fg.muted', fontSize: '11px', fontWeight: 700 }}>
+          {label}
+        </Text>
+      )}
+      <Text
+        sx={{
+          color: value === null ? 'fg.muted' : valueColor,
+          fontWeight: value && value > 0 ? 700 : 500,
+        }}
+      >
+        {formatScore(value)}
+      </Text>
+    </Box>
+  );
+}
+
+function formatScore(value: number | null): string {
+  if (value === null) return '-';
+  return value.toFixed(2);
+}
+
+const RecentTime = React.memo(function RecentTime({ iso }: { iso: string | null | undefined }) {
+  if (!iso) return <Text sx={{ color: 'var(--fg-muted)' }}>-</Text>;
+  const recent = isRecent(iso);
+  if (recent) {
+    return (
+      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+        <Box
+          sx={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            bg: 'var(--success-emphasis)',
+            display: 'inline-block',
+            animation: 'gtPulse 1.6s ease-in-out infinite',
+          }}
+        />
+        <Text
+          sx={{
+            color: 'var(--success-fg)',
+            fontWeight: 700,
+            letterSpacing: '0.2px',
+          }}
+        >
+          {formatRelativeTime(iso)}
+        </Text>
+      </Box>
+    );
+  }
+  return <Text sx={{ color: 'var(--fg-muted)' }}>{formatRelativeTime(iso)}</Text>;
+});

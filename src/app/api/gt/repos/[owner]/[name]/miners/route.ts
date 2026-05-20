@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { RepoMiner, RepoMinersResponse } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,7 +91,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       if (p.mergedAt) row.prCount += 1;
       row.score += num(p.score);
     }
-    const ossContributions = [...ossMap.values()]
+    const ossContributions: RepoMiner[] = [...ossMap.values()]
       .filter((r) => r.prCount > 0 || r.score > 0)
       .sort((a, b) => b.score - a.score || b.prCount - a.prCount)
       .slice(0, 10)
@@ -111,7 +112,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
     // this repo. Upstream /miners doesn't expose per-repo issue lists, so we
     // approximate: rank issue-eligible miners by issueDiscoveryScore globally
     // and surface those with > 0 totalOpenIssues.
-    const issueDiscoveries = [...shared.miners]
+    const issueDiscoveries: RepoMiner[] = [...shared.miners]
       .filter((m) => m.isIssueEligible && (m.totalOpenIssues ?? 0) > 0)
       .sort((a, b) => num(b.issueDiscoveryScore) - num(a.issueDiscoveryScore))
       .slice(0, 10)
@@ -124,12 +125,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
         avatarUrl: `https://github.com/${m.githubUsername}.png?size=48`,
       }));
 
-    return NextResponse.json({
+    const body: RepoMinersResponse = {
       fullName,
       ossContributions,
       issueDiscoveries,
       fetched_at: shared.fetched_at,
-    });
+    };
+    return NextResponse.json(body);
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 502 });
   }

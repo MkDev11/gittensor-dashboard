@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { GtRepo, GtPrSummary, GtReposResponse } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,34 +36,6 @@ interface UpstreamPr {
   prState: string;
   score?: string | number | null;
   collateralScore?: string | number | null;
-}
-
-export interface GtRepo {
-  fullName: string;
-  owner: string;
-  name: string;
-  weight: number;
-  isActive: boolean;
-  inactiveAt: string | null;
-  totalScore: number;
-  totalPrCount: number;
-  mergedPrCount: number;
-  contributorCount: number;
-  collateralStaked: number;
-  prsThisWeek: number;
-  prsLastWeek: number;
-  trendingPct: number;
-  lastPrAt: string | null;
-}
-
-export interface GtPrSummary {
-  pullRequestNumber: number;
-  title: string;
-  repository: string;
-  author: string;
-  prCreatedAt: string;
-  prState: string;
-  mergedAt: string | null;
 }
 
 interface Cached {
@@ -189,7 +162,7 @@ async function refresh(): Promise<Cached> {
   return next;
 }
 
-function payload(c: Cached, source: 'live' | 'cache' | 'stale') {
+function payload(c: Cached, source: 'live' | 'cache' | 'stale'): GtReposResponse {
   const active = c.repos.filter((r) => r.isActive).length;
   return {
     fetched_at: c.fetched_at,

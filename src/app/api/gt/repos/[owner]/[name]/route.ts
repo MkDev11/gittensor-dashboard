@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { withRotation } from '@/lib/github';
+import type { GtRepoSummary } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,7 +92,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       closedIssueCount = 0;
     }
 
-    return NextResponse.json({
+    const body: GtRepoSummary = {
       fullName,
       owner: params.owner,
       name: params.name,
@@ -118,7 +119,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
             createdAt: gh.data.created_at,
           }
         : null,
-    });
+    };
+    return NextResponse.json(body);
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 502 });
   }

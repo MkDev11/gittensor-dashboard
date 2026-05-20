@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { setSessionCookieFor, upsertGithubUser } from '@/lib/auth';
 import { publicOrigin } from '@/lib/origin';
+import { safeOAuthNextPath } from '@/lib/oauth-next';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +37,8 @@ export async function GET(req: NextRequest) {
 
   const jar = await cookies();
   const expectedState = jar.get(STATE_COOKIE)?.value;
-  const next = jar.get(NEXT_COOKIE)?.value || '/';
+  // Re-check the cookie in case it was hand-set or came from an older build.
+  const next = safeOAuthNextPath(jar.get(NEXT_COOKIE)?.value);
   // Clear the one-shot cookies regardless of outcome.
   jar.set({ name: STATE_COOKIE, value: '', maxAge: 0, path: '/' });
   jar.set({ name: NEXT_COOKIE, value: '', maxAge: 0, path: '/' });

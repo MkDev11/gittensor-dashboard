@@ -27,46 +27,45 @@ import {
   EyeIcon,
   ChevronRightIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
-  TriangleUpIcon,
-  TriangleDownIcon,
   CheckIcon,
 } from '@primer/octicons-react';
-import { ALL_REPOS, type RepoEntry } from '@/lib/repos';
+import { ALL_REPOS, type Sn74Repo } from '@/lib/repos';
 import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import { IssueStatusBadge, PullStatusBadge } from '@/components/StatusBadge';
 import { formatRelativeTime, isRecent } from '@/lib/format';
 import { useMinerLogin } from '@/lib/use-miner';
 import Dropdown from '@/components/Dropdown';
 import ContentViewer from '@/components/ContentViewer';
+import AuthorCredibilityNote from '@/components/AuthorCredibilityNote';
+import RelatedPRsCell, { type LinkedPullReference } from '@/components/RelatedPRsCell';
 import { IssueLabels } from '@/components/IssueLabels';
 import SearchInput from '@/components/SearchInput';
 import AuthorFilter from '@/components/AuthorFilter';
-import AuthorSidebar from '@/components/AuthorSidebar';
+import AuthorActivitySidebar from '@/components/AuthorActivitySidebar';
 import { useSettings } from '@/lib/settings';
 import { useToast } from '@/lib/toast';
-import { pullStatus } from '@/lib/api-types';
-import type { IssueDto, IssuesResponse, IssuesMetaResponse, PullDto, PullsResponse, PullsMetaResponse } from '@/lib/api-types';
+import { pullStatus } from '@/types/entities';
+import type { AuthorCredibility, Issue, IssuesResponse, IssuesMetaResponse, Pull, PullsResponse, PullsMetaResponse } from '@/types/entities';
 import { RepoListSkeleton, TableRowsSkeleton } from '@/components/Skeleton';
+import { tableHeaderSx, tableCellSx, tableTimeSx } from '@/components/repo-explorer/styles';
+import { weightColor, weightFontWeight } from '@/components/repo-explorer/weights';
+import { SortHeader } from '@/components/repo-explorer/SortHeader';
+import { TabButton } from '@/components/repo-explorer/TabButton';
+import { ValidationPicker } from '@/components/repo-explorer/ValidationPicker';
+import { ResizeHandle } from '@/components/repo-explorer/ResizeHandle';
+import { InlinePagination } from '@/components/repo-explorer/Pagination';
+import { useIssueFilters, type IssueState } from '@/components/repo-explorer/useIssueFilters';
+import { usePullFilters, type PRState } from '@/components/repo-explorer/usePullFilters';
+import {
+  DEFAULT_EXCESSIVE_PR_PENALTY_THRESHOLD,
+  DEFAULT_MIN_CREDIBILITY,
+  DEFAULT_MIN_ISSUE_CREDIBILITY,
+  DEFAULT_OPEN_ISSUE_SPAM_THRESHOLD,
+} from '@/lib/gittensor-policy';
 
 type RepoSort = 'weight' | 'name' | 'tracked';
-type IssueState = 'all' | 'open' | 'completed' | 'not_planned' | 'duplicate' | 'closed';
-type PRState = 'all' | 'open' | 'draft' | 'merged' | 'closed' | 'mine';
 type Tab = 'issues' | 'pulls';
-type IssueSortKey =
-  | 'opened'
-  | 'updated'
-  | 'closed'
-  | 'author'
-  | 'state'
-  | 'comments'
-  | 'author_open'
-  | 'author_completed'
-  | 'author_not_planned'
-  | 'author_closed';
-type PullSortKey = 'opened' | 'updated' | 'closed' | 'author' | 'state';
-type SortDir = 'asc' | 'desc';
-type AuthorTarget = { login: string; association?: string | null };
+type AuthorTarget = { login: string; association?: string | null; initialTab: 'issues' | 'pulls' };
 type RelatedPopoverLayout = { placement: 'down' | 'up'; maxHeight: number };
 type StickyBadge = { issues: number; pulls: number; priority?: boolean };
 interface RepoBadgesResponse {
@@ -80,7 +79,7 @@ interface RepoBadgesResponse {
 // Stable empty array so the relatedPRs fallback doesn't break React.memo on
 // rows with no linked PRs (otherwise `?? []` creates a fresh reference each
 // render, defeating prop equality).
-const EMPTY_PRS: Array<{ number: number; title: string; state: string; merged: number; draft: number; author_login?: string | null }> = [];
+const EMPTY_PRS: LinkedPullReference[] = [];
 const EMPTY_ISSUES: Array<{ number: number; title: string; state: string; state_reason: string | null; author_login: string | null }> = [];
 
 const DEFAULT_RELATED_POPOVER_LAYOUT: RelatedPopoverLayout = { placement: 'down', maxHeight: 420 };
@@ -100,6 +99,75 @@ function relatedPopoverOffset(layout: RelatedPopoverLayout) {
   return layout.placement === 'up'
     ? { bottom: '100%', mb: 1 }
     : { top: '100%', mt: 1 };
+}
+
+function trimNumber(value: number, maxDigits = 2): string {
+  return value
+    .toFixed(maxDigits)
+    .replace(/\.?0+$/, '');
+}
+
+function formatPolicyPercent(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return 'Not set';
+  const percent = value * 100;
+  const digits = percent > 0 && percent < 10 ? 2 : 1;
+  return `${trimNumber(percent, digits)}%`;
+}
+
+function formatPolicyScore(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return 'Not set';
+  return trimNumber(value, 2);
+}
+
+function formatPolicyThreshold(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return 'Not set';
+  return trimNumber(value, 1);
+}
+
+function policyTooltip(label: string, value: string, detail: string): string {
+  return `${label}: ${value}. ${detail}`;
+}
+
+function RepoPolicyChip({
+  label,
+  value,
+  title,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+}) {
+  return (
+    <Box
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        minHeight: 24,
+        maxWidth: '100%',
+        px: '10px',
+        border: '1px solid',
+        borderColor: 'var(--border-default)',
+        borderRadius: 999,
+        bg: 'var(--bg-canvas)',
+        color: 'var(--fg-default)',
+        fontSize: '11px',
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+      }}
+      title={title ?? `${label}: ${value}`}
+      aria-label={title ?? `${label}: ${value}`}
+    >
+      <Text as="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>
+        {label}
+      </Text>
+      <Text as="span" sx={{ color: 'var(--fg-muted)', mx: 1 }}>
+        ·
+      </Text>
+      <Text as="span" sx={{ color: 'var(--fg-default)', fontFamily: 'mono', fontSize: '11px', flexShrink: 0 }}>
+        {value}
+      </Text>
+    </Box>
+  );
 }
 
 function useRelatedPopoverLayout(
@@ -130,38 +198,168 @@ function useRelatedPopoverLayout(
 // `null` selection without making every downstream read nullable, so we hold a
 // dummy entry that yields empty issues/PRs and gets swapped out the moment
 // `allRepos` populates (see the `selected`-hydration effect below).
-const EMPTY_REPO: RepoEntry = {
+const EMPTY_REPO: Sn74Repo = {
   fullName: '',
   owner: '',
   name: '',
   weight: 0,
+  issueDiscoveryShare: null,
+  maintainerCut: null,
+  fixedBaseScore: null,
+  excessivePrPenaltyThreshold: null,
+  openIssueSpamThreshold: null,
+  minCredibility: null,
+  minIssueCredibility: null,
+  defaultLabelMultiplier: null,
+  trustedLabelPipeline: null,
+  additionalAcceptableBranches: null,
+  labelMultipliers: null,
   inactiveAt: null,
 };
+
+function RepoPolicyPanel({ repo }: { repo: Sn74Repo }) {
+  if (!repo.fullName) return null;
+  const excessivePrThreshold = repo.excessivePrPenaltyThreshold ?? DEFAULT_EXCESSIVE_PR_PENALTY_THRESHOLD;
+  const openIssueThreshold = repo.openIssueSpamThreshold ?? DEFAULT_OPEN_ISSUE_SPAM_THRESHOLD;
+  const minPrCredibility = repo.minCredibility ?? DEFAULT_MIN_CREDIBILITY;
+  const minIssueCredibility = repo.minIssueCredibility ?? DEFAULT_MIN_ISSUE_CREDIBILITY;
+
+  return (
+    <Box
+      sx={{
+        mb: 3,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '6px',
+        flexWrap: 'wrap',
+      }}
+    >
+      <RepoPolicyChip
+        label="Emission"
+        value={formatPolicyPercent(repo.weight)}
+        title={policyTooltip(
+          'Emission',
+          formatPolicyPercent(repo.weight),
+          'Share of the SN74 repository reward pool assigned to this repository.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Issue discovery"
+        value={formatPolicyPercent(repo.issueDiscoveryShare)}
+        title={policyTooltip(
+          'Issue discovery',
+          formatPolicyPercent(repo.issueDiscoveryShare),
+          'Portion of this repository reward pool reserved for discovering valid issues. The rest goes to pull request rewards.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Maintainer cut"
+        value={formatPolicyPercent(repo.maintainerCut)}
+        title={policyTooltip(
+          'Maintainer cut',
+          formatPolicyPercent(repo.maintainerCut),
+          'Share reserved for repository maintainers before the remaining pool is distributed to contributors.',
+        )}
+      />
+      {repo.fixedBaseScore !== null && (
+        <RepoPolicyChip
+          label="Fixed base"
+          value={formatPolicyScore(repo.fixedBaseScore)}
+          title={policyTooltip(
+            'Fixed base score',
+            formatPolicyScore(repo.fixedBaseScore),
+            'Overrides the normal token-derived base score for this repository when configured.',
+          )}
+        />
+      )}
+      <RepoPolicyChip
+        label="Excessive PR threshold"
+        value={formatPolicyThreshold(excessivePrThreshold)}
+        title={policyTooltip(
+          'Excessive PR penalty threshold',
+          formatPolicyThreshold(excessivePrThreshold),
+          'Base number of open PRs a contributor can have in this repo before the open-PR spam penalty suppresses PR rewards. High token score can add bonus slots up to the configured maximum.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Open issue threshold"
+        value={formatPolicyThreshold(openIssueThreshold)}
+        title={policyTooltip(
+          'Open issue spam threshold',
+          formatPolicyThreshold(openIssueThreshold),
+          'Base number of open issues a contributor can have in this repo before issue-discovery spam suppression applies. Solved issue token score can add bonus slots up to the configured maximum.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Min PR cred"
+        value={formatPolicyPercent(minPrCredibility)}
+        title={policyTooltip(
+          'Minimum PR credibility',
+          formatPolicyPercent(minPrCredibility),
+          'Minimum merged-versus-closed PR credibility required for a contributor to receive PR rewards in this repository.',
+        )}
+      />
+      <RepoPolicyChip
+        label="Min issue cred"
+        value={formatPolicyPercent(minIssueCredibility)}
+        title={policyTooltip(
+          'Minimum issue credibility',
+          formatPolicyPercent(minIssueCredibility),
+          'Minimum solved-versus-closed issue credibility required for a contributor to receive issue-discovery rewards in this repository.',
+        )}
+      />
+    </Box>
+  );
+}
 
 export default function RepoExplorer() {
   const { tracked, toggle: toggleTrack } = useTrackedRepos();
   const [repoQuery, setRepoQuery] = useState('');
   const [repoSort, setRepoSort] = useState<RepoSort>('weight');
   const [trackedOnly, setTrackedOnly] = useState(false);
-  const [selected, setSelected] = useState<RepoEntry>(EMPTY_REPO);
+  const [selected, setSelected] = useState<Sn74Repo>(EMPTY_REPO);
   const [tab, setTabState] = useState<Tab>('issues');
-  const [issueQuery, setIssueQuery] = useState('');
-  const [issueState, setIssueState] = useState<IssueState>('all');
-  const [issueAuthor, setIssueAuthor] = useState<string>('all');
-  const [issueAuthorsRequested, setIssueAuthorsRequested] = useState(false);
+
+  const {
+    query: issueQuery,
+    setQuery: setIssueQuery,
+    debouncedQuery: debouncedIssueQuery,
+    state: issueState,
+    setState: setIssueState,
+    author: issueAuthor,
+    setAuthor: setIssueAuthor,
+    authorsRequested: issueAuthorsRequested,
+    setAuthorsRequested: setIssueAuthorsRequested,
+    sortKey: issueSortKey,
+    sortDir: issueSortDir,
+    toggleSort: toggleIssueSort,
+    reset: resetIssueFilters,
+  } = useIssueFilters();
+
+  const {
+    query: prQuery,
+    setQuery: setPrQuery,
+    debouncedQuery: debouncedPrQuery,
+    state: prState,
+    setState: setPrState,
+    mineOnly: prMineOnly,
+    setMineOnly: setPrMineOnly,
+    author: prAuthor,
+    setAuthor: setPrAuthor,
+    authorsRequested: prAuthorsRequested,
+    setAuthorsRequested: setPrAuthorsRequested,
+    sortKey: pullSortKey,
+    sortDir: pullSortDir,
+    toggleSort: togglePullSort,
+    reset: resetPullFilters,
+  } = usePullFilters();
+
   // Filters and per-repo viewing state are scoped to the active repo — reset
   // them when the user switches repos so e.g. an author filter from repo A
   // doesn't carry over to repo B (where that author may not have any issues).
   useEffect(() => {
-    setIssueQuery('');
-    setIssueState('all');
-    setIssueAuthor('all');
-    setIssueAuthorsRequested(false);
-    setPrQuery('');
-    setPrState('all');
-    setPrAuthor('all');
-    setPrAuthorsRequested(false);
-    setPrMineOnly(false);
+    resetIssueFilters();
+    resetPullFilters();
     setIssuesPage(1);
     setPullsPage(1);
     setExpandedIssue(null);
@@ -173,30 +371,12 @@ export default function RepoExplorer() {
     setRenderedAuthorTarget(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected.fullName]);
-  const [prQuery, setPrQuery] = useState('');
-  const [prState, setPrState] = useState<PRState>('all');
-  const [prMineOnly, setPrMineOnly] = useState(false);
-  const [prAuthor, setPrAuthor] = useState<string>('all');
-  const [prAuthorsRequested, setPrAuthorsRequested] = useState(false);
-
-  // Debounced text-search values — feed into the queryKey so server-side
-  // filtering doesn't refire on every keystroke.
-  const [debouncedIssueQuery, setDebouncedIssueQuery] = useState('');
-  const [debouncedPrQuery, setDebouncedPrQuery] = useState('');
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedIssueQuery(issueQuery), 300);
-    return () => clearTimeout(t);
-  }, [issueQuery]);
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedPrQuery(prQuery), 300);
-    return () => clearTimeout(t);
-  }, [prQuery]);
   const [authorTarget, setAuthorTarget] = useState<AuthorTarget | null>(null);
   const [renderedAuthorTarget, setRenderedAuthorTarget] = useState<AuthorTarget | null>(null);
   const [authorPanelActive, setAuthorPanelActive] = useState(false);
   const authorSideRef = useRef<HTMLDivElement | null>(null);
-  const [issueModal, setIssueModal] = useState<IssueDto | null>(null);
-  const [pullModal, setPullModal] = useState<PullDto | null>(null);
+  const [issueModal, setIssueModal] = useState<Issue | null>(null);
+  const [pullModal, setPullModal] = useState<Pull | null>(null);
   const [expandedIssue, setExpandedIssue] = useState<number | null>(null);
   const [expandedPull, setExpandedPull] = useState<number | null>(null);
   const { settings, update, hydrated: settingsReady } = useSettings();
@@ -210,26 +390,6 @@ export default function RepoExplorer() {
   // Pagination state
   const [issuesPage, setIssuesPage] = useState(1);
   const [pullsPage, setPullsPage] = useState(1);
-  const [issueSortKey, setIssueSortKey] = useState<IssueSortKey>('opened');
-  const [issueSortDir, setIssueSortDir] = useState<SortDir>('desc');
-  const [pullSortKey, setPullSortKey] = useState<PullSortKey>('updated');
-  const [pullSortDir, setPullSortDir] = useState<SortDir>('desc');
-
-  const toggleIssueSort = (key: IssueSortKey) => {
-    if (issueSortKey === key) setIssueSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setIssueSortKey(key);
-      setIssueSortDir(key === 'author' || key === 'state' ? 'asc' : 'desc');
-    }
-  };
-
-  const togglePullSort = (key: PullSortKey) => {
-    if (pullSortKey === key) setPullSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setPullSortKey(key);
-      setPullSortDir(key === 'author' || key === 'state' ? 'asc' : 'desc');
-    }
-  };
 
   // Resizable pane widths (persisted to localStorage).
   const [leftWidth, setLeftWidth] = useState<number>(360);
@@ -442,7 +602,7 @@ export default function RepoExplorer() {
   // Server polls master_repositories.json every 5 min and persists any new
   // repos at weight 0; nothing is ever removed. Client refetches on the same
   // cadence so newly discovered repos appear without a page reload.
-  const { data: sn74ReposData, isLoading: sn74ReposLoading, isSuccess: sn74ReposReady } = useQuery<{ repos: RepoEntry[]; source: 'live' | 'empty'; count: number }>({
+  const { data: sn74ReposData, isLoading: sn74ReposLoading, isSuccess: sn74ReposReady } = useQuery<{ repos: Sn74Repo[]; source: 'live' | 'empty'; count: number }>({
     queryKey: ['sn74-repos'],
     queryFn: async ({ signal }) => {
       const r = await fetch('/api/sn74-repos', { signal });
@@ -454,15 +614,32 @@ export default function RepoExplorer() {
     refetchOnWindowFocus: false,
   });
 
-  const sn74Repos: RepoEntry[] = sn74ReposData?.repos ?? ALL_REPOS;
+  const sn74Repos: Sn74Repo[] = sn74ReposData?.repos ?? ALL_REPOS;
 
   const allRepos = useMemo(() => {
     const sn74Set = new Set(sn74Repos.map((r) => r.fullName));
-    const userExtras: RepoEntry[] = (userReposData?.repos ?? [])
+    const userExtras: Sn74Repo[] = (userReposData?.repos ?? [])
       .filter((u) => !sn74Set.has(u.full_name))
       .map((u) => {
         const [owner, name] = u.full_name.split('/');
-        return { fullName: u.full_name, owner, name, weight: u.weight, inactiveAt: null };
+        return {
+          fullName: u.full_name,
+          owner,
+          name,
+          weight: u.weight,
+          issueDiscoveryShare: null,
+          maintainerCut: null,
+          fixedBaseScore: null,
+          excessivePrPenaltyThreshold: null,
+          openIssueSpamThreshold: null,
+          minCredibility: null,
+          minIssueCredibility: null,
+          defaultLabelMultiplier: null,
+          trustedLabelPipeline: null,
+          additionalAcceptableBranches: null,
+          labelMultipliers: null,
+          inactiveAt: null,
+        };
       });
     return [...sn74Repos, ...userExtras];
   }, [sn74Repos, userReposData]);
@@ -968,7 +1145,7 @@ export default function RepoExplorer() {
         try {
           const r = await fetch(`/api/pull/${selected.owner}/${selected.name}/${prNumber}`);
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          pr = (await r.json()) as PullDto;
+          pr = (await r.json()) as Pull;
         } catch (err) {
           console.warn('[explorer] could not open linked PR:', err);
           return;
@@ -986,16 +1163,30 @@ export default function RepoExplorer() {
     [pullsData?.pulls, selected.owner, selected.name, settings.contentDisplay],
   );
 
-  const openAuthorSidebar = useCallback((login: string, association?: string | null) => {
+  const openAuthorSidebar = useCallback((login: string, association: string | null | undefined, initialTab: 'issues' | 'pulls') => {
     setIssueModal(null);
     setPullModal(null);
     setExpandedIssue(null);
     setExpandedPull(null);
-    setAuthorTarget({ login, association });
+    setAuthorTarget({ login, association, initialTab });
   }, []);
 
+  const openIssueAuthorSidebar = useCallback(
+    (login: string, association?: string | null) => {
+      openAuthorSidebar(login, association, 'issues');
+    },
+    [openAuthorSidebar],
+  );
+
+  const openPullAuthorSidebar = useCallback(
+    (login: string, association?: string | null) => {
+      openAuthorSidebar(login, association, 'pulls');
+    },
+    [openAuthorSidebar],
+  );
+
   const openIssueFromAuthorSidebar = useCallback(
-    (issue: IssueDto) => {
+    (issue: Issue) => {
       setAuthorTarget(null);
       setPullModal(null);
       setExpandedPull(null);
@@ -1007,6 +1198,24 @@ export default function RepoExplorer() {
 
       setTabState('issues');
       setExpandedIssue(issue.number);
+    },
+    [settings.contentDisplay],
+  );
+
+  const openPullFromAuthorSidebar = useCallback(
+    (pull: Pull) => {
+      setAuthorTarget(null);
+      setIssueModal(null);
+      setExpandedIssue(null);
+      setExpandedPull(null);
+
+      if (settings.contentDisplay === 'modal' || settings.contentDisplay === 'side') {
+        setPullModal(pull);
+        return;
+      }
+
+      setTabState('pulls');
+      setPendingOpen({ kind: 'pull', number: pull.number });
     },
     [settings.contentDisplay],
   );
@@ -1053,32 +1262,32 @@ export default function RepoExplorer() {
         if (kind === 'issue') {
           setTabState('issues');
           if (useOverlay) {
-            setIssueModal(data as IssueDto);
+            setIssueModal(data as Issue);
             setPullModal(null);
             setExpandedIssue(null);
           } else {
             setIssueModal(null);
             setPullModal(null);
-            setExpandedIssue((data as IssueDto).number);
+            setExpandedIssue((data as Issue).number);
             setTimeout(() => {
               document
-                .querySelector(`[data-issue-number="${(data as IssueDto).number}"]`)
+                .querySelector(`[data-issue-number="${(data as Issue).number}"]`)
                 ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 120);
           }
         } else {
           setTabState('pulls');
           if (useOverlay) {
-            setPullModal(data as PullDto);
+            setPullModal(data as Pull);
             setIssueModal(null);
             setExpandedPull(null);
           } else {
             setPullModal(null);
             setIssueModal(null);
-            setExpandedPull((data as PullDto).number);
+            setExpandedPull((data as Pull).number);
             setTimeout(() => {
               document
-                .querySelector(`[data-pull-number="${(data as PullDto).number}"]`)
+                .querySelector(`[data-pull-number="${(data as Pull).number}"]`)
                 ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }, 120);
           }
@@ -1250,7 +1459,7 @@ export default function RepoExplorer() {
                 color: trackedOnly ? 'var(--attention-emphasis)' : 'var(--fg-default)',
                 cursor: 'pointer',
                 fontSize: '14px',
-                fontWeight: 500,
+                fontWeight: 400,
                 userSelect: 'none',
               }}
               title="Show only tracked repos"
@@ -1499,6 +1708,8 @@ export default function RepoExplorer() {
             )}
           </Box>
 
+          <RepoPolicyPanel repo={selected} />
+
           {/* Tabs */}
           <Box sx={{ display: 'flex', gap: 4, mb: '-1px' }}>
             <TabButton
@@ -1680,7 +1891,7 @@ export default function RepoExplorer() {
                             }
                             onSetValidation={(next) => setValidation.mutate({ number: issue.number, status: next })}
                             onPRClick={openLinkedPullRequest}
-                            onAuthorClick={openAuthorSidebar}
+                            onAuthorClick={openIssueAuthorSidebar}
                           />
                           {expanded && settings.contentDisplay === 'accordion' && (
                             <Box as="tr">
@@ -1903,6 +2114,7 @@ export default function RepoExplorer() {
                             expanded={expanded}
                             onView={handleView}
                             linkedIssues={linkedIssues}
+                            onAuthorClick={openPullAuthorSidebar}
                             onIssueClick={(num) => {
                               setPullModal(null);
                               setIssueModal(null);
@@ -1994,14 +2206,17 @@ export default function RepoExplorer() {
               willChange: 'transform',
             }}
           >
-            <AuthorSidebar
+            <AuthorActivitySidebar
+              key={`${selected.fullName}:${renderedAuthorTarget.login}:${renderedAuthorTarget.initialTab}`}
               owner={selected.owner}
               name={selected.name}
               repoFullName={selected.fullName}
               login={renderedAuthorTarget.login}
               initialAssociation={renderedAuthorTarget.association ?? null}
+              initialTab={renderedAuthorTarget.initialTab}
               onClose={() => setAuthorTarget(null)}
               onIssueClick={openIssueFromAuthorSidebar}
+              onPullClick={openPullFromAuthorSidebar}
             />
           </Box>
         </>
@@ -2107,42 +2322,6 @@ export default function RepoExplorer() {
   );
 }
 
-function SortHeader<T extends string>({
-  label,
-  sortKey,
-  current,
-  dir,
-  onClick,
-  align = 'left',
-}: {
-  label: string;
-  sortKey: T;
-  current: T;
-  dir: SortDir;
-  onClick: (key: T) => void;
-  align?: 'left' | 'right' | 'center';
-}) {
-  const active = current === sortKey;
-  return (
-    <Box
-      as="th"
-      onClick={() => onClick(sortKey)}
-      sx={{
-        ...tableHeaderSx,
-        textAlign: align,
-        cursor: 'pointer',
-        userSelect: 'none',
-        '&:hover': { color: 'var(--fg-default)' },
-      }}
-    >
-      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-        {label}
-        {active && (dir === 'asc' ? <TriangleUpIcon size={12} /> : <TriangleDownIcon size={12} />)}
-      </Box>
-    </Box>
-  );
-}
-
 function OwnerCommentsTab({
   loading,
   data,
@@ -2224,283 +2403,6 @@ function OwnerCommentsTab({
   );
 }
 
-// Per-row valid / invalid picker. Two side-by-side toggle buttons — one for
-// each state — so a single click sets or clears it. Mutually exclusive: clicking
-// the opposite side of an already-set value flips directly to the new value.
-function ValidationPicker({
-  value,
-  onChange,
-}: {
-  value: 'valid' | 'invalid' | null;
-  onChange: (next: 'valid' | 'invalid' | null) => void;
-}) {
-  const cellSx: React.CSSProperties = {
-    width: 30,
-    height: 24,
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    border: '1px solid var(--border-default)',
-    cursor: 'pointer',
-    padding: 0,
-    lineHeight: 1,
-    transition: 'background 0.08s ease, color 0.08s ease',
-  };
-  return (
-    <Box sx={{ display: 'inline-flex' }}>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onChange(value === 'valid' ? null : 'valid');
-        }}
-        title={value === 'valid' ? 'Clear valid' : 'Mark as valid'}
-        style={{
-          ...cellSx,
-          borderTopLeftRadius: 6,
-          borderBottomLeftRadius: 6,
-          borderRight: 'none',
-          background: value === 'valid' ? 'var(--success-subtle)' : 'var(--bg-emphasis)',
-          color: value === 'valid' ? 'var(--success-fg)' : 'var(--fg-muted)',
-        }}
-      >
-        <CheckIcon size={14} />
-      </button>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onChange(value === 'invalid' ? null : 'invalid');
-        }}
-        title={value === 'invalid' ? 'Clear invalid' : 'Mark as invalid'}
-        style={{
-          ...cellSx,
-          borderTopRightRadius: 6,
-          borderBottomRightRadius: 6,
-          background: value === 'invalid' ? 'var(--danger-subtle)' : 'var(--bg-emphasis)',
-          color: value === 'invalid' ? 'var(--danger-fg)' : 'var(--fg-muted)',
-        }}
-      >
-        <XIcon size={14} />
-      </button>
-    </Box>
-  );
-}
-
-function InlinePagination({
-  page,
-  totalPages,
-  totalItems,
-  pageSize,
-  onChange,
-  onPageSizeChange,
-  rawPageSize,
-}: {
-  page: number;
-  totalPages: number;
-  totalItems: number;
-  pageSize: number;
-  onChange: (next: number) => void;
-  onPageSizeChange?: (size: number) => void;
-  rawPageSize?: number;
-}) {
-  const start = (page - 1) * pageSize + 1;
-  const end = Math.min(page * pageSize, totalItems);
-  const showPageNav = totalItems > pageSize;
-
-  const navBtn = (label: React.ReactNode, target: number, disabled: boolean | undefined, aria: string) => (
-    <button
-      key={aria}
-      type="button"
-      onClick={() => onChange(target)}
-      disabled={disabled}
-      aria-label={aria}
-      title={aria}
-      className="gt-pag-btn"
-      data-disabled={disabled ? 'true' : 'false'}
-    >
-      {label}
-    </button>
-  );
-
-  return (
-    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 0 }}>
-      <Text sx={{ color: 'var(--fg-muted)', whiteSpace: 'nowrap' }}>
-        <strong>{showPageNav ? start : 1}</strong>–<strong>{showPageNav ? end : totalItems}</strong> of{' '}
-        <strong>{totalItems}</strong>
-      </Text>
-      {onPageSizeChange && (
-        <Dropdown
-          value={String(rawPageSize && rawPageSize > 0 ? rawPageSize : pageSize)}
-          onChange={(v) => onPageSizeChange(parseInt(v, 10))}
-          options={[
-            { value: '10', label: '10' },
-            { value: '25', label: '25' },
-            { value: '50', label: '50' },
-            { value: '100', label: '100' },
-          ]}
-          width={72}
-          size="small"
-          ariaLabel="Rows per page"
-        />
-      )}
-      {showPageNav && (
-        <Box className="gt-pag-group">
-          {navBtn(<DoubleChevron dir="left" />, 1, page <= 1, 'First page')}
-          {navBtn(<ChevronLeftIcon size={14} />, page - 1, page <= 1, 'Previous page')}
-          <Box className="gt-pag-label">
-            <Text sx={{ color: 'var(--fg-default)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
-              {page}
-            </Text>
-            <Text sx={{ color: 'var(--fg-muted)', mx: '4px' }}>/</Text>
-            <Text sx={{ color: 'var(--fg-muted)', fontVariantNumeric: 'tabular-nums' }}>
-              {totalPages}
-            </Text>
-          </Box>
-          {navBtn(<ChevronRightIcon size={14} />, page + 1, page >= totalPages, 'Next page')}
-          {navBtn(<DoubleChevron dir="right" />, totalPages, page >= totalPages, 'Last page')}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-function DoubleChevron({ dir }: { dir: 'left' | 'right' }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
-      {dir === 'left' ? (
-        <>
-          <path d="M9.78 4.22a.75.75 0 0 1 0 1.06L7.06 8l2.72 2.72a.75.75 0 1 1-1.06 1.06L5.47 8.53a.75.75 0 0 1 0-1.06l3.25-3.25a.75.75 0 0 1 1.06 0Z" fill="currentColor" />
-          <path d="M5.78 4.22a.75.75 0 0 1 0 1.06L3.06 8l2.72 2.72a.75.75 0 1 1-1.06 1.06L1.47 8.53a.75.75 0 0 1 0-1.06l3.25-3.25a.75.75 0 0 1 1.06 0Z" fill="currentColor" />
-        </>
-      ) : (
-        <>
-          <path d="M6.22 4.22a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06l-3.25 3.25a.75.75 0 1 1-1.06-1.06L8.94 8 6.22 5.28a.75.75 0 0 1 0-1.06Z" fill="currentColor" />
-          <path d="M10.22 4.22a.75.75 0 0 1 1.06 0l3.25 3.25a.75.75 0 0 1 0 1.06l-3.25 3.25a.75.75 0 1 1-1.06-1.06L12.94 8l-2.72-2.72a.75.75 0 0 1 0-1.06Z" fill="currentColor" />
-        </>
-      )}
-    </svg>
-  );
-}
-
-function Pagination({
-  page,
-  totalPages,
-  totalItems,
-  pageSize,
-  onChange,
-  onPageSizeChange,
-  rawPageSize,
-}: {
-  page: number;
-  totalPages: number;
-  totalItems: number;
-  pageSize: number;
-  onChange: (next: number) => void;
-  onPageSizeChange?: (size: number) => void;
-  rawPageSize?: number;
-}) {
-  const start = (page - 1) * pageSize + 1;
-  const end = Math.min(page * pageSize, totalItems);
-
-  const btn = (label: React.ReactNode, target: number, disabled?: boolean, active?: boolean) => (
-    <button
-      key={`${label}-${target}`}
-      type="button"
-      onClick={() => onChange(target)}
-      disabled={disabled}
-      style={{
-        minWidth: 32,
-        height: 28,
-        padding: '0 10px',
-        border: '1px solid var(--border-default)',
-        borderRadius: 6,
-        background: active ? 'var(--accent-emphasis)' : 'var(--bg-canvas)',
-        color: active ? '#ffffff' : disabled ? 'var(--fg-subtle)' : 'var(--fg-default)',
-        fontSize: 13,
-        fontWeight: active ? 600 : 500,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        fontFamily: 'inherit',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {label}
-    </button>
-  );
-
-  // Build a windowed page-number list (current ± 2, plus first/last with ellipses)
-  const numbers: (number | '…')[] = [];
-  const window = 1;
-  for (let i = 1; i <= totalPages; i++) {
-    if (i === 1 || i === totalPages || (i >= page - window && i <= page + window)) {
-      numbers.push(i);
-    } else if (numbers[numbers.length - 1] !== '…') {
-      numbers.push('…');
-    }
-  }
-
-  const showPageNav = totalItems > pageSize;
-
-  return (
-    <Box
-      sx={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 3,
-        px: 3,
-        py: 2,
-        borderTop: '1px solid',
-        borderColor: 'var(--border-default)',
-        bg: 'var(--bg-subtle)',
-        flexShrink: 0,
-        flexWrap: 'wrap',
-      }}
-    >
-      <Box sx={{ color: 'var(--fg-muted)', fontSize: 0 }}>
-        Showing <strong>{showPageNav ? start : 1}</strong>–<strong>{showPageNav ? end : totalItems}</strong> of <strong>{totalItems}</strong>
-      </Box>
-
-      {onPageSizeChange && (
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-          <Text sx={{ color: 'var(--fg-muted)', fontSize: 0 }}>Rows per page</Text>
-          <Dropdown
-            value={String(rawPageSize && rawPageSize > 0 ? rawPageSize : pageSize)}
-            onChange={(v) => onPageSizeChange(parseInt(v, 10))}
-            options={[
-              { value: '10', label: '10' },
-              { value: '25', label: '25' },
-              { value: '50', label: '50' },
-              { value: '100', label: '100' },
-            ]}
-            width={88}
-            size="small"
-            ariaLabel="Rows per page"
-          />
-        </Box>
-      )}
-
-      {showPageNav && (
-        <Box sx={{ ml: 'auto', display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-          {btn(<ChevronLeftIcon size={14} />, page - 1, page <= 1)}
-          {numbers.map((n, i) =>
-            n === '…' ? (
-              <span key={`e-${i}`} style={{ color: 'var(--fg-muted)', padding: '0 4px' }}>
-                …
-              </span>
-            ) : (
-              btn(n, n, false, n === page)
-            )
-          )}
-          {btn(<ChevronRightIcon size={14} />, page + 1, page >= totalPages)}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
 const RecentTime = React.memo(function RecentTime({ iso }: { iso: string | null | undefined }) {
   if (!iso) return <Text sx={{ color: 'var(--fg-muted)' }}>—</Text>;
   const recent = isRecent(iso);
@@ -2532,48 +2434,18 @@ const RecentTime = React.memo(function RecentTime({ iso }: { iso: string | null 
   return <Text sx={{ color: 'var(--fg-muted)' }}>{formatRelativeTime(iso)}</Text>;
 });
 
-function ResizeHandle({ onMouseDown }: { onMouseDown: (e: React.MouseEvent) => void }) {
-  return (
-    <Box
-      role="separator"
-      aria-orientation="vertical"
-      onMouseDown={onMouseDown}
-      sx={{
-        display: ['none', null, null, null, 'block'],
-        width: 4,
-        flexShrink: 0,
-        cursor: 'col-resize',
-        position: 'relative',
-        bg: 'var(--border-default)',
-        transition: 'background 80ms',
-        zIndex: 1,
-        '&:hover': {
-          bg: 'var(--accent-emphasis)',
-        },
-        '&:active': {
-          bg: 'var(--accent-emphasis)',
-        },
-        '&::before': {
-          content: '""',
-          position: 'absolute',
-          top: 0,
-          bottom: 0,
-          left: '-4px',
-          right: '-4px',
-        },
-      }}
-    />
-  );
-}
-
 const AuthorCell = React.memo(function AuthorCell({
   login,
   association,
+  credibility,
+  credibilityVariant,
   highlight,
   onClick,
 }: {
   login: string | null;
   association?: string | null;
+  credibility?: AuthorCredibility | null;
+  credibilityVariant?: 'issues' | 'pulls';
   highlight?: boolean;
   onClick?: (login: string, association?: string | null) => void;
 }) {
@@ -2601,6 +2473,7 @@ const AuthorCell = React.memo(function AuthorCell({
         sx={{
           color: highlight ? 'var(--attention-emphasis)' : 'var(--fg-default)',
           fontWeight: 500,
+          minWidth: 0,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -2609,6 +2482,9 @@ const AuthorCell = React.memo(function AuthorCell({
       >
         {login}
       </Text>
+      {credibilityVariant && (
+        <AuthorCredibilityNote credibility={credibility} variant={credibilityVariant} />
+      )}
       {showAssociation && (
         <Label variant="secondary" sx={{ fontSize: '10px', flexShrink: 0 }}>
           {(association ?? '').toLowerCase()}
@@ -2623,6 +2499,7 @@ const AuthorCell = React.memo(function AuthorCell({
     textDecoration: 'none',
     color: 'inherit',
     maxWidth: '100%',
+    minWidth: 0,
   };
 
   if (onClick) {
@@ -2690,154 +2567,21 @@ const CountBadge = React.memo(function CountBadge({ n, fg, bg }: { n: number; fg
   );
 });
 
-function weightColor(w: number): string {
-  if (w >= 0.5) return 'var(--success-fg)';
-  if (w >= 0.3) return 'var(--accent-fg)';
-  if (w >= 0.15) return 'var(--attention-emphasis)';
-  if (w >= 0.05) return 'var(--fg-default)';
-  return 'var(--fg-subtle)';
-}
-
-function weightFontWeight(w: number): number {
-  if (w >= 0.5) return 700;
-  if (w >= 0.3) return 700;
-  if (w >= 0.15) return 600;
-  if (w >= 0.05) return 500;
-  return 400;
-}
-
-const tableHeaderSx = {
-  px: 2,
-  py: '6px',
-  textAlign: 'left' as const,
-  fontWeight: 600,
-  fontSize: '11px',
-  color: 'var(--fg-muted)',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.5px',
-  whiteSpace: 'nowrap' as const,
-  borderBottom: '1px solid',
-  borderColor: 'var(--border-default)',
-};
-
-const tableCellSx = {
-  px: 2,
-  py: '6px',
-  height: 36,
-  verticalAlign: 'middle' as const,
-  cursor: 'pointer',
-};
-
-const tableTimeSx = {
-  ...tableCellSx,
-  fontSize: 0,
-  color: 'var(--fg-muted)',
-  whiteSpace: 'nowrap' as const,
-  cursor: 'pointer',
-};
-
-function TabButton({
-  active,
-  onClick,
-  icon,
-  label,
-  count,
-  newCount = 0,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  count?: number;
-  newCount?: number;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '8px 16px',
-        background: 'transparent',
-        border: 'none',
-        borderBottom: active ? '2px solid var(--attention-emphasis)' : '2px solid transparent',
-        color: active ? 'var(--fg-default)' : 'var(--fg-muted)',
-        fontSize: 14,
-        fontWeight: active ? 600 : 500,
-        fontFamily: 'inherit',
-        cursor: 'pointer',
-        marginBottom: 0,
-        transition: 'color 80ms, border-color 80ms',
-      }}
-      onMouseEnter={(e) => {
-        if (!active) (e.currentTarget as HTMLButtonElement).style.color = 'var(--fg-default)';
-      }}
-      onMouseLeave={(e) => {
-        if (!active) (e.currentTarget as HTMLButtonElement).style.color = 'var(--fg-muted)';
-      }}
-    >
-      {icon}
-      {label}
-      {typeof count === 'number' && (
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '0 6px',
-            background: 'var(--bg-emphasis)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 999,
-            fontSize: 12,
-            fontWeight: 500,
-            minWidth: 20,
-            justifyContent: 'center',
-          }}
-        >
-          {count}
-        </span>
-      )}
-      {newCount > 0 && (
-        <span
-          title={`${newCount} new since you last viewed this tab`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '0 6px',
-            height: 18,
-            minWidth: 18,
-            background: 'var(--danger-emphasis)',
-            color: '#ffffff',
-            borderRadius: 999,
-            fontSize: 11,
-            fontWeight: 700,
-            lineHeight: 1,
-            boxShadow: '0 0 0 2px var(--bg-canvas)',
-            animation: 'badgePulse 2s ease-in-out infinite',
-          }}
-        >
-          {newCount > 99 ? '99+' : newCount}
-        </span>
-      )}
-    </button>
-  );
-}
-
 const ExplorerPullRow = React.memo(function ExplorerPullRow({
   pr,
   mine,
   expanded,
   onView,
   linkedIssues,
+  onAuthorClick,
   onIssueClick,
 }: {
-  pr: PullDto;
+  pr: Pull;
   mine: boolean;
   expanded: boolean;
   onView: () => void;
   linkedIssues: Array<{ number: number; title: string; state: string; state_reason: string | null; author_login: string | null }>;
+  onAuthorClick: (login: string, association?: string | null) => void;
   onIssueClick: (issueNumber: number) => void;
 }) {
   return (
@@ -2910,7 +2654,14 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
         </Box>
       </Box>
       <Box as="td" sx={{ ...tableCellSx, fontSize: 0 }}>
-        <AuthorCell login={pr.author_login} association={pr.author_association} highlight={mine} />
+        <AuthorCell
+          login={pr.author_login}
+          association={pr.author_association}
+          credibility={pr.author_credibility}
+          credibilityVariant="pulls"
+          highlight={mine}
+          onClick={onAuthorClick}
+        />
       </Box>
       <Box as="td" sx={tableTimeSx} title={pr.created_at ?? undefined}>
         <RecentTime iso={pr.created_at} />
@@ -2943,6 +2694,7 @@ const ExplorerPullRow = React.memo(function ExplorerPullRow({
   prev.mine === next.mine &&
   prev.expanded === next.expanded &&
   prev.linkedIssues === next.linkedIssues &&
+  prev.onAuthorClick === next.onAuthorClick &&
   prev.onIssueClick === next.onIssueClick,
 );
 
@@ -2958,7 +2710,7 @@ const ExplorerIssueRow = React.memo(function ExplorerIssueRow({
   onPRClick,
   onAuthorClick,
 }: {
-  issue: IssueDto;
+  issue: Issue;
   expanded: boolean;
   onView: () => void;
   authorStats: { open: number; completed: number; not_planned: number; closed: number } | null;
@@ -3028,6 +2780,8 @@ const ExplorerIssueRow = React.memo(function ExplorerIssueRow({
         <AuthorCell
           login={issue.author_login}
           association={issue.author_association}
+          credibility={issue.author_credibility}
+          credibilityVariant="issues"
           onClick={onAuthorClick}
         />
       </Box>
@@ -3062,149 +2816,6 @@ const ExplorerIssueRow = React.memo(function ExplorerIssueRow({
   prev.onPRClick === next.onPRClick &&
   prev.onAuthorClick === next.onAuthorClick,
 );
-
-function RelatedPRsCell({
-  prs,
-  onPRClick,
-}: {
-  prs: Array<{ number: number; title: string; state: string; merged: number; draft: number; author_login?: string | null }>;
-  onPRClick?: (prNumber: number) => void | Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [popoverLayout, updatePopoverLayout] = useRelatedPopoverLayout(open, prs.length, wrapRef);
-
-  useEffect(() => {
-    if (!open) return;
-    const onMouseDown = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  if (prs.length === 0) {
-    return <Text sx={{ color: 'var(--fg-muted)', fontFamily: 'mono', fontSize: 0 }}>—</Text>;
-  }
-  const merged = prs.filter((p) => p.merged).length;
-  const open_ = prs.filter((p) => !p.merged && p.state === 'open').length;
-  const tone = open_ > 0 ? 'var(--success-emphasis)' : merged > 0 ? 'var(--done-emphasis)' : 'var(--fg-muted)';
-
-  return (
-    <Box
-      ref={wrapRef as unknown as React.Ref<HTMLDivElement>}
-      sx={{ position: 'relative', display: 'inline-block' }}
-      onClick={(e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (!open) updatePopoverLayout();
-        setOpen((v) => !v);
-      }}
-    >
-      <Box
-        as="button"
-        title={`${prs.length} PR${prs.length === 1 ? '' : 's'} reference this issue`}
-        sx={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 1,
-          px: '8px',
-          py: '3px',
-          border: '1px solid',
-          borderColor: 'var(--border-default)',
-          borderRadius: '999px',
-          bg: 'var(--bg-canvas)',
-          color: tone,
-          fontSize: '12px',
-          fontWeight: 700,
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          '&:hover': { borderColor: tone },
-        }}
-      >
-        <GitPullRequestIcon size={11} />
-        {prs.length}
-      </Box>
-      {open && (
-        <Box
-          sx={{
-            position: 'absolute',
-            ...relatedPopoverOffset(popoverLayout),
-            right: 0,
-            minWidth: 280,
-            maxWidth: 360,
-            maxHeight: popoverLayout.maxHeight,
-            overflowY: 'auto',
-            bg: 'var(--bg-subtle)',
-            border: '1px solid',
-            borderColor: 'var(--border-default)',
-            borderRadius: 2,
-            boxShadow: 'var(--shadow-overlay)',
-            zIndex: 50,
-            py: 1,
-            textAlign: 'left',
-          }}
-        >
-          <Text sx={{ px: 2, py: 1, fontSize: 0, color: 'var(--fg-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px', display: 'block' }}>
-            Linked pull requests
-          </Text>
-          {prs.map((pr) => {
-            const status = pr.merged ? 'merged' : pr.draft ? 'draft' : pr.state === 'open' ? 'open' : 'closed';
-            const statusColor =
-              status === 'merged' ? 'var(--done-emphasis)' :
-              status === 'open' ? 'var(--success-emphasis)' :
-              status === 'draft' ? 'var(--fg-muted)' :
-              'var(--danger-fg)';
-            return (
-              <button
-                key={pr.number}
-                onClick={(e: React.MouseEvent) => {
-                  e.stopPropagation();
-                  setOpen(false);
-                  void onPRClick?.(pr.number);
-                }}
-                onMouseEnter={highlightRelatedRow}
-                onMouseLeave={unhighlightRelatedRow}
-                style={relatedPopoverRowStyle}
-              >
-                {pr.author_login ? (
-                  <span style={relatedPopoverAuthorStyle}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={`https://github.com/${pr.author_login}.png?size=32`}
-                      alt={pr.author_login}
-                      loading="lazy"
-                      style={{ width: 16, height: 16, borderRadius: '50%', border: '1px solid var(--border-muted)', display: 'block', flexShrink: 0 }}
-                    />
-                    <span style={relatedPopoverAuthorTextStyle}>
-                      {pr.author_login}
-                    </span>
-                  </span>
-                ) : (
-                  <GitPullRequestIcon size={12} />
-                )}
-                <span style={{ ...relatedPopoverStatusTextStyle, color: statusColor }}>
-                  {status}
-                </span>
-                <span style={relatedPopoverTitleStyle}>
-                  #{pr.number} {pr.title}
-                </span>
-              </button>
-            );
-          })}
-        </Box>
-      )}
-    </Box>
-  );
-}
 
 /** Inline cell for the PR table: shows a count badge with a popover listing
  *  the issues this PR closes/fixes/references. Mirrors RelatedPRsCell so the
@@ -3391,13 +3002,6 @@ const relatedPopoverAuthorTextStyle: React.CSSProperties = {
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
-};
-
-const relatedPopoverStatusTextStyle: React.CSSProperties = {
-  fontSize: 12,
-  fontWeight: 700,
-  textTransform: 'capitalize',
-  flexShrink: 0,
 };
 
 const relatedPopoverTitleStyle: React.CSSProperties = {

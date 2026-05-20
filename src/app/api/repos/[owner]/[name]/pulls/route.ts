@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb, getReadDb, PullRow } from '@/lib/db';
 import { refreshPullsIfStale } from '@/lib/refresh';
 import { buildEtag, etagNotModified, withEtagHeaders } from '@/lib/etag';
+import { authorCredibilityForRepo, getGittensorCredibilityIndex } from '@/lib/gittensor-credibility';
+import { getIssueDiscoveryDisabledReposAsyncServer } from '@/lib/repos-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -195,6 +197,14 @@ export async function GET(
     }
   }
 
+  const [credibilityIndex, issueDiscoveryDisabledRepos] = rows.length > 0
+    ? await Promise.all([
+        getGittensorCredibilityIndex([full]),
+        getIssueDiscoveryDisabledReposAsyncServer([full]),
+      ])
+    : [null, new Set<string>()];
+  const issueDiscoveryDisabled = issueDiscoveryDisabledRepos.has(full.toLowerCase());
+
   return NextResponse.json(
     {
       repo: full,
@@ -203,7 +213,12 @@ export async function GET(
       ...(new_count !== undefined ? { new_count } : {}),
       last_fetch: meta?.last_pulls_fetch ?? null,
       last_error: meta?.last_fetch_error ?? null,
-      pulls: rows,
+      pulls: rows.map((r) => ({
+        ...r,
+        author_credibility: authorCredibilityForRepo(credibilityIndex, r.author_login, r.repo_full_name, {
+          issueDiscoveryDisabled,
+        }),
+      })),
       linked_issues_by_pull,
     },
     { headers: withEtagHeaders(etag) },

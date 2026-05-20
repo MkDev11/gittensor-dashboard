@@ -24,44 +24,7 @@ import {
 import { TableRowsSkeleton, CardGridSkeleton } from '@/components/Skeleton';
 import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import { formatRelativeTime, formatNumber, formatCount, formatPercent } from '@/lib/format';
-
-interface GtRepo {
-  fullName: string;
-  owner: string;
-  name: string;
-  weight: number;
-  isActive: boolean;
-  inactiveAt: string | null;
-  totalScore: number;
-  totalPrCount: number;
-  mergedPrCount: number;
-  contributorCount: number;
-  collateralStaked: number;
-  prsThisWeek: number;
-  prsLastWeek: number;
-  trendingPct: number;
-  lastPrAt: string | null;
-}
-
-interface GtPrSummary {
-  pullRequestNumber: number;
-  title: string;
-  repository: string;
-  author: string;
-  prCreatedAt: string;
-  prState: string;
-  mergedAt: string | null;
-}
-
-interface GtReposResp {
-  fetched_at: number;
-  source?: string;
-  count: number;
-  activeCount: number;
-  inactiveCount: number;
-  repos: GtRepo[];
-  recentPrs: GtPrSummary[];
-}
+import type { GtRepo, GtPrSummary, GtReposResponse } from '@/types/entities';
 
 type SortKey = 'weight' | 'totalScore' | 'mergedPrCount' | 'contributorCount' | 'fullName';
 type StatusFilter = 'all' | 'active' | 'inactive';
@@ -91,7 +54,7 @@ export default function RepositoriesPage() {
   const [pageSize, setPageSize] = useState<number>(10);
   const [page, setPage] = useState<number>(1);
 
-  const { data, isLoading, isError } = useQuery<GtReposResp>({
+  const { data, isLoading, isError } = useQuery<GtReposResponse>({
     queryKey: ['gt-repositories'],
     queryFn: async () => {
       const r = await fetch('/api/gt/repositories');
