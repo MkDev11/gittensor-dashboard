@@ -216,7 +216,8 @@ export default function DocsPage() {
                 <Li>
                   <strong>Middle pane</strong> — Issues / Pull Requests tabs for the selected repo. Each table shows
                   state badges, author with avatar, opened/updated/closed timestamps (recent items in bold green),
-                  and related-PR count for issues.
+                  related-PR count for issues, linked issue chips for pull requests, and Gittensor PR scores where
+                  available. Clicking a linked issue opens its detail view directly.
                 </Li>
                 <Li>
                   <strong>Right rail (when open)</strong> — issue/PR content viewer. Slides in from the right and
@@ -278,6 +279,7 @@ export default function DocsPage() {
                 <Li><strong>Pagination</strong>: page controls at the table edge with configurable rows per page</Li>
                 <Li><strong>Author activity</strong>: click an author to open their repo-scoped activity sidebar with latest PRs and issues</Li>
                 <Li><strong>Score</strong>: Gittensor-backed PR score column; open PRs show potential and collateral values, merged PRs show the final score</Li>
+                <Li><strong>Linked issues</strong>: issue chips mirror Explorer and open the issue detail view directly</Li>
                 <Li><strong>Sorting</strong>: server-backed sort controls keep large PR sets responsive</Li>
               </Ul>
             </Article>

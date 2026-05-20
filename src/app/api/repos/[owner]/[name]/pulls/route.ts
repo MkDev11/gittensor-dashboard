@@ -4,6 +4,7 @@ import { refreshPullsIfStale } from '@/lib/refresh';
 import { buildEtag, etagNotModified, withEtagHeaders } from '@/lib/etag';
 import { authorCredibilityForRepo, getGittensorCredibilityIndex } from '@/lib/gittensor-credibility';
 import { getIssueDiscoveryDisabledReposAsyncServer } from '@/lib/repos-server';
+import { GITTENSOR_PR_SCORE_TTL_MS, getGittensorPrScoreMap, pullScoreKey } from '@/lib/gittensor-pr-scores';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,10 +44,11 @@ export async function GET(
     .prepare('SELECT COUNT(*) AS c FROM pr_issue_links WHERE repo_full_name = ?')
     .get(full) as { c: number }).c;
   const etag = buildEtag([
-    'pulls-v2',
+    'pulls-v3',
     full,
     meta0?.last_pulls_fetch,
     linkCount0,
+    Math.floor(Date.now() / GITTENSOR_PR_SCORE_TTL_MS),
     url.searchParams.get('q'),
     url.searchParams.get('state'),
     url.searchParams.get('author'),
@@ -197,12 +199,13 @@ export async function GET(
     }
   }
 
-  const [credibilityIndex, issueDiscoveryDisabledRepos] = rows.length > 0
+  const [credibilityIndex, issueDiscoveryDisabledRepos, scoreMap] = rows.length > 0
     ? await Promise.all([
         getGittensorCredibilityIndex([full]),
         getIssueDiscoveryDisabledReposAsyncServer([full]),
+        getGittensorPrScoreMap(),
       ])
-    : [null, new Set<string>()];
+    : [null, new Set<string>(), null];
   const issueDiscoveryDisabled = issueDiscoveryDisabledRepos.has(full.toLowerCase());
 
   return NextResponse.json(
@@ -215,6 +218,7 @@ export async function GET(
       last_error: meta?.last_fetch_error ?? null,
       pulls: rows.map((r) => ({
         ...r,
+        score: scoreMap?.get(pullScoreKey(r.repo_full_name, r.number)) ?? null,
         author_credibility: authorCredibilityForRepo(credibilityIndex, r.author_login, r.repo_full_name, {
           issueDiscoveryDisabled,
         }),

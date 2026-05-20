@@ -287,7 +287,7 @@ export default function AuthorActivitySidebar({
         />
       </Box>
 
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
+      <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden' }}>
         <Box sx={{ px: 3, py: 2, color: 'var(--fg-muted)', fontSize: 0 }}>
           {activeTab === 'pulls'
             ? `Latest pull requests${stats?.last_updated_at ? ` - updated ${formatRelativeTime(stats.last_updated_at)}` : ''}`
@@ -324,163 +324,167 @@ export default function AuthorActivitySidebar({
             No cached issues by {login} in this repo.
           </Box>
         ) : activeTab === 'issues' ? (
-          <Box as="table" sx={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 0 }}>
-            <Box as="thead" sx={{ position: 'sticky', top: 0, bg: 'var(--bg-subtle)', zIndex: 1 }}>
-              <Box as="tr">
-                <Box as="th" sx={{ ...tableHeaderSx, width: 104 }}>State</Box>
-                <Box as="th" sx={{ ...tableHeaderSx, width: 48 }}>No</Box>
-                <Box as="th" sx={tableHeaderSx}>Issue</Box>
-                <Box as="th" sx={{ ...tableHeaderSx, width: 92 }}>Opened</Box>
-                <Box as="th" sx={{ ...tableHeaderSx, width: 104 }}>Updated</Box>
+          <Box sx={tableScrollSx}>
+            <Box as="table" sx={activityTableSx}>
+              <Box as="thead" sx={{ position: 'sticky', top: 0, bg: 'var(--bg-subtle)', zIndex: 1 }}>
+                <Box as="tr">
+                  <Box as="th" sx={{ ...tableHeaderSx, width: 104 }}>State</Box>
+                  <Box as="th" sx={{ ...tableHeaderSx, width: 48 }}>No</Box>
+                  <Box as="th" sx={tableHeaderSx}>Issue</Box>
+                  <Box as="th" sx={{ ...tableHeaderSx, width: 92 }}>Opened</Box>
+                  <Box as="th" sx={{ ...tableHeaderSx, width: 104 }}>Updated</Box>
+                </Box>
               </Box>
-            </Box>
-            <Box as="tbody">
-              {issues.map((issue, index) => (
-                <Box
-                  as="tr"
-                  key={issue.id}
-                  onClick={() => onIssueClick(issue)}
-                  sx={{
-                    height: 44,
-                    borderBottom: '1px solid',
-                    borderColor: 'var(--border-muted)',
-                    cursor: 'pointer',
-                    '&:hover': { bg: 'var(--bg-subtle)' },
-                  }}
-                >
-                  <Box as="td" sx={tableCellSx}>
-                    <IssueStatusBadge issue={issue} mergedPRCount={issue.merged_pr_count} />
-                  </Box>
+              <Box as="tbody">
+                {issues.map((issue, index) => (
                   <Box
-                    as="td"
+                    as="tr"
+                    key={issue.id}
+                    onClick={() => onIssueClick(issue)}
                     sx={{
-                      ...tableCellSx,
-                      color: 'var(--fg-muted)',
-                      fontFamily: 'mono',
-                      fontVariantNumeric: 'tabular-nums',
-                      whiteSpace: 'nowrap',
+                      height: 44,
+                      borderBottom: '1px solid',
+                      borderColor: 'var(--border-muted)',
+                      cursor: 'pointer',
+                      '&:hover': { bg: 'var(--bg-subtle)' },
                     }}
                   >
-                    {(safeIssuesPage - 1) * AUTHOR_PAGE_SIZE + index + 1}
-                  </Box>
-                  <Box as="td" sx={{ ...tableCellSx, minWidth: 0, overflow: 'hidden' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, minWidth: 0 }}>
-                      <Text
-                        sx={{
-                          color: 'var(--fg-default)',
-                          fontWeight: 500,
-                          lineHeight: '20px',
-                          minWidth: 0,
-                          flex: '1 1 auto',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                        title={issue.title}
-                      >
-                        {issue.title}
-                      </Text>
-                      <Text
-                        sx={{
-                          color: 'var(--fg-muted)',
-                          fontFamily: 'mono',
-                          fontVariantNumeric: 'tabular-nums',
-                          whiteSpace: 'nowrap',
-                          flexShrink: 0,
-                        }}
-                      >
-                        #{issue.number}
-                      </Text>
+                    <Box as="td" sx={tableCellSx}>
+                      <IssueStatusBadge issue={issue} mergedPRCount={issue.merged_pr_count} />
+                    </Box>
+                    <Box
+                      as="td"
+                      sx={{
+                        ...tableCellSx,
+                        color: 'var(--fg-muted)',
+                        fontFamily: 'mono',
+                        fontVariantNumeric: 'tabular-nums',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {(safeIssuesPage - 1) * AUTHOR_PAGE_SIZE + index + 1}
+                    </Box>
+                    <Box as="td" sx={{ ...tableCellSx, minWidth: 0, overflow: 'hidden' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, minWidth: 0 }}>
+                        <Text
+                          sx={{
+                            color: 'var(--fg-default)',
+                            fontWeight: 500,
+                            lineHeight: '20px',
+                            minWidth: 0,
+                            flex: '1 1 auto',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={issue.title}
+                        >
+                          {issue.title}
+                        </Text>
+                        <Text
+                          sx={{
+                            color: 'var(--fg-muted)',
+                            fontFamily: 'mono',
+                            fontVariantNumeric: 'tabular-nums',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                          }}
+                        >
+                          #{issue.number}
+                        </Text>
+                      </Box>
+                    </Box>
+                    <Box as="td" sx={tableTimeSx} title={issue.created_at ?? undefined}>
+                      <RecentTime iso={issue.created_at} />
+                    </Box>
+                    <Box as="td" sx={tableTimeSx} title={issue.updated_at ?? undefined}>
+                      <RecentTime iso={issue.updated_at} />
                     </Box>
                   </Box>
-                  <Box as="td" sx={tableTimeSx} title={issue.created_at ?? undefined}>
-                    <RecentTime iso={issue.created_at} />
-                  </Box>
-                  <Box as="td" sx={tableTimeSx} title={issue.updated_at ?? undefined}>
-                    <RecentTime iso={issue.updated_at} />
-                  </Box>
-                </Box>
-              ))}
+                ))}
+              </Box>
             </Box>
           </Box>
         ) : (
-          <Box as="table" sx={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 0 }}>
-            <Box as="thead" sx={{ position: 'sticky', top: 0, bg: 'var(--bg-subtle)', zIndex: 1 }}>
-              <Box as="tr">
-                <Box as="th" sx={{ ...tableHeaderSx, width: 104 }}>State</Box>
-                <Box as="th" sx={{ ...tableHeaderSx, width: 48 }}>No</Box>
-                <Box as="th" sx={tableHeaderSx}>Pull Request</Box>
-                <Box as="th" sx={{ ...tableHeaderSx, width: 92 }}>Opened</Box>
-                <Box as="th" sx={{ ...tableHeaderSx, width: 104 }}>Updated</Box>
+          <Box sx={tableScrollSx}>
+            <Box as="table" sx={activityTableSx}>
+              <Box as="thead" sx={{ position: 'sticky', top: 0, bg: 'var(--bg-subtle)', zIndex: 1 }}>
+                <Box as="tr">
+                  <Box as="th" sx={{ ...tableHeaderSx, width: 104 }}>State</Box>
+                  <Box as="th" sx={{ ...tableHeaderSx, width: 48 }}>No</Box>
+                  <Box as="th" sx={tableHeaderSx}>Pull Request</Box>
+                  <Box as="th" sx={{ ...tableHeaderSx, width: 92 }}>Opened</Box>
+                  <Box as="th" sx={{ ...tableHeaderSx, width: 104 }}>Updated</Box>
+                </Box>
               </Box>
-            </Box>
-            <Box as="tbody">
-              {pulls.map((pull, index) => (
-                <Box
-                  as="tr"
-                  key={pull.id}
-                  onClick={() => onPullClick(pull)}
-                  sx={{
-                    height: 44,
-                    borderBottom: '1px solid',
-                    borderColor: 'var(--border-muted)',
-                    cursor: 'pointer',
-                    '&:hover': { bg: 'var(--bg-subtle)' },
-                  }}
-                >
-                  <Box as="td" sx={tableCellSx}>
-                    <PullStatusBadge pr={pull} />
-                  </Box>
+              <Box as="tbody">
+                {pulls.map((pull, index) => (
                   <Box
-                    as="td"
+                    as="tr"
+                    key={pull.id}
+                    onClick={() => onPullClick(pull)}
                     sx={{
-                      ...tableCellSx,
-                      color: 'var(--fg-muted)',
-                      fontFamily: 'mono',
-                      fontVariantNumeric: 'tabular-nums',
-                      whiteSpace: 'nowrap',
+                      height: 44,
+                      borderBottom: '1px solid',
+                      borderColor: 'var(--border-muted)',
+                      cursor: 'pointer',
+                      '&:hover': { bg: 'var(--bg-subtle)' },
                     }}
                   >
-                    {(safePullsPage - 1) * AUTHOR_PAGE_SIZE + index + 1}
-                  </Box>
-                  <Box as="td" sx={{ ...tableCellSx, minWidth: 0, overflow: 'hidden' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, minWidth: 0 }}>
-                      <Text
-                        sx={{
-                          color: 'var(--fg-default)',
-                          fontWeight: 500,
-                          lineHeight: '20px',
-                          minWidth: 0,
-                          flex: '1 1 auto',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                        title={pull.title}
-                      >
-                        {pull.title}
-                      </Text>
-                      <Text
-                        sx={{
-                          color: 'var(--fg-muted)',
-                          fontFamily: 'mono',
-                          fontVariantNumeric: 'tabular-nums',
-                          whiteSpace: 'nowrap',
-                          flexShrink: 0,
-                        }}
-                      >
-                        #{pull.number}
-                      </Text>
+                    <Box as="td" sx={tableCellSx}>
+                      <PullStatusBadge pr={pull} />
+                    </Box>
+                    <Box
+                      as="td"
+                      sx={{
+                        ...tableCellSx,
+                        color: 'var(--fg-muted)',
+                        fontFamily: 'mono',
+                        fontVariantNumeric: 'tabular-nums',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {(safePullsPage - 1) * AUTHOR_PAGE_SIZE + index + 1}
+                    </Box>
+                    <Box as="td" sx={{ ...tableCellSx, minWidth: 0, overflow: 'hidden' }}>
+                      <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, minWidth: 0 }}>
+                        <Text
+                          sx={{
+                            color: 'var(--fg-default)',
+                            fontWeight: 500,
+                            lineHeight: '20px',
+                            minWidth: 0,
+                            flex: '1 1 auto',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title={pull.title}
+                        >
+                          {pull.title}
+                        </Text>
+                        <Text
+                          sx={{
+                            color: 'var(--fg-muted)',
+                            fontFamily: 'mono',
+                            fontVariantNumeric: 'tabular-nums',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                          }}
+                        >
+                          #{pull.number}
+                        </Text>
+                      </Box>
+                    </Box>
+                    <Box as="td" sx={tableTimeSx} title={pull.created_at ?? undefined}>
+                      <RecentTime iso={pull.created_at} />
+                    </Box>
+                    <Box as="td" sx={tableTimeSx} title={pull.updated_at ?? undefined}>
+                      <RecentTime iso={pull.updated_at} />
                     </Box>
                   </Box>
-                  <Box as="td" sx={tableTimeSx} title={pull.created_at ?? undefined}>
-                    <RecentTime iso={pull.created_at} />
-                  </Box>
-                  <Box as="td" sx={tableTimeSx} title={pull.updated_at ?? undefined}>
-                    <RecentTime iso={pull.updated_at} />
-                  </Box>
-                </Box>
-              ))}
+                ))}
+              </Box>
             </Box>
           </Box>
         )}
@@ -625,8 +629,27 @@ const CountBadge = React.memo(function CountBadge({ n, fg, bg }: { n: number; fg
   );
 });
 
+const tableScrollSx = {
+  width: '100%',
+  maxWidth: '100%',
+  minWidth: 0,
+  overflowX: 'auto' as const,
+  overflowY: 'hidden' as const,
+  WebkitOverflowScrolling: 'touch',
+  overscrollBehaviorX: 'contain' as const,
+  touchAction: 'pan-x pan-y',
+};
+
+const activityTableSx = {
+  width: '100%',
+  minWidth: 560,
+  tableLayout: 'fixed' as const,
+  borderCollapse: 'collapse' as const,
+  fontSize: 0,
+};
+
 const tableHeaderSx = {
-  px: 2,
+  px: [1, 2],
   py: '6px',
   textAlign: 'left' as const,
   fontWeight: 600,
@@ -640,7 +663,7 @@ const tableHeaderSx = {
 };
 
 const tableCellSx = {
-  px: 2,
+  px: [1, 2],
   py: '6px',
   height: 36,
   verticalAlign: 'middle' as const,

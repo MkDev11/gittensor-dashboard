@@ -484,9 +484,43 @@ select {
 .md-content li { margin-top: 0.25em; }
 .md-content li > p { margin-top: 16px; }
 .md-content li + li { margin-top: 0.25em; }
-.md-content ul.contains-task-list { padding-left: 1.2em; list-style: none; }
-.md-content li.task-list-item { list-style: none; }
-.md-content input[type="checkbox"] { margin: 0 0.35em 0.25em -1.4em; vertical-align: middle; }
+.md-content ul.contains-task-list {
+  padding-left: 1.55em;
+  list-style: none;
+}
+.md-content li.task-list-item {
+  position: relative;
+  list-style: none;
+}
+.md-content li.task-list-item > input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin: 0 0.5em 0 -1.55em;
+  vertical-align: -2px;
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  background: var(--bg-canvas);
+  opacity: 1;
+  pointer-events: none;
+}
+.md-content li.task-list-item > input[type="checkbox"]:checked {
+  border-color: var(--accent-emphasis);
+  background: var(--accent-emphasis);
+}
+.md-content li.task-list-item > input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
 
 .md-content a {
   color: var(--accent-fg);
