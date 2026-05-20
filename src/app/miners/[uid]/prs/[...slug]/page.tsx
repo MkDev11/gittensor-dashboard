@@ -17,8 +17,10 @@ import {
   ZapIcon,
   TrophyIcon,
   ClockIcon,
+  MarkGithubIcon,
 } from '@primer/octicons-react';
 import { formatUsd, formatRelativeTime } from '@/lib/format';
+import { Card, CardHeader, MONO, LABEL, EmptyState } from '../../../parts';
 
 /* =========================================================================
  * Types (subset of /api/gt/miners/[uid] response)
@@ -55,11 +57,10 @@ function num(v: unknown): number {
 
 /* =========================================================================
  * Time-decay model (mirrors prTimeDecayModel.ts from gittensor-ui)
- * Default params: graceHours=12, midpoint=10, steepness=0.4, floor=0.05
  * ========================================================================= */
 
 const DECAY = { graceHours: 12, midpoint: 10, steepness: 0.4, floor: 0.05 };
-const LOOKBACK = 35; // days
+const LOOKBACK = 35;
 
 function decayAt(days: number): number {
   if (days <= DECAY.graceHours / 24) return 1;
@@ -68,18 +69,17 @@ function decayAt(days: number): number {
 }
 
 /* =========================================================================
- * Time-decay SVG chart — pure SVG, no external charting library
+ * Time-decay SVG chart
  * ========================================================================= */
 
-const PAD_L = 44, PAD_R = 24, PAD_T = 20, PAD_B = 36;
-const CHART_W = 360, CHART_H = 130;
+const PAD_L = 44, PAD_R = 24, PAD_T = 18, PAD_B = 30;
+const CHART_W = 480, CHART_H = 160;
 const SVG_W = PAD_L + CHART_W + PAD_R;
 const SVG_H = PAD_T + CHART_H + PAD_B;
 
 const xOf = (d: number) => PAD_L + (Math.min(d, LOOKBACK) / LOOKBACK) * CHART_W;
 const yOf = (v: number) => PAD_T + CHART_H * (1 - Math.max(0, Math.min(1, v)));
 
-// Pre-compute curve path (module-level: doesn't depend on runtime data)
 const STEPS = 140;
 const _pts = Array.from({ length: STEPS + 1 }, (_, i) => {
   const d = (i / STEPS) * LOOKBACK;
@@ -109,134 +109,59 @@ function TimeDecayChart({
   const isPast = nowDays > LOOKBACK;
 
   return (
-    <Box
-      sx={{
-        border: '1px solid',
-        borderColor: 'border.default',
-        borderRadius: 2,
-        bg: 'canvas.subtle',
-        p: 3,
-        overflow: 'hidden',
-      }}
-    >
-      {/* Header */}
-      <Box
-        sx={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          mb: 2,
-          flexWrap: 'wrap',
-          gap: 2,
-        }}
-      >
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-          <ClockIcon size={13} />
-          <Text sx={{ fontSize: 1, fontWeight: 700 }}>Time Decay</Text>
-        </Box>
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 0, color: 'fg.muted' }}>
-          {actualMultiplier != null && (
-            <Box>
-              actual{' '}
-              <Text
-                as="span"
-                sx={{ fontFamily: 'mono', fontWeight: 700, color: 'accent.fg' }}
-              >
-                {(actualMultiplier * 100).toFixed(1)}%
-              </Text>
-            </Box>
-          )}
-          <Box>
-            model{' '}
-            <Text as="span" sx={{ fontFamily: 'mono', fontWeight: 700, color: 'fg.default' }}>
-              {(modelMult * 100).toFixed(1)}%
-            </Text>
+    <Card>
+      <CardHeader
+        icon={<ClockIcon size={13} />}
+        title="Time decay"
+        sub={`grace ${DECAY.graceHours}h · midpoint ${DECAY.midpoint}d · floor ${(DECAY.floor * 100).toFixed(0)}%`}
+        right={
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 0, color: 'fg.muted' }}>
+            {actualMultiplier != null && (
+              <span>actual <Text as="span" sx={{ ...MONO, fontWeight: 700, color: 'fg.default' }}>{(actualMultiplier * 100).toFixed(1)}%</Text></span>
+            )}
+            <span>model <Text as="span" sx={{ ...MONO, fontWeight: 700, color: 'fg.default' }}>{(modelMult * 100).toFixed(1)}%</Text></span>
+            <span>day <Text as="span" sx={{ ...MONO, fontWeight: 700 }}>{nowDays.toFixed(1)}</Text></span>
+            {isPast && <Text sx={{ color: 'danger.fg', fontWeight: 600 }}>past window</Text>}
           </Box>
-          <Box>
-            day{' '}
-            <Text as="span" sx={{ fontFamily: 'mono', fontWeight: 700 }}>
-              {nowDays.toFixed(1)}
-            </Text>
-          </Box>
-          {isPast && (
-            <Text sx={{ color: 'danger.fg', fontWeight: 600 }}>past lookback window</Text>
-          )}
-        </Box>
-      </Box>
-
-      {/* SVG */}
-      <Box sx={{ overflowX: 'auto' }}>
-        <svg
-          width={SVG_W}
-          height={SVG_H}
-          viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-          style={{ display: 'block', maxWidth: '100%' }}
-        >
+        }
+      />
+      <Box sx={{ p: 3, overflowX: 'auto' }}>
+        <svg width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{ display: 'block', maxWidth: '100%' }}>
           <defs>
             <linearGradient id="tdc-fill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="var(--color-accent-fg,#58a6ff)" stopOpacity="0.28" />
-              <stop offset="100%" stopColor="var(--color-accent-fg,#58a6ff)" stopOpacity="0.03" />
+              <stop offset="0%"   stopColor="var(--accent-fg)" stopOpacity="0.32" />
+              <stop offset="100%" stopColor="var(--accent-fg)" stopOpacity="0.02" />
             </linearGradient>
           </defs>
 
-          {/* Grace-period shading */}
-          <rect
-            x={PAD_L}
-            y={PAD_T}
-            width={GRACE_X - PAD_L}
-            height={CHART_H}
-            fill="var(--color-success-subtle,#122d22)"
-            opacity={0.6}
-          />
+          {/* Grace shading */}
+          <rect x={PAD_L} y={PAD_T} width={GRACE_X - PAD_L} height={CHART_H}
+                fill="var(--success-fg)" opacity={0.14} />
 
-          {/* Y-axis grid lines + labels */}
+          {/* Y grid + labels */}
           {Y_GRID.map((v) => {
             const y = yOf(v);
             return (
               <g key={v}>
-                <line
-                  x1={PAD_L}
-                  y1={y}
-                  x2={PAD_L + CHART_W}
-                  y2={y}
-                  stroke="var(--color-border-muted,#30363d)"
-                  strokeWidth="1"
-                />
-                <text
-                  x={PAD_L - 5}
-                  y={y + 4}
-                  textAnchor="end"
-                  fontSize="9"
-                  fill="var(--color-fg-subtle,#6e7681)"
-                  fontFamily="monospace"
-                >
+                <line x1={PAD_L} y1={y} x2={PAD_L + CHART_W} y2={y}
+                      stroke="var(--border-muted)" strokeWidth="1" />
+                <text x={PAD_L - 6} y={y + 3} textAnchor="end" fontSize="9"
+                      fill="var(--fg-subtle)" fontFamily="monospace">
                   {Math.round(v * 100)}%
                 </text>
               </g>
             );
           })}
 
-          {/* X-axis ticks + labels */}
+          {/* X ticks */}
           {X_TICKS.map((d) => {
             const x = xOf(d);
             return (
               <g key={d}>
-                <line
-                  x1={x}
-                  y1={PAD_T + CHART_H}
-                  x2={x}
-                  y2={PAD_T + CHART_H + 5}
-                  stroke="var(--color-border-muted,#30363d)"
-                  strokeWidth="1"
-                />
-                <text
-                  x={x}
-                  y={PAD_T + CHART_H + 17}
-                  textAnchor="middle"
-                  fontSize="9"
-                  fill="var(--color-fg-subtle,#6e7681)"
-                  fontFamily="monospace"
-                >
+                <line x1={x} y1={PAD_T + CHART_H} x2={x} y2={PAD_T + CHART_H + 4}
+                      stroke="var(--border-muted)" strokeWidth="1" />
+                <text x={x} y={PAD_T + CHART_H + 16} textAnchor="middle" fontSize="9"
+                      fill="var(--fg-subtle)" fontFamily="monospace">
                   {d}d
                 </text>
               </g>
@@ -244,156 +169,106 @@ function TimeDecayChart({
           })}
 
           {/* Chart border */}
-          <rect
-            x={PAD_L}
-            y={PAD_T}
-            width={CHART_W}
-            height={CHART_H}
-            fill="none"
-            stroke="var(--color-border-muted,#30363d)"
-            strokeWidth="1"
-          />
+          <rect x={PAD_L} y={PAD_T} width={CHART_W} height={CHART_H}
+                fill="none" stroke="var(--border-muted)" strokeWidth="1" />
 
-          {/* Fill under curve */}
+          {/* Curve fill + stroke */}
           <path d={FILL_PATH} fill="url(#tdc-fill)" />
+          <path d={CURVE_PATH} fill="none" stroke="var(--accent-fg)" strokeWidth="1.8" strokeLinejoin="round" />
 
-          {/* Decay curve */}
-          <path
-            d={CURVE_PATH}
-            fill="none"
-            stroke="var(--color-accent-fg,#58a6ff)"
-            strokeWidth="1.8"
-            strokeLinejoin="round"
-          />
-
-          {/* "Grace" label */}
-          <text
-            x={PAD_L + (GRACE_X - PAD_L) / 2}
-            y={PAD_T + CHART_H - 8}
-            textAnchor="middle"
-            fontSize="8"
-            fill="var(--color-success-fg,#3fb950)"
-            fontFamily="monospace"
-          >
+          {/* Grace label */}
+          <text x={PAD_L + (GRACE_X - PAD_L) / 2} y={PAD_T + 12}
+                textAnchor="middle" fontSize="9"
+                fill="var(--success-fg)" fontFamily="monospace">
             grace
           </text>
 
           {/* "Now" marker */}
           {!isPast && (
             <>
-              <line
-                x1={nowX}
-                y1={PAD_T}
-                x2={nowX}
-                y2={PAD_T + CHART_H}
-                stroke="var(--color-fg-muted,#8b949e)"
-                strokeWidth="1"
-                strokeDasharray="4,2"
-              />
-              {/* Label above chart */}
-              <text
-                x={Math.min(nowX + 4, PAD_L + CHART_W - 24)}
-                y={PAD_T - 5}
-                fontSize="9"
-                fill="var(--color-fg-muted,#8b949e)"
-                fontFamily="monospace"
-              >
+              <line x1={nowX} y1={PAD_T} x2={nowX} y2={PAD_T + CHART_H}
+                    stroke="var(--fg-default)" strokeWidth="1" strokeDasharray="4,2" opacity={0.5} />
+              <text x={Math.min(nowX + 4, PAD_L + CHART_W - 26)} y={PAD_T - 4}
+                    fontSize="9" fill="var(--fg-muted)" fontFamily="monospace">
                 now
               </text>
-              {/* Dot on curve */}
-              <circle
-                cx={nowX}
-                cy={nowY}
-                r={5}
-                fill="var(--color-accent-fg,#58a6ff)"
-                stroke="var(--color-canvas-subtle,#161b22)"
-                strokeWidth="2"
-              />
+              <circle cx={nowX} cy={nowY} r={5} fill="var(--accent-fg)"
+                      stroke="var(--bg-subtle, #161b22)" strokeWidth="2" />
             </>
+          )}
+
+          {/* Actual vs model marker (when available) */}
+          {actualMultiplier != null && !isPast && Math.abs((actualMultiplier - modelMult)) > 0.01 && (
+            <circle cx={nowX} cy={yOf(actualMultiplier)} r={3.5}
+                    fill="var(--success-fg)" stroke="var(--bg-subtle, #161b22)" strokeWidth="1.5" />
           )}
         </svg>
       </Box>
-
-      <Text sx={{ display: 'block', fontSize: '10px', color: 'fg.subtle', mt: 1 }}>
-        Grace {DECAY.graceHours}h · Midpoint day {DECAY.midpoint} · Floor{' '}
-        {(DECAY.floor * 100).toFixed(0)}% · Steepness {DECAY.steepness}
-      </Text>
-    </Box>
+    </Card>
   );
 }
 
 /* =========================================================================
- * Stat tile used in the PR hero card
+ * PR hero / stats
  * ========================================================================= */
 
 function PrStat({
-  label,
-  value,
-  color,
-  sub,
-  icon,
+  label, value, sub, icon, tone = 'neutral',
 }: {
   label: string;
-  value: string;
-  color: string;
+  value: React.ReactNode;
   sub?: string;
   icon?: React.ReactNode;
+  tone?: 'neutral' | 'success' | 'danger' | 'done' | 'accent';
 }) {
+  const fg =
+    tone === 'success' ? 'var(--success-fg)'
+    : tone === 'danger'  ? 'var(--danger-fg)'
+    : tone === 'done'    ? 'var(--done-fg)'
+    : tone === 'accent'  ? 'var(--accent-fg)'
+    : 'var(--fg-default)';
   return (
     <Box
       sx={{
-        p: 3,
-        borderRight: '1px solid',
-        borderColor: 'border.muted',
-        '&:last-of-type': { borderRight: 'none' },
+        p: '12px',
+        borderRight: ['none', null, '1px solid'],
+        borderRightColor: 'border.muted',
+        borderBottom: ['1px solid', null, 'none'],
+        borderBottomColor: 'border.muted',
+        '&:nth-of-type(2n)': { borderRight: ['none', null, '1px solid'], borderRightColor: 'border.muted' },
+        '&:last-of-type': { borderRight: 'none', borderBottom: 'none' },
         minWidth: 0,
       }}
     >
-      <Box
-        sx={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '4px',
-          fontSize: '10px',
-          color: 'fg.muted',
-          fontWeight: 700,
-          letterSpacing: '1px',
-          textTransform: 'uppercase',
-        }}
-      >
-        {icon && <Box sx={{ color, display: 'inline-flex' }}>{icon}</Box>}
-        {label}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+        {icon && <Box sx={{ color: 'fg.muted', display: 'inline-flex' }}>{icon}</Box>}
+        <Text sx={{ ...LABEL }}>{label}</Text>
       </Box>
       <Text
         sx={{
           display: 'block',
-          fontFamily: 'mono',
-          fontVariantNumeric: 'tabular-nums',
+          ...MONO,
+          fontWeight: 700,
           fontSize: [2, null, 3],
-          fontWeight: 800,
           letterSpacing: '-0.03em',
-          color,
-          mt: '4px',
           lineHeight: 1.1,
+          mt: '4px',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
         }}
+        style={{ color: fg }}
       >
         {value}
       </Text>
       {sub && (
-        <Text sx={{ display: 'block', fontSize: 0, color: 'fg.muted', mt: '2px' }}>
+        <Text sx={{ display: 'block', fontSize: '10px', color: 'fg.subtle', mt: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {sub}
         </Text>
       )}
     </Box>
   );
 }
-
-/* =========================================================================
- * Back-nav button
- * ========================================================================= */
 
 function BackToMiner({ uid, name }: { uid: string; name: string }) {
   return (
@@ -409,8 +284,13 @@ function BackToMiner({ uid, name }: { uid: string; name: string }) {
           borderColor: 'border.default',
           borderRadius: 1,
           color: 'fg.muted',
-          fontSize: 1,
+          fontSize: 0,
+          fontWeight: 600,
           cursor: 'pointer',
+          maxWidth: 240,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
           '&:hover': { color: 'fg.default', borderColor: 'border.muted' },
         }}
       >
@@ -445,10 +325,7 @@ export default function PrDetailPage({
   });
 
   const pr = useMemo(
-    () =>
-      data?.prs.find(
-        (p) => p.repository === repoFull && p.pullRequestNumber === prNumber,
-      ) ?? null,
+    () => data?.prs.find((p) => p.repository === repoFull && p.pullRequestNumber === prNumber) ?? null,
     [data, repoFull, prNumber],
   );
 
@@ -457,54 +334,32 @@ export default function PrDetailPage({
   const ghHref = `https://github.com/${repoFull}/pull/${prNumber}`;
 
   const stateColor =
-    pr?.prState === 'MERGED'
-      ? 'var(--success-fg)'
-      : pr?.prState === 'OPEN'
-        ? 'var(--accent-fg)'
-        : 'var(--danger-fg)';
+    pr?.prState === 'MERGED' ? 'done.fg'
+    : pr?.prState === 'OPEN'   ? 'success.fg'
+    : 'danger.fg';
   const StateIcon =
-    pr?.prState === 'MERGED'
-      ? GitMergeIcon
-      : pr?.prState === 'OPEN'
-        ? GitPullRequestIcon
-        : GitPullRequestClosedIcon;
+    pr?.prState === 'MERGED' ? GitMergeIcon
+    : pr?.prState === 'OPEN'   ? GitPullRequestIcon
+    : GitPullRequestClosedIcon;
+  const stateTone: 'done' | 'success' | 'danger' =
+    pr?.prState === 'MERGED' ? 'done' : pr?.prState === 'OPEN' ? 'success' : 'danger';
 
-  const daysSinceMerge =
-    pr?.mergedAt
-      ? (Date.now() - Date.parse(pr.mergedAt)) / (1000 * 60 * 60 * 24)
-      : null;
+  const daysSinceMerge = pr?.mergedAt
+    ? (Date.now() - Date.parse(pr.mergedAt)) / (1000 * 60 * 60 * 24)
+    : null;
 
   const scoreDisplay = pr
-    ? pr.realScore > 0
-      ? pr.realScore.toFixed(4)
-      : pr.collateralScore > 0
-        ? pr.collateralScore.toFixed(4)
-        : '0'
+    ? pr.realScore > 0 ? pr.realScore.toFixed(4)
+      : pr.collateralScore > 0 ? pr.collateralScore.toFixed(4)
+      : '0'
     : '—';
 
   if (isError || (!isLoading && data && !pr)) {
     return (
       <PageLayout containerWidth="full" padding="normal">
-        <PageLayout.Header>
-          <BackToMiner uid={uid} name={ghName} />
-        </PageLayout.Header>
+        <PageLayout.Header><BackToMiner uid={uid} name={ghName} /></PageLayout.Header>
         <PageLayout.Content>
-          <Box
-            sx={{
-              p: 4,
-              textAlign: 'center',
-              border: '1px solid',
-              borderColor: 'danger.emphasis',
-              bg: 'danger.subtle',
-              borderRadius: 2,
-            }}
-          >
-            <Text sx={{ color: 'danger.fg' }}>
-              {isError
-                ? 'Could not load miner data.'
-                : `PR #${prNumber} not found in ${repoFull}.`}
-            </Text>
-          </Box>
+          <EmptyState text={isError ? 'Could not load miner data.' : `PR #${prNumber} not found in ${repoFull}.`} />
         </PageLayout.Content>
       </PageLayout>
     );
@@ -515,11 +370,10 @@ export default function PrDetailPage({
       <PageLayout.Header>
         <BackToMiner uid={uid} name={ghName} />
 
-        {/* PR hero card */}
         {pr && (
           <Box
             sx={{
-              mt: 3,
+              mt: 2,
               border: '1px solid',
               borderColor: 'border.default',
               borderRadius: 2,
@@ -527,23 +381,51 @@ export default function PrDetailPage({
               overflow: 'hidden',
             }}
           >
-            {/* Title + meta */}
+            {/* Title + meta row */}
             <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
-                <Box sx={{ color: stateColor, mt: '3px', flexShrink: 0 }}>
+                <Box sx={{ color: stateColor, mt: '4px', flexShrink: 0 }}>
                   <StateIcon size={18} />
                 </Box>
                 <Heading
                   sx={{
-                    fontSize: [3, null, 4],
+                    fontSize: [2, null, 3],
                     fontWeight: 700,
                     letterSpacing: '-0.02em',
                     color: 'fg.default',
                     lineHeight: 1.3,
+                    flex: 1,
+                    minWidth: 0,
                   }}
                 >
                   {pr.title}
                 </Heading>
+                <Box
+                  as="a"
+                  href={ghHref}
+                  target="_blank"
+                  rel="noreferrer"
+                  sx={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 1,
+                    px: 2,
+                    py: '4px',
+                    border: '1px solid',
+                    borderColor: 'border.default',
+                    borderRadius: 1,
+                    color: 'fg.muted',
+                    fontSize: 0,
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    flexShrink: 0,
+                    '&:hover': { borderColor: 'border.muted', color: 'fg.default' },
+                  }}
+                >
+                  <MarkGithubIcon size={11} />
+                  GitHub
+                  <LinkExternalIcon size={10} />
+                </Box>
               </Box>
 
               <Box
@@ -553,155 +435,96 @@ export default function PrDetailPage({
                   gap: 2,
                   flexWrap: 'wrap',
                   pl: '26px',
+                  fontSize: 0,
                 }}
               >
-                <Text sx={{ fontSize: 0, color: 'fg.muted', fontFamily: 'mono' }}>
+                <Text sx={{ ...MONO, color: 'fg.muted' }}>
                   {pr.repository}#{pr.pullRequestNumber}
                 </Text>
-                <Text sx={{ fontSize: 0, color: 'fg.subtle' }}>·</Text>
-                <Text sx={{ fontSize: 0, color: 'fg.muted' }}>
-                  opened {formatRelativeTime(pr.prCreatedAt)}
-                </Text>
+                <Text sx={{ color: 'fg.subtle' }}>·</Text>
+                <Text sx={{ color: 'fg.muted' }}>opened {formatRelativeTime(pr.prCreatedAt)}</Text>
                 {pr.prState === 'MERGED' && pr.mergedAt && (
                   <>
-                    <Text sx={{ fontSize: 0, color: 'fg.subtle' }}>·</Text>
-                    <Text sx={{ fontSize: 0, color: 'success.fg' }}>
-                      merged {formatRelativeTime(pr.mergedAt)}
-                    </Text>
+                    <Text sx={{ color: 'fg.subtle' }}>·</Text>
+                    <Text sx={{ color: 'done.fg', fontWeight: 600 }}>merged {formatRelativeTime(pr.mergedAt)}</Text>
                   </>
                 )}
                 {pr.prState === 'CLOSED' && (
                   <>
-                    <Text sx={{ fontSize: 0, color: 'fg.subtle' }}>·</Text>
-                    <Text sx={{ fontSize: 0, color: 'danger.fg' }}>closed</Text>
+                    <Text sx={{ color: 'fg.subtle' }}>·</Text>
+                    <Text sx={{ color: 'danger.fg', fontWeight: 600 }}>closed</Text>
                   </>
                 )}
                 {pr.label && (
                   <>
-                    <Text sx={{ fontSize: 0, color: 'fg.subtle' }}>·</Text>
-                    <Label variant="default" sx={{ fontSize: 0 }}>
-                      {pr.label}
-                    </Label>
+                    <Text sx={{ color: 'fg.subtle' }}>·</Text>
+                    <Label variant="default" sx={{ fontSize: 0 }}>{pr.label}</Label>
                   </>
                 )}
-                <Box sx={{ ml: 'auto' }}>
-                  <Box
-                    as="a"
-                    href={ghHref}
-                    target="_blank"
-                    rel="noreferrer"
-                    sx={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 1,
-                      px: 2,
-                      py: '4px',
-                      border: '1px solid',
-                      borderColor: 'border.default',
-                      borderRadius: 1,
-                      color: 'fg.muted',
-                      fontSize: 0,
-                      fontWeight: 600,
-                      textDecoration: 'none',
-                      '&:hover': { borderColor: 'border.muted', color: 'fg.default' },
-                    }}
-                  >
-                    GitHub <LinkExternalIcon size={10} />
-                  </Box>
-                </Box>
               </Box>
             </Box>
 
-            {/* Stats strip */}
+            {/* Stats grid */}
             <Box
               sx={{
                 display: 'grid',
-                gridTemplateColumns: [
-                  'repeat(2, 1fr)',
-                  null,
-                  'repeat(3, 1fr)',
-                  null,
-                  'repeat(6, 1fr)',
-                ],
+                gridTemplateColumns: ['repeat(2, 1fr)', null, 'repeat(3, 1fr)', null, 'repeat(6, 1fr)'],
                 borderTop: '1px solid',
                 borderColor: 'border.muted',
                 bg: 'canvas.default',
               }}
             >
               <PrStat
-                label="Additions"
+                label="Added"
                 value={`+${pr.additions.toLocaleString()}`}
-                color="var(--success-fg)"
-                icon={<DiffAddedIcon size={11} />}
                 sub={`${pr.commitCount} commit${pr.commitCount === 1 ? '' : 's'}`}
+                tone="success"
+                icon={<DiffAddedIcon size={11} />}
               />
               <PrStat
-                label="Deletions"
-                value={`-${pr.deletions.toLocaleString()}`}
-                color="var(--danger-fg)"
+                label="Removed"
+                value={`−${pr.deletions.toLocaleString()}`}
+                tone="danger"
                 icon={<DiffRemovedIcon size={11} />}
               />
               <PrStat
                 label="Score"
                 value={scoreDisplay}
-                color="var(--attention-emphasis)"
-                sub={
-                  pr.realScore > 0 && pr.score > 0
-                    ? `${pr.score.toFixed(4)} live`
-                    : pr.realScore > 0
-                      ? 'pending'
-                      : pr.collateralScore > 0
-                        ? 'collateral'
-                        : '—'
-                }
                 icon={<TrophyIcon size={11} />}
+                sub={
+                  pr.realScore > 0 && pr.score > 0 ? `${pr.score.toFixed(4)} live`
+                  : pr.realScore > 0 ? 'pending'
+                  : pr.collateralScore > 0 ? 'collateral'
+                  : '—'
+                }
               />
               <PrStat
                 label="Earned"
-                value={
-                  pr.earnedScore != null ? num(pr.earnedScore).toFixed(4) : '—'
-                }
-                color="var(--done-emphasis)"
+                value={pr.earnedScore != null ? num(pr.earnedScore).toFixed(4) : '—'}
                 icon={<TrophyIcon size={11} />}
+                tone="accent"
               />
               <PrStat
                 label="$/Day"
-                value={
-                  pr.predictedUsdPerDay > 0
-                    ? formatUsd(pr.predictedUsdPerDay, { style: 'compact' })
-                    : '—'
-                }
-                color={
-                  pr.predictedUsdPerDay > 0
-                    ? 'var(--success-fg)'
-                    : 'var(--fg-muted)'
-                }
+                value={pr.predictedUsdPerDay > 0 ? formatUsd(pr.predictedUsdPerDay, { style: 'compact' }) : '—'}
+                tone={pr.predictedUsdPerDay > 0 ? 'success' : 'neutral'}
                 icon={<ZapIcon size={11} />}
               />
               <PrStat
                 label="Decay"
-                value={
-                  pr.timeDecayMultiplier != null
-                    ? `${(pr.timeDecayMultiplier * 100).toFixed(1)}%`
-                    : '—'
-                }
-                color="var(--accent-fg)"
-                sub={
-                  daysSinceMerge != null
-                    ? `day ${daysSinceMerge.toFixed(1)}`
-                    : undefined
-                }
+                value={pr.timeDecayMultiplier != null ? `${(pr.timeDecayMultiplier * 100).toFixed(1)}%` : '—'}
                 icon={<ClockIcon size={11} />}
+                sub={daysSinceMerge != null ? `day ${daysSinceMerge.toFixed(1)}` : undefined}
+                tone={stateTone}
               />
             </Box>
           </Box>
         )}
 
-        {/* Loading state */}
         {isLoading && !pr && (
           <Box
             sx={{
-              mt: 3,
+              mt: 2,
               p: 4,
               textAlign: 'center',
               border: '1px solid',
@@ -717,13 +540,9 @@ export default function PrDetailPage({
       </PageLayout.Header>
 
       <PageLayout.Content>
-        {/* Time decay chart — shown only for merged PRs */}
         {pr && pr.prState === 'MERGED' && daysSinceMerge != null && (
           <Box sx={{ mt: 3 }}>
-            <TimeDecayChart
-              daysSinceMerge={daysSinceMerge}
-              actualMultiplier={pr.timeDecayMultiplier}
-            />
+            <TimeDecayChart daysSinceMerge={daysSinceMerge} actualMultiplier={pr.timeDecayMultiplier} />
           </Box>
         )}
       </PageLayout.Content>

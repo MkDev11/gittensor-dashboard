@@ -1,22 +1,14 @@
-/**
- * Reusable building blocks for the Miners page leaderboard.
- *
- * Split from page.tsx so the row / card primitives (and the types and
- * helpers they need) live in one focused module. The page itself just
- * composes them with state.
- */
+// Shared primitives for the Miners pages.
 import React from 'react';
 import { Box, Text } from '@primer/react';
-import { StarIcon, StarFillIcon } from '@primer/octicons-react';
-import { formatUsd } from '@/lib/format';
+import { StarIcon, StarFillIcon, SearchIcon } from '@primer/octicons-react';
 
-/* ─── Types ─── */
+/* ─────────────────────────── Types ─────────────────────────── */
 
 export interface Miner {
   id: string;
   uid: number;
   hotkey: string;
-  // Some miners join the subnet before linking GitHub, so this can be null.
   githubUsername: string | null;
   githubId?: string;
   isEligible: boolean;
@@ -37,6 +29,11 @@ export interface Miner {
   totalOpenPrs?: number;
   totalClosedPrs?: number;
   totalMergedPrs?: number;
+  // Server-enriched: merged PRs with tokenScore >= 5.
+  totalValidMergedPrs?: number;
+  // Server-enriched ISO timestamps.
+  lastOssActivityAt?: string | null;
+  lastDiscoveryActivityAt?: string | null;
   totalPrs?: number;
   totalAdditions?: number;
   totalDeletions?: number;
@@ -46,18 +43,14 @@ export interface Miner {
   usdPerDay?: number;
 }
 
-// Scoring rubric. Switching mode reshapes score, credibility,
-// eligibility, and $/day everywhere via `viewOf`.
 export type Mode = 'total' | 'oss' | 'discovery';
 
-// Per-mode projection of a miner. Ranking, sorting, filtering, and
-// rendering all read from this so mode switches stay consistent.
 export interface MinerView {
   mode: Mode;
   score: number;
   cred: number;
   eligible: boolean;
-  usd: number; // $/day attributed to this track only
+  usd: number;
   counts: {
     primaryLabel: 'Merged' | 'Solved' | 'Done';
     primary: number;
@@ -66,23 +59,7 @@ export interface MinerView {
   };
 }
 
-export type Tier = { accent: string; glow: string; ringWidth: number };
-
-// Primer `fontSize` accepts a scale number or a responsive array of
-// scale numbers / null. Used by RankBadge and UsdValue size props.
-export type ResponsiveSize = number | Array<number | null>;
-
-/* ─── Constants ─── */
-
-// Classic medal podium: gold / silver / bronze. Accent colours the
-// rank, stripe, ring, and bar; glow washes the row bg.
-export const TIERS: Record<1 | 2 | 3, Tier> = {
-  1: { accent: 'var(--attention-emphasis)', glow: 'var(--attention-subtle-strong)', ringWidth: 2 },
-  2: { accent: 'var(--silver-emphasis)', glow: 'var(--silver-subtle)', ringWidth: 2 },
-  3: { accent: 'var(--bronze-emphasis)', glow: 'var(--bronze-subtle)', ringWidth: 2 },
-};
-
-/* ─── Helpers ─── */
+/* ─────────────────────────── Helpers ─────────────────────────── */
 
 export function num(v: unknown): number {
   const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0;
@@ -101,27 +78,6 @@ export function ghAvatar(m: Pick<Miner, 'githubUsername' | 'uid'>, size: number)
   return `https://github.com/${ghName(m)}.png?size=${size}`;
 }
 
-export function tierForRank(rank: number): Tier | null {
-  return rank === 1 || rank === 2 || rank === 3
-    ? TIERS[rank as 1 | 2 | 3]
-    : null;
-}
-
-export function percentOrZero(value: number): string {
-  return value > 0 ? `${Math.round(value * 100)}%` : '0%';
-}
-
-export function credColor(value: number): string {
-  return value >= 0.5
-    ? 'var(--success-fg)'
-    : value >= 0.2
-      ? 'var(--attention-emphasis)'
-      : 'var(--fg-muted)';
-}
-
-// Splits a miner's unified $/day across the OSS and Discovery tracks.
-// Score-weighted when eligible in both (50/50 fallback when both scores are 0),
-// full allocation to the single eligible track, or $0 when neither is eligible.
 export function splitEarnings(
   usdPerDay: number,
   ossScore: number,
@@ -142,10 +98,13 @@ export function splitEarnings(
   return { oss: usdPerDay * ossShare, disc: usdPerDay * discShare };
 }
 
-// Projects a miner into the current Mode's view.
-//   - oss / discovery: per-track score, cred, eligibility, $/day, counts.
-//   - total: combined score & counts, score-weighted cred, eligible if
-//     either track is, unified $/day (no double-count).
+// Mirrors per-repo Cred formula; upstream `credibility` uses a weighted
+// formula that can disagree with the visible merge counts.
+function acceptanceRate(positive: number, closed: number): number {
+  const denom = positive + closed;
+  return denom > 0 ? positive / denom : 0;
+}
+
 export function viewOf(m: Miner, mode: Mode): MinerView {
   const ossScore = num(m.totalScore);
   const issueScore = num(m.issueDiscoveryScore);
@@ -157,18 +116,25 @@ export function viewOf(m: Miner, mode: Mode): MinerView {
   const issueEligible = !!m.isIssueEligible;
   const combinedScore = ossScore + issueScore;
 
+  const merged = m.totalMergedPrs ?? 0;
+  const closedPr = m.totalClosedPrs ?? 0;
+  const solved = m.totalSolvedIssues ?? 0;
+  const closedIssue = m.totalClosedIssues ?? 0;
+  const ossCred = acceptanceRate(merged, closedPr);
+  const issueCred = acceptanceRate(solved, closedIssue);
+
   if (mode === 'discovery') {
     return {
       mode,
       score: issueScore,
-      cred: num(m.issueCredibility),
+      cred: issueCred,
       eligible: issueEligible,
       usd: discUsd,
       counts: {
         primaryLabel: 'Solved',
-        primary: m.totalSolvedIssues ?? 0,
+        primary: solved,
         open: m.totalOpenIssues ?? 0,
-        closed: m.totalClosedIssues ?? 0,
+        closed: closedIssue,
       },
     };
   }
@@ -176,59 +142,61 @@ export function viewOf(m: Miner, mode: Mode): MinerView {
     return {
       mode,
       score: ossScore,
-      cred: num(m.credibility),
+      cred: ossCred,
       eligible: ossEligible,
       usd: ossUsd,
       counts: {
         primaryLabel: 'Merged',
-        primary: m.totalMergedPrs ?? 0,
+        primary: merged,
         open: m.totalOpenPrs ?? 0,
-        closed: m.totalClosedPrs ?? 0,
+        closed: closedPr,
       },
     };
   }
-  // Total mode: scores sum, counts sum, eligible if either track is.
-  // Cred is a score-weighted average of the two tracks — NOT max, which
-  // would over-reward specialists (90/0 beating 80/80). 50/50 fallback
-  // when both scores are 0.
-  const ossCred = num(m.credibility);
-  const issueCred = num(m.issueCredibility);
-  const weightedCred = combinedScore > 0
-    ? (ossScore * ossCred + issueScore * issueCred) / combinedScore
-    : (ossCred + issueCred) / 2;
+  const combinedCred = acceptanceRate(merged + solved, closedPr + closedIssue);
   return {
     mode,
     score: combinedScore,
-    cred: weightedCred,
+    cred: combinedCred,
     eligible: ossEligible || issueEligible,
     usd: ossUsd + discUsd,
     counts: {
       primaryLabel: 'Done',
-      primary: (m.totalMergedPrs ?? 0) + (m.totalSolvedIssues ?? 0),
+      primary: merged + solved,
       open: (m.totalOpenPrs ?? 0) + (m.totalOpenIssues ?? 0),
-      closed: (m.totalClosedPrs ?? 0) + (m.totalClosedIssues ?? 0),
+      closed: closedPr + closedIssue,
     },
   };
 }
 
-/* ─── Row primitives ───
- * Small presentational components shared by LeaderRow (table) and
- * LeaderCard (grid). Each one owns one visual concern; consumers
- * compose them. Tier styling is passed in as a prop so callers can
- * resolve it once from `rank`.
- */
+// Kept for API compatibility.
+export function credColor(_v: number): string {
+  return 'var(--fg-default)';
+}
 
-// Avatar with optional tier ring + outer glow. `box-sizing: border-box`
-// keeps the layout box exactly `size` regardless of the ring thickness,
-// so tier rings don't shift downstream content (name / UID).
+/* ─────────────────────────── Tokens ─────────────────────────── */
+
+export const MONO = {
+  fontFamily: 'mono',
+  fontVariantNumeric: 'tabular-nums',
+} as const;
+
+export const LABEL = {
+  fontSize: '10px',
+  fontWeight: 700,
+  letterSpacing: '0.6px',
+  textTransform: 'uppercase',
+  color: 'fg.muted',
+} as const;
+
+/* ─────────────────────────── Avatar / Identity ─────────────────────────── */
+
 export function MinerAvatar({
   miner,
   size,
-  tier,
 }: {
   miner: Pick<Miner, 'githubUsername' | 'uid'>;
   size: number;
-  tier: Tier | null;
 }) {
   return (
     /* eslint-disable-next-line @next/next/no-img-element */
@@ -241,78 +209,32 @@ export function MinerAvatar({
         height: size,
         boxSizing: 'border-box',
         borderRadius: '50%',
-        border: tier
-          ? `${tier.ringWidth}px solid ${tier.accent}`
-          : '1px solid var(--border-muted)',
-        boxShadow: tier
-          ? `0 0 0 3px ${tier.glow}, 0 0 14px -2px ${tier.accent}`
-          : 'none',
+        border: '1px solid var(--border-muted)',
         flexShrink: 0,
       }}
     />
   );
 }
 
-// Decorated rank numeral. `size` accepts a number or responsive array
-// so callers can pick mobile/desktop sizes (LeaderRow) or a single
-// size (LeaderCard).
-export function RankBadge({
-  rank,
-  tier,
-  size,
-}: {
-  rank: number;
-  tier: Tier | null;
-  size: ResponsiveSize;
-}) {
-  return (
-    <Text
-      sx={{
-        display: 'block',
-        fontFamily: 'mono',
-        fontWeight: 900,
-        fontStyle: tier ? 'italic' : 'normal',
-        fontSize: size,
-        letterSpacing: '-0.04em',
-        color: tier ? tier.accent : 'fg.muted',
-        textShadow: tier
-          ? `0 0 14px ${tier.accent}66, 0 0 4px ${tier.glow}`
-          : 'none',
-        lineHeight: 1,
-      }}
-    >
-      {rank}
-    </Text>
-  );
-}
-
-// Avatar + name + optional UID + "you" label. Eligibility is communicated by
-// the row/card's dim treatment, not a badge.
 export function MinerIdentity({
   miner,
-  isMe,
-  isTop,
-  tier,
   avatarSize,
   showUid = true,
 }: {
   miner: Miner;
-  isMe: boolean;
-  isTop: boolean;
-  tier: Tier | null;
+  isMe?: boolean;
+  isTop?: boolean;
+  tier?: unknown;
   avatarSize: number;
   showUid?: boolean;
 }) {
-  // `isMe` is still used by the row's background highlight — we no
-  // longer paint a "you" badge here.
-  void isMe;
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-      <MinerAvatar miner={miner} size={avatarSize} tier={tier} />
-      <Box sx={{ minWidth: 0, display: 'inline-flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
+      <MinerAvatar miner={miner} size={avatarSize} />
+      <Box sx={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: '6px' }}>
         <Text
           sx={{
-            fontWeight: isTop ? 600 : 500,
+            fontWeight: 600,
             fontSize: 1,
             color: 'fg.default',
             overflow: 'hidden',
@@ -324,7 +246,7 @@ export function MinerIdentity({
           {ghName(miner)}
         </Text>
         {showUid && (
-          <Text sx={{ fontFamily: 'mono', fontSize: 0, color: 'fg.muted' }}>
+          <Text sx={{ ...MONO, fontSize: '11px', color: 'fg.subtle', flexShrink: 0 }}>
             #{miner.uid}
           </Text>
         )}
@@ -333,122 +255,64 @@ export function MinerIdentity({
   );
 }
 
-// Relative score bar + percent + optional "Score X.XX" caption.
-export function ScoreBar({
-  pct,
-  score,
-  tier,
-  isTop,
-  showCaption = true,
-}: {
-  pct: number;
-  score: number;
-  tier: Tier | null;
-  isTop: boolean;
-  showCaption?: boolean;
-}) {
-  const barFill = tier
-    ? `linear-gradient(90deg, ${tier.accent} 0%, ${tier.glow} 100%)`
-    : 'linear-gradient(90deg, var(--accent-emphasis) 0%, var(--accent-fg) 100%)';
+/* ─────────────────────────── Eligibility ─────────────────────────── */
+
+export function EligibilityDot({ eligible, title }: { eligible: boolean; title?: string }) {
   return (
-    <Box sx={{ minWidth: 0 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-        <Box
-          sx={{
-            flex: 1,
-            position: 'relative',
-            height: isTop ? 10 : 8,
-            borderRadius: 999,
-            bg: 'var(--bg-inset)',
-            overflow: 'hidden',
-            border: '1px solid',
-            borderColor: 'border.muted',
-          }}
-        >
-          <Box
-            sx={{
-              height: '100%',
-              width: `${pct}%`,
-              borderRadius: 999,
-              background: barFill,
-              transition: 'width 300ms ease',
-            }}
-          />
-        </Box>
-        <Text
-          sx={{
-            fontFamily: 'mono',
-            fontVariantNumeric: 'tabular-nums',
-            fontSize: 0,
-            color: 'fg.default',
-            fontWeight: 700,
-            minWidth: 36,
-            textAlign: 'right',
-          }}
-        >
-          {pct}%
-        </Text>
-      </Box>
-      {showCaption && (
-        <Text sx={{ display: 'block', mt: '4px', fontFamily: 'mono', fontSize: '10px', color: 'fg.muted' }}>
-          Score {score.toFixed(2)}
-        </Text>
-      )}
+    <Box
+      aria-hidden
+      title={title ?? (eligible ? 'Eligible' : 'Not eligible')}
+      sx={{
+        width: 6,
+        height: 6,
+        borderRadius: 999,
+        flexShrink: 0,
+        bg: eligible ? 'success.fg' : 'transparent',
+        border: eligible ? 'none' : '1px solid',
+        borderColor: 'border.muted',
+      }}
+    />
+  );
+}
+
+export function EligibilityBadge({
+  eligible,
+  label,
+  size = 'sm',
+}: {
+  eligible: boolean;
+  label: string;
+  size?: 'sm' | 'md';
+}) {
+  const pad = size === 'md' ? { px: '8px', py: '3px', fz: '11px' } : { px: '6px', py: '2px', fz: '10px' };
+  return (
+    <Box
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px',
+        px: pad.px,
+        py: pad.py,
+        borderRadius: 999,
+        border: '1px solid',
+        borderColor: eligible ? 'success.emphasis' : 'border.muted',
+        bg: eligible ? 'success.subtle' : 'canvas.inset',
+        color: eligible ? 'success.fg' : 'fg.muted',
+        fontSize: pad.fz,
+        fontWeight: 700,
+        letterSpacing: '0.5px',
+        textTransform: 'uppercase',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <Box aria-hidden sx={{ width: 5, height: 5, borderRadius: 999, bg: eligible ? 'success.fg' : 'fg.subtle' }} />
+      {label}
     </Box>
   );
 }
 
-// $/day value with optional "$/DAY" label. `labelDisplay`:
-//   - 'always' — label always visible (cards, mobile rows).
-//   - 'mobile' — label only on mobile (table rows; the desktop
-//                header carries it).
-//   - 'never'  — value only.
-export function UsdValue({
-  usd,
-  size,
-  labelDisplay = 'always',
-}: {
-  usd: number;
-  size: ResponsiveSize;
-  labelDisplay?: 'always' | 'mobile' | 'never';
-}) {
-  const labelDisplaySx =
-    labelDisplay === 'always' ? 'block'
-      : labelDisplay === 'never' ? 'none'
-        : (['block', null, 'none'] as const);
-  return (
-    <Box sx={{ textAlign: 'right' }}>
-      <Text
-        sx={{
-          display: labelDisplaySx,
-          fontSize: '10px',
-          color: 'fg.muted',
-          fontWeight: 700,
-          letterSpacing: '1px',
-          textTransform: 'uppercase',
-        }}
-      >
-        $/day
-      </Text>
-      <Text
-        sx={{
-          display: 'block',
-          fontFamily: 'mono',
-          fontVariantNumeric: 'tabular-nums',
-          fontSize: size,
-          fontWeight: 800,
-          color: usd > 0 ? 'var(--accent-fg)' : 'fg.muted',
-          letterSpacing: '-0.02em',
-        }}
-      >
-        {formatUsd(usd, { style: 'compact' })}
-      </Text>
-    </Box>
-  );
-}
+/* ─────────────────────────── Track button ─────────────────────────── */
 
-// Star toggle that tracks / untracks a miner. Stops click propagation so
-// the row's surrounding link doesn't navigate away when the star is hit.
 export function TrackButton({
   isTracked,
   onClick,
@@ -465,226 +329,798 @@ export function TrackButton({
         onClick();
       }}
       aria-label={isTracked ? 'Untrack miner' : 'Track miner'}
+      title={isTracked ? 'Untrack miner' : 'Track miner'}
       sx={{
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 28,
-        height: 28,
+        width: 26,
+        height: 26,
         bg: 'transparent',
         border: 'none',
         borderRadius: 1,
-        color: isTracked ? 'attention.fg' : 'fg.muted',
+        color: isTracked ? 'fg.default' : 'fg.muted',
         cursor: 'pointer',
-        '&:hover': { bg: 'canvas.inset', color: 'attention.fg' },
+        '&:hover': { bg: 'canvas.inset', color: 'fg.default' },
       }}
     >
-      {isTracked ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
+      {isTracked ? <StarFillIcon size={12} /> : <StarIcon size={12} />}
     </Box>
   );
 }
 
-// Mobile-labelled metric used in the table row. Desktop label is
-// omitted because LeaderboardHeader carries it.
-export function MetricCell({
-  label,
-  mobileLabel,
-  value,
-  color,
-  isTop,
-  gridArea,
-  alignMobile = 'right',
+/* ─────────────────────────── Card / Surface ─────────────────────────── */
+
+export function Card({
+  children,
+  pad = false,
+  inset = false,
 }: {
-  label: string;
-  // Shorter version shown on mobile (e.g. "Cred" instead of "Credibility").
-  // Falls back to `label` if not provided.
-  mobileLabel?: string;
-  value: string;
-  color: string;
-  isTop: boolean;
-  gridArea?: string;
-  alignMobile?: 'left' | 'right';
+  children: React.ReactNode;
+  pad?: boolean;
+  inset?: boolean;
 }) {
   return (
     <Box
       sx={{
-        // gridArea is unset on mobile so the metric sub-grid's
-        // auto-placement positions the cells; keeping a desktop name
-        // here would either be ignored or stack every cell at line 1.
-        gridArea: ['auto', null, gridArea],
-        textAlign: [alignMobile, null, 'right'],
+        border: '1px solid',
+        borderColor: 'border.default',
+        borderRadius: 2,
+        bg: inset ? 'canvas.inset' : 'canvas.subtle',
+        overflow: 'hidden',
+        p: pad ? 3 : 0,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+export function CardHeader({
+  icon,
+  title,
+  sub,
+  right,
+}: {
+  icon?: React.ReactNode;
+  title: React.ReactNode;
+  sub?: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <Box
+      sx={{
+        px: [2, null, 3],
+        py: '8px',
+        borderBottom: '1px solid',
+        borderColor: 'border.muted',
+        bg: 'canvas.default',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 2,
+        flexWrap: 'wrap',
+        minHeight: 38,
+      }}
+    >
+      {icon && <Box sx={{ color: 'fg.muted', display: 'inline-flex' }}>{icon}</Box>}
+      <Text sx={{ fontSize: 1, fontWeight: 700, letterSpacing: '-0.005em' }}>{title}</Text>
+      {sub && (
+        <Text sx={{ fontSize: 0, color: 'fg.muted' }}>· {sub}</Text>
+      )}
+      {right && <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>{right}</Box>}
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Metric cell ─────────────────────────── */
+
+export type Tone = 'neutral' | 'success' | 'danger' | 'done' | 'accent';
+
+const TONE_FG: Record<Tone, string> = {
+  neutral: 'var(--fg-default)',
+  success: 'var(--success-fg)',
+  danger:  'var(--danger-fg)',
+  done:    'var(--done-fg)',
+  accent:  'var(--accent-fg)',
+};
+
+export function Metric({
+  label,
+  value,
+  sub,
+  tone = 'neutral',
+  size = 'md',
+  align = 'left',
+}: {
+  label?: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: Tone;
+  size?: 'sm' | 'md' | 'lg';
+  align?: 'left' | 'right' | 'center';
+}) {
+  const valueSize = size === 'lg' ? [2, null, 3] : size === 'sm' ? 1 : 2;
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '2px',
+        textAlign: align,
+        alignItems: align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center',
         minWidth: 0,
       }}
     >
+      {label && (
+        <Text sx={{ ...LABEL }}>{label}</Text>
+      )}
       <Text
         sx={{
-          display: ['block', null, 'none'],
-          fontSize: '9px',
-          color: 'fg.muted',
+          ...MONO,
+          fontSize: valueSize,
           fontWeight: 700,
-          letterSpacing: '0.6px',
-          textTransform: 'uppercase',
-          whiteSpace: 'nowrap',
+          letterSpacing: '-0.02em',
+          lineHeight: 1.1,
+          color: 'fg.default',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
-        }}
-      >
-        {mobileLabel ?? label}
-      </Text>
-      <Text
-        sx={{
-          display: 'block',
-          fontFamily: 'mono',
-          fontVariantNumeric: 'tabular-nums',
-          fontWeight: 700,
-          color,
-          fontSize: [1, null, isTop ? 2 : 1],
-          letterSpacing: '-0.01em',
           whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
+          maxWidth: '100%',
         }}
+        style={{ color: TONE_FG[tone] }}
       >
         {value}
+      </Text>
+      {sub && (
+        <Text sx={{ fontSize: '10px', color: 'fg.subtle', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>
+          {sub}
+        </Text>
+      )}
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Intensity bar ─────────────────────────── */
+
+export function IntensityBar({
+  value,
+  height = 4,
+  tone = 'neutral',
+  track = true,
+}: {
+  value: number;
+  height?: number;
+  tone?: Tone;
+  track?: boolean;
+}) {
+  const pct = Math.max(0, Math.min(1, value));
+  return (
+    <Box
+      sx={{
+        width: '100%',
+        height,
+        borderRadius: 999,
+        bg: track ? 'border.muted' : 'transparent',
+        overflow: 'hidden',
+        position: 'relative',
+      }}
+    >
+      <Box
+        sx={{ height: '100%', borderRadius: 999, transition: 'width 240ms ease' }}
+        style={{
+          width: `${pct * 100}%`,
+          backgroundColor: TONE_FG[tone],
+          opacity: tone === 'neutral' ? 0.55 : 0.85,
+        }}
+      />
+    </Box>
+  );
+}
+
+export function SplitBar({
+  a,
+  b,
+  height = 6,
+  ariaLabel,
+}: {
+  a: number;
+  b: number;
+  height?: number;
+  ariaLabel?: string;
+}) {
+  const total = a + b;
+  const aPct = total > 0 ? (a / total) * 100 : 0;
+  const bPct = total > 0 ? (b / total) * 100 : 0;
+  return (
+    <Box
+      aria-label={ariaLabel}
+      sx={{
+        width: '100%',
+        height,
+        borderRadius: 999,
+        bg: 'border.muted',
+        overflow: 'hidden',
+        display: 'flex',
+      }}
+    >
+      <Box style={{ width: `${aPct}%`, backgroundColor: TONE_FG.accent, opacity: 0.85 }} />
+      <Box style={{ width: `${bPct}%`, backgroundColor: TONE_FG.done, opacity: 0.85 }} />
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Count cell ─────────────────────────── */
+
+// Icon takes the tone color; value stays neutral so a column reads as one
+// rhythm. Empty (0/—) dims both at reduced opacity.
+export function CountCell({
+  icon,
+  value,
+  tone = 'neutral',
+  title,
+}: {
+  icon: React.ReactNode;
+  value: number | string;
+  tone?: Tone;
+  title?: string;
+}) {
+  const empty = value === 0 || value === '—' || value === '0';
+  return (
+    <Box
+      title={title}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'flex-end',
+        gap: '4px',
+        minWidth: 0,
+      }}
+      style={{ opacity: empty ? 0.55 : 1 }}
+    >
+      <Box
+        sx={{ display: 'inline-flex', flexShrink: 0 }}
+        style={{ color: empty ? 'var(--fg-muted)' : TONE_FG[tone] }}
+      >
+        {icon}
+      </Box>
+      <Text
+        sx={{
+          ...MONO,
+          fontSize: '11px',
+          fontWeight: empty ? 400 : 600,
+          lineHeight: 1,
+          color: empty ? 'fg.muted' : 'fg.default',
+        }}
+      >
+        {typeof value === 'number' ? value.toLocaleString() : value}
       </Text>
     </Box>
   );
 }
 
-// Dual-segment score bar for Total mode. Left (green) = OSS share,
-// right (purple) = Discovery share. Total width = pct of leader score.
-export function CompositionBar({
-  pct,
-  ossScore,
-  discScore,
-  isTop,
-  tier,
+/* ─────────────────────────── Pill / Chip ─────────────────────────── */
+
+export function Pill({
+  active,
+  onClick,
+  children,
+  size = 'sm',
 }: {
-  pct: number;
-  ossScore: number;
-  discScore: number;
-  isTop: boolean;
-  tier: Tier | null;
+  active?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+  size?: 'sm' | 'md';
 }) {
-  const total = ossScore + discScore;
-  const ossFrac = total > 0 ? ossScore / total : 0;
-  const ossPx = pct * ossFrac;
-  const discPx = pct * (1 - ossFrac);
+  const pad = size === 'md' ? { px: '12px', py: '5px', fz: 1 } : { px: '10px', py: '3px', fz: 0 };
   return (
-    <Box sx={{ minWidth: 0 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+    <Box
+      as={onClick ? 'button' : 'span'}
+      onClick={onClick}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '4px',
+        px: pad.px,
+        py: pad.py,
+        border: '1px solid',
+        borderColor: active ? 'border.default' : 'transparent',
+        borderRadius: 999,
+        bg: active ? 'canvas.default' : 'canvas.inset',
+        color: active ? 'fg.default' : 'fg.muted',
+        fontSize: pad.fz,
+        fontWeight: active ? 700 : 500,
+        cursor: onClick ? 'pointer' : 'default',
+        fontFamily: 'inherit',
+        whiteSpace: 'nowrap',
+        textTransform: 'capitalize',
+        transition: 'background-color 100ms, color 100ms',
+        '&:focus': { outline: 'none' },
+        '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '1px' },
+        '&:hover': onClick ? { color: 'fg.default', bg: 'canvas.default' } : undefined,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Segmented control ─────────────────────────── */
+
+export interface SegmentOption<K extends string> {
+  key: K;
+  label: string;
+  icon?: React.ReactNode;
+  count?: number;
+}
+
+export function Segmented<K extends string>({
+  options,
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  options: SegmentOption<K>[];
+  value: K;
+  onChange: (k: K) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <Box
+      role="tablist"
+      aria-label={ariaLabel}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'stretch',
+        borderRadius: 2,
+        border: '1px solid',
+        borderColor: 'border.default',
+        bg: 'canvas.inset',
+        p: '3px',
+      }}
+    >
+      {options.map((opt) => {
+        const active = value === opt.key;
+        return (
+          <Box
+            as="button"
+            key={opt.key}
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(opt.key)}
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '5px',
+              px: '10px',
+              py: '4px',
+              border: 'none',
+              borderRadius: 1,
+              bg: active ? 'canvas.default' : 'transparent',
+              color: active ? 'fg.default' : 'fg.muted',
+              fontFamily: 'inherit',
+              fontSize: 0,
+              fontWeight: active ? 700 : 500,
+              cursor: 'pointer',
+              boxShadow: active ? '0 0 0 1px var(--border-default)' : 'none',
+              transition: 'background-color 100ms, color 100ms',
+              '&:focus': { outline: 'none' },
+              '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '2px', borderRadius: '4px' },
+              '&:hover': { color: 'fg.default' },
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {opt.icon}
+            {opt.label}
+            {typeof opt.count === 'number' && (
+              <Text
+                sx={{
+                  ...MONO,
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  color: active ? 'fg.muted' : 'fg.subtle',
+                  px: '5px',
+                  py: '1px',
+                  borderRadius: 999,
+                  bg: 'canvas.inset',
+                }}
+              >
+                {opt.count.toLocaleString()}
+              </Text>
+            )}
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Search box ─────────────────────────── */
+
+export function SearchBox({
+  value,
+  onChange,
+  placeholder = 'Search…',
+  size = 'sm',
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  size?: 'sm' | 'md';
+}) {
+  const isMd = size === 'md';
+  return (
+    <Box
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '6px',
+        px: 2,
+        py: isMd ? '5px' : '4px',
+        border: '1px solid',
+        borderColor: 'border.default',
+        borderRadius: 2,
+        bg: 'canvas.default',
+        color: 'fg.muted',
+        minWidth: isMd ? 200 : 160,
+        maxWidth: 320,
+        flex: '1 1 auto',
+        '&:focus-within': { borderColor: 'border.muted', color: 'fg.default' },
+      }}
+    >
+      <SearchIcon size={12} />
+      <Box
+        as="input"
+        type="text"
+        value={value}
+        placeholder={placeholder}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          border: 'none',
+          outline: 'none',
+          bg: 'transparent',
+          color: 'fg.default',
+          fontFamily: 'inherit',
+          fontSize: isMd ? 1 : 0,
+          '&::placeholder': { color: 'fg.subtle' },
+        }}
+      />
+      {value && (
         <Box
+          as="button"
+          onClick={() => onChange('')}
+          aria-label="Clear search"
           sx={{
-            flex: 1,
-            position: 'relative',
-            height: isTop ? 10 : 8,
-            borderRadius: 999,
-            bg: 'var(--bg-inset)',
-            overflow: 'hidden',
-            border: '1px solid',
-            borderColor: 'border.muted',
+            border: 'none',
+            bg: 'transparent',
+            color: 'fg.subtle',
+            cursor: 'pointer',
+            fontSize: '10px',
+            lineHeight: 1,
+            px: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            '&:hover': { color: 'fg.default' },
           }}
         >
-          <Box
-            sx={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              height: '100%',
-              width: `${ossPx}%`,
-              bg: tier ? tier.accent : 'var(--success-fg)',
-              transition: 'width 300ms ease',
-            }}
-          />
-          <Box
-            sx={{
-              position: 'absolute',
-              left: `${ossPx}%`,
-              top: 0,
-              height: '100%',
-              width: `${discPx}%`,
-              bg: 'var(--done-emphasis)',
-              transition: 'width 300ms ease, left 300ms ease',
-            }}
-          />
+          ✕
         </Box>
-        <Text
+      )}
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Pagination ─────────────────────────── */
+
+export function Pagination({
+  page,
+  pageCount,
+  total,
+  filtered,
+  onPage,
+  pageSize,
+  zeroIndexed = false,
+}: {
+  page: number;
+  pageCount: number;
+  total: number;
+  filtered: number;
+  onPage: (p: number) => void;
+  pageSize?: number;
+  zeroIndexed?: boolean;
+}) {
+  if (total === 0) return null;
+  const p1 = zeroIndexed ? page + 1 : page;
+  const showRange = pageSize !== undefined;
+  const start = showRange ? (p1 - 1) * (pageSize ?? 0) + 1 : 0;
+  const end = showRange ? Math.min(p1 * (pageSize ?? 0), filtered) : 0;
+
+  return (
+    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
+      {showRange && (
+        <Text sx={{ ...MONO, fontSize: 0, color: 'fg.muted' }}>
+          {start.toLocaleString()}–{end.toLocaleString()}
+          <Text as="span" sx={{ color: 'fg.subtle' }}> / </Text>
+          {filtered.toLocaleString()}
+          {filtered !== total && (
+            <Text as="span" sx={{ color: 'fg.subtle' }}> of {total.toLocaleString()}</Text>
+          )}
+        </Text>
+      )}
+      {!showRange && filtered !== total && (
+        <Text sx={{ ...MONO, fontSize: 0, color: 'fg.muted' }}>
+          {filtered.toLocaleString()} / {total.toLocaleString()}
+        </Text>
+      )}
+      {pageCount > 1 && (
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          <NavBtn disabled={p1 <= 1} onClick={() => onPage(zeroIndexed ? page - 1 : page - 1)}>‹</NavBtn>
+          <Text sx={{ ...MONO, fontSize: 0, minWidth: 44, textAlign: 'center', color: 'fg.muted' }}>
+            <Text as="span" sx={{ color: 'fg.default', fontWeight: 700 }}>{p1}</Text>
+            <Text as="span" sx={{ color: 'fg.subtle' }}> / </Text>
+            {pageCount}
+          </Text>
+          <NavBtn disabled={p1 >= pageCount} onClick={() => onPage(zeroIndexed ? page + 1 : page + 1)}>›</NavBtn>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function NavBtn({
+  disabled,
+  onClick,
+  children,
+}: {
+  disabled: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Box
+      as="button"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 22,
+        height: 22,
+        border: '1px solid',
+        borderColor: 'border.default',
+        borderRadius: 1,
+        bg: 'canvas.default',
+        color: disabled ? 'fg.subtle' : 'fg.default',
+        fontSize: 1,
+        lineHeight: 1,
+        fontFamily: 'inherit',
+        fontWeight: 600,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        '&:focus': { outline: 'none' },
+        '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '1px' },
+        '&:hover': disabled ? undefined : { bg: 'canvas.inset', borderColor: 'border.muted' },
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Row-size selector ─────────────────────────── */
+
+const CHEVRON_DOWN_URL =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 16 16' fill='%238b949e'><path d='M3.22 5.22a.75.75 0 0 1 1.06 0L8 8.94l3.72-3.72a.75.75 0 0 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L3.22 6.28a.75.75 0 0 1 0-1.06Z'/></svg>\")";
+
+// `All` is encoded as `Infinity` so callers can use the value with `Array.slice(0, n)`.
+export function RowSizeSelector({
+  value,
+  onChange,
+  options = [10, 25, 50, 100],
+  total,
+  filtered,
+  showAll = true,
+  label = 'Rows',
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  options?: number[];
+  total?: number;
+  filtered?: number;
+  showAll?: boolean;
+  label?: string;
+}) {
+  const showCount = typeof total === 'number' && typeof filtered === 'number';
+  const visible = value === Infinity ? (filtered ?? 0) : Math.min(value, filtered ?? 0);
+  const selectValue = value === Infinity ? 'all' : String(value);
+
+  return (
+    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
+      {showCount && (
+        <Text sx={{ ...MONO, fontSize: 0, color: 'fg.muted' }}>
+          {visible.toLocaleString()}
+          <Text as="span" sx={{ color: 'fg.subtle' }}>{' / '}</Text>
+          {filtered!.toLocaleString()}
+          {filtered !== total && (
+            <Text as="span" sx={{ color: 'fg.subtle' }}>{` of ${total!.toLocaleString()}`}</Text>
+          )}
+        </Text>
+      )}
+      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+        <Text sx={{ ...LABEL, color: 'fg.muted', textTransform: 'none', fontWeight: 600, letterSpacing: 0 }}>
+          {label}:
+        </Text>
+        <Box
+          as="select"
+          value={selectValue}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
+            const v = e.target.value;
+            onChange(v === 'all' ? Infinity : Number.parseInt(v, 10));
+          }}
           sx={{
+            appearance: 'none',
+            WebkitAppearance: 'none',
+            MozAppearance: 'none',
             fontFamily: 'mono',
             fontVariantNumeric: 'tabular-nums',
             fontSize: 0,
-            color: 'fg.default',
             fontWeight: 700,
-            minWidth: 36,
-            textAlign: 'right',
+            lineHeight: 1,
+            color: 'fg.default',
+            bg: 'canvas.default',
+            border: '1px solid',
+            borderColor: 'border.default',
+            borderRadius: 1,
+            pl: '8px',
+            pr: '22px',
+            py: '3px',
+            height: 22,
+            cursor: 'pointer',
+            backgroundImage: CHEVRON_DOWN_URL,
+            backgroundPosition: 'right 6px center',
+            backgroundRepeat: 'no-repeat',
+            transition: 'border-color 100ms',
+            '&:focus': { outline: 'none' },
+            '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '1px', borderColor: 'border.muted' },
+            '&:hover': { borderColor: 'border.muted' },
           }}
         >
-          {pct}%
-        </Text>
-      </Box>
-      <Box sx={{ display: 'flex', gap: 2, mt: '4px' }}>
-        {ossScore > 0 && (
-          <Text sx={{ fontFamily: 'mono', fontSize: '10px', color: tier ? tier.accent : 'var(--success-fg)' }}>
-            OSS {ossScore.toFixed(1)}
-          </Text>
-        )}
-        {discScore > 0 && (
-          <Text sx={{ fontFamily: 'mono', fontSize: '10px', color: 'var(--done-emphasis)' }}>
-            DISC {discScore.toFixed(1)}
-          </Text>
-        )}
-        {total === 0 && (
-          <Text sx={{ fontFamily: 'mono', fontSize: '10px', color: 'fg.muted' }}>Score 0.00</Text>
-        )}
+          {options.map((n) => (
+            <option key={n} value={String(n)}>{n}</option>
+          ))}
+          {showAll && <option value="all">All</option>}
+        </Box>
       </Box>
     </Box>
   );
 }
 
-// Compact, always-labelled metric for card layouts where the cell is
-// self-explaining and a separate header isn't available.
-export function CompactMetric({
-  label,
-  value,
-  color,
+/* ─────────────────────────── Page navigation ─────────────────────────── */
+
+// Footer page-nav. `page` is 1-indexed; `pageSize === Infinity` is treated
+// as a single page.
+export function PageNav({
+  page,
+  pageSize,
+  filteredCount,
+  onPage,
 }: {
-  label: string;
-  value: string;
-  color: string;
+  page: number;
+  pageSize: number;
+  filteredCount: number;
+  onPage: (p: number) => void;
 }) {
+  if (filteredCount === 0) {
+    return <Text sx={{ ...MONO, fontSize: 0, color: 'fg.muted' }}>0 of 0</Text>;
+  }
+  const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
+  const safe = Math.min(Math.max(1, page), totalPages);
+  const start = (safe - 1) * pageSize + 1;
+  const end = Math.min(safe * pageSize, filteredCount);
   return (
-    <Box sx={{ minWidth: 0 }}>
-      <Text
-        sx={{
-          display: 'block',
-          fontSize: '9px',
-          color: 'fg.muted',
-          fontWeight: 700,
-          letterSpacing: '0.6px',
-          textTransform: 'uppercase',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        {label}
+    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: 'fg.muted' }}>
+      <Text sx={{ ...MONO, fontSize: 0 }}>
+        {start.toLocaleString()}–{end.toLocaleString()}
+        <Text as="span" sx={{ color: 'fg.subtle' }}>{' of '}</Text>
+        {filteredCount.toLocaleString()}
       </Text>
-      <Text
-        sx={{
-          display: 'block',
-          fontFamily: 'mono',
-          fontVariantNumeric: 'tabular-nums',
-          fontWeight: 700,
-          color,
-          fontSize: 1,
-          letterSpacing: '-0.01em',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        {value}
-      </Text>
+      {totalPages > 1 && (
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          <PageBtn onClick={() => onPage(1)}             disabled={safe <= 1}          aria="First page">|‹</PageBtn>
+          <PageBtn onClick={() => onPage(safe - 1)}      disabled={safe <= 1}          aria="Previous page">‹</PageBtn>
+          <PageBtn onClick={() => onPage(safe + 1)}      disabled={safe >= totalPages} aria="Next page">›</PageBtn>
+          <PageBtn onClick={() => onPage(totalPages)}    disabled={safe >= totalPages} aria="Last page">›|</PageBtn>
+        </Box>
+      )}
     </Box>
   );
+}
+
+function PageBtn({
+  onClick,
+  disabled,
+  aria,
+  children,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  aria: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Box
+      as="button"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      aria-label={aria}
+      title={aria}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 24,
+        height: 24,
+        px: 1,
+        bg: 'transparent',
+        border: '1px solid',
+        borderColor: 'transparent',
+        borderRadius: 1,
+        color: disabled ? 'fg.subtle' : 'fg.muted',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.4 : 1,
+        fontFamily: 'mono',
+        fontSize: 0,
+        lineHeight: 1,
+        '&:focus': { outline: 'none' },
+        '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '1px' },
+        '&:hover': disabled ? undefined : { color: 'fg.default', bg: 'canvas.default', borderColor: 'border.muted' },
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Empty state ─────────────────────────── */
+
+export function EmptyState({
+  icon,
+  text,
+  hint,
+}: {
+  icon?: React.ReactNode;
+  text: string;
+  hint?: string;
+}) {
+  return (
+    <Box
+      sx={{
+        p: 4,
+        textAlign: 'center',
+        border: '1px solid',
+        borderColor: 'border.default',
+        borderRadius: 2,
+        bg: 'canvas.subtle',
+        color: 'fg.muted',
+      }}
+    >
+      {icon && <Box sx={{ display: 'inline-flex', justifyContent: 'center', mb: 2, color: 'fg.subtle' }}>{icon}</Box>}
+      <Text sx={{ display: 'block', fontWeight: 600, fontSize: 1 }}>{text}</Text>
+      {hint && (
+        <Text sx={{ display: 'block', fontSize: 0, color: 'fg.subtle', mt: 1, maxWidth: 420, mx: 'auto' }}>
+          {hint}
+        </Text>
+      )}
+    </Box>
+  );
+}
+
+/* ─────────────────────────── Dot separator ─────────────────────────── */
+
+export function Sep() {
+  return <Text aria-hidden sx={{ color: 'fg.subtle' }}>·</Text>;
 }

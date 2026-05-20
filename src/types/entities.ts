@@ -191,6 +191,11 @@ export interface Miner {
   totalOpenPrs?: number;
   totalClosedPrs?: number;
   totalMergedPrs?: number;
+  // Server-enriched: merged PRs with tokenScore >= 5.
+  totalValidMergedPrs?: number;
+  // Server-enriched ISO timestamps.
+  lastOssActivityAt?: string | null;
+  lastDiscoveryActivityAt?: string | null;
   totalPrs?: number;
   totalAdditions?: number;
   totalDeletions?: number;
