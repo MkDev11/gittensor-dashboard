@@ -34,6 +34,7 @@ import {
 import { useTrackedMiners } from '@/lib/tracked-miners';
 import { useMinerLogin } from '@/lib/use-miner';
 import { formatUsd, formatRelativeTime } from '@/lib/format';
+import { num, splitEarnings } from '../parts';
 
 /* =========================================================================
  * Types — mirror /api/gt/miners/[uid] response.
@@ -163,10 +164,6 @@ function withinPeriod(iso: string | null | undefined, days: number | null): bool
   return Date.now() - t < days * 24 * 60 * 60 * 1000;
 }
 
-function num(v: unknown): number {
-  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0;
-  return Number.isFinite(n) ? n : 0;
-}
 
 /* =========================================================================
  * Page
@@ -347,14 +344,15 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
     });
   }, [prsInPeriod, discoveredInPeriod, solvedInPeriod, mode, data?.repoEvals]);
 
-  // Window-scoped eligible repo counts — derived from the same breakdown the table uses,
-  // so the hero stats always match the repository panel.
+  // Trust validator's per-repo flags (source of truth). The validator
+  // applies the full canonical formula (incl. token_score gates) which
+  // we can't fully replicate client-side.
   const ossEligibleCount = useMemo(
-    () => repoBreakdown.filter(r => repoEvalMap.get(r.repo.toLowerCase())?.isEligible ?? ossRepoEligible(r)).length,
+    () => repoBreakdown.filter(r => repoEvalMap.get(r.repo.toLowerCase())?.isEligible === true).length,
     [repoBreakdown, repoEvalMap],
   );
   const discEligibleCount = useMemo(
-    () => repoBreakdown.filter(r => repoEvalMap.get(r.repo.toLowerCase())?.isIssueEligible ?? discRepoEligible(r)).length,
+    () => repoBreakdown.filter(r => repoEvalMap.get(r.repo.toLowerCase())?.isIssueEligible === true).length,
     [repoBreakdown, repoEvalMap],
   );
 
@@ -385,23 +383,13 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
   const issueEligible = !!miner?.isIssueEligible;
 
   const usdPerDay = num(miner?.usdPerDay);
-  // Score-weighted split matching viewOf() in parts.tsx. When both tracks are
-  // eligible, each gets a proportional share based on its score contribution.
-  // When only one is eligible it gets 100%; neither eligible → both $0.
-  const ossScore = num(miner?.totalScore);
-  const issueScore = num(miner?.issueDiscoveryScore);
-  const combinedScore = ossScore + issueScore;
-  let ossShare = 0, discShare = 0;
-  if (ossEligible && issueEligible) {
-    ossShare = combinedScore > 0 ? ossScore / combinedScore : 0.5;
-    discShare = 1 - ossShare;
-  } else if (ossEligible) {
-    ossShare = 1;
-  } else if (issueEligible) {
-    discShare = 1;
-  }
-  const ossEarningPerDay = usdPerDay * ossShare;
-  const discEarningPerDay = usdPerDay * discShare;
+  const { oss: ossEarningPerDay, disc: discEarningPerDay } = splitEarnings(
+    usdPerDay,
+    num(miner?.totalScore),
+    num(miner?.issueDiscoveryScore),
+    ossEligible,
+    issueEligible,
+  );
 
   const copyHotkey = async () => {
     if (!miner?.hotkey) return;
@@ -479,23 +467,23 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
           <Box
             sx={{
               position: 'relative',
-              p: 3,
+              p: 2,
               display: 'grid',
               gridTemplateColumns: ['auto 1fr', null, 'auto 1fr auto'],
               alignItems: 'center',
-              gap: 3,
+              gap: 2,
             }}
           >
             <Box
               sx={{
                 position: 'relative',
-                width: [56, null, 72],
-                height: [56, null, 72],
+                width: [44, null, 56],
+                height: [44, null, 56],
                 borderRadius: '50%',
-                border: '2px solid',
+                border: '1.5px solid',
                 borderColor: ossEligible || issueEligible ? 'success.emphasis' : 'border.default',
                 boxShadow: ossEligible || issueEligible
-                  ? '0 0 0 3px var(--success-subtle), 0 0 20px -4px var(--success-fg)'
+                  ? '0 0 0 2px var(--success-subtle)'
                   : 'none',
                 overflow: 'hidden',
                 flexShrink: 0,
@@ -510,10 +498,10 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
             </Box>
 
             <Box sx={{ minWidth: 0 }}>
-              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap', mb: 1 }}>
+              <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2, flexWrap: 'wrap', mb: '4px' }}>
                 <Heading
                   sx={{
-                    fontSize: [3, null, 4],
+                    fontSize: [2, null, 3],
                     letterSpacing: '-0.02em',
                     color: 'fg.default',
                     overflow: 'hidden',
@@ -1077,7 +1065,7 @@ function HeroStat({
   return (
     <Box
       sx={{
-        p: 3,
+        p: '10px',
         borderRight: ['none', null, '1px solid var(--border-muted)'],
         borderTop: ['1px solid var(--border-muted)', null, 'none'],
         '&:nth-of-type(2n+1)': {
@@ -1090,7 +1078,7 @@ function HeroStat({
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '4px',
+        gap: '2px',
       }}
     >
       <Box
@@ -1102,7 +1090,7 @@ function HeroStat({
           fontSize: '10px',
           color: 'fg.muted',
           fontWeight: 700,
-          letterSpacing: '1px',
+          letterSpacing: '0.8px',
           textTransform: 'uppercase',
         }}
       >
@@ -1114,9 +1102,9 @@ function HeroStat({
           display: 'block',
           fontFamily: 'mono',
           fontVariantNumeric: 'tabular-nums',
-          fontSize: [3, null, 4],
+          fontSize: [2, null, 3],
           fontWeight: 800,
-          letterSpacing: '-0.03em',
+          letterSpacing: '-0.02em',
           color: accent,
           lineHeight: 1.1,
           overflow: 'hidden',
@@ -1129,7 +1117,7 @@ function HeroStat({
       <Text
         sx={{
           display: 'block',
-          fontSize: 0,
+          fontSize: '11px',
           color: 'fg.muted',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -1257,7 +1245,7 @@ function StatCard({
       sx={{
         position: 'relative',
         overflow: 'hidden',
-        p: '12px',
+        p: '10px',
         border: '1px solid',
         borderColor: 'border.default',
         borderRadius: 2,
@@ -1294,7 +1282,7 @@ function StatCard({
           fontSize: '10px',
           color: 'fg.muted',
           fontWeight: 700,
-          letterSpacing: '0.8px',
+          letterSpacing: '0.6px',
           textTransform: 'uppercase',
         }}
       >
@@ -1306,8 +1294,8 @@ function StatCard({
           fontFamily: 'mono',
           fontVariantNumeric: 'tabular-nums',
           fontWeight: 800,
-          fontSize: 4,
-          letterSpacing: '-0.03em',
+          fontSize: [2, null, 3],
+          letterSpacing: '-0.02em',
           color: loading ? 'fg.muted' : t.fg,
           lineHeight: 1.1,
           mt: '2px',
@@ -1316,7 +1304,7 @@ function StatCard({
         {loading ? '—' : value}
       </Text>
       {sub && (
-        <Text sx={{ fontSize: 0, color: 'fg.muted', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <Text sx={{ fontSize: '11px', color: 'fg.muted', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {sub}
         </Text>
       )}
@@ -2011,20 +1999,10 @@ interface RepoBucket {
   closedIssue: number;
 }
 
-// Eligibility thresholds — mirror constants.py defaults.
-const OSS_MIN_VALID_PRS   = 3;
-const OSS_MIN_CRED        = 0.80;
-const DISC_MIN_VALID_SOLVED = 3;
-const DISC_MIN_CRED       = 0.80;
-
-function ossRepoEligible(r: RepoBucket): boolean {
-  const cred = (r.merged + r.closedPr) > 0 ? r.merged / (r.merged + r.closedPr) : 0;
-  return r.validPrs >= OSS_MIN_VALID_PRS && cred >= OSS_MIN_CRED;
-}
-function discRepoEligible(r: RepoBucket): boolean {
-  const cred = (r.solvedIssue + r.closedIssue) > 0 ? r.solvedIssue / (r.solvedIssue + r.closedIssue) : 0;
-  return r.solvedIssue >= DISC_MIN_VALID_SOLVED && cred >= DISC_MIN_CRED;
-}
+// Eligibility is determined by the validator (see constants.py: 3 valid
+// PRs / issues, 80% credibility, token_score gate). We don't re-derive
+// it client-side — `repoEval.isEligible` / `isIssueEligible` from the
+// per-miner API are the source of truth.
 
 function makeRepoBucket(repo: string): RepoBucket {
   return {
@@ -2142,8 +2120,9 @@ function RepoBreakdown({
     setPage(0);
   };
 
-  const repoIsOssEligible  = (r: RepoBucket) => repoEvalMap.get(r.repo.toLowerCase())?.isEligible       ?? ossRepoEligible(r);
-  const repoIsDiscEligible = (r: RepoBucket) => repoEvalMap.get(r.repo.toLowerCase())?.isIssueEligible  ?? discRepoEligible(r);
+  // Validator flags only (canonical).
+  const repoIsOssEligible  = (r: RepoBucket) => repoEvalMap.get(r.repo.toLowerCase())?.isEligible      === true;
+  const repoIsDiscEligible = (r: RepoBucket) => repoEvalMap.get(r.repo.toLowerCase())?.isIssueEligible === true;
 
   const sums = useMemo(() => {
     // Only eligible repos contribute to the earnings pool — non-eligible repos
@@ -2436,20 +2415,33 @@ function RepoRow({
   repoEval: RepoEval | undefined;
 }) {
   const [owner, name] = row.repo.split('/');
-  // Use validator-provided eligibility when available; fall back to local approximation.
-  const isEligible = repoEval
-    ? (mode === 'oss' ? repoEval.isEligible : repoEval.isIssueEligible)
-    : (mode === 'oss' ? ossRepoEligible(row) : discRepoEligible(row));
-  // Use validator-provided credibility when available; fall back to local calculation.
-  const credPct = repoEval
-    ? Math.round((mode === 'oss' ? repoEval.credibility : repoEval.issueCredibility) * 100)
-    : (() => {
-        const credOss = (row.merged + row.closedPr) > 0
-          ? Math.round((row.merged / (row.merged + row.closedPr)) * 100) : null;
-        const credDisc = (row.solvedIssue + row.closedIssue) > 0
-          ? Math.round((row.solvedIssue / (row.solvedIssue + row.closedIssue)) * 100) : null;
-        return mode === 'oss' ? credOss : credDisc;
-      })();
+  // Validator flag is canonical eligibility.
+  const isEligible = mode === 'oss'
+    ? repoEval?.isEligible === true
+    : repoEval?.isIssueEligible === true;
+  // Credibility from the visible window data (so the % matches the merged
+  // / closed counts in the row). Validator's `credibility` field uses a
+  // different definition and was producing 100% for repos whose visible
+  // merge ratio is well under that.
+  const credPct = mode === 'oss'
+    ? ((row.merged + row.closedPr) > 0
+        ? Math.round((row.merged / (row.merged + row.closedPr)) * 100) : null)
+    : ((row.solvedIssue + row.closedIssue) > 0
+        ? Math.round((row.solvedIssue / (row.solvedIssue + row.closedIssue)) * 100) : null);
+
+  // Dynamic style via inline `style` — avoids styled-components class blow-up.
+  const inlineBg =
+    isSelected ? 'var(--accent-subtle)'
+      : isEligible ? 'var(--success-subtle)'
+        : 'transparent';
+  const inlineBoxShadow =
+    isSelected ? 'inset 3px 0 0 var(--accent-fg)'
+      : isEligible ? 'inset 3px 0 0 var(--success-fg)'
+        : 'none';
+  const inlineBorderColor =
+    isEligible
+      ? (mode === 'oss' ? 'var(--success-muted)' : 'var(--done-muted)')
+      : 'var(--border-muted)';
 
   return (
     <Box
@@ -2464,21 +2456,29 @@ function RepoRow({
         py: '9px',
         border: 'none',
         borderBottom: '1px solid',
-        borderColor: isEligible ? (mode === 'oss' ? 'success.muted' : 'done.muted') : 'border.muted',
         '&:last-of-type': { borderBottom: 'none' },
-        boxShadow: isSelected ? 'inset 3px 0 0 var(--accent-fg)' : isEligible ? 'inset 3px 0 0 var(--success-fg)' : 'none',
-        bg: isSelected ? 'accent.subtle' : isEligible ? 'success.subtle' : 'transparent',
         color: 'fg.default',
         textAlign: 'left',
         fontFamily: 'inherit',
         cursor: 'pointer',
         transition: 'background-color 100ms, box-shadow 100ms',
-        '&:hover': { bg: isSelected ? 'accent.subtle' : isEligible ? 'success.subtle' : 'canvas.default' },
+      }}
+      style={{
+        backgroundColor: inlineBg,
+        boxShadow: inlineBoxShadow,
+        borderBottomColor: inlineBorderColor,
       }}
     >
       {/* Repo name */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, pr: 2 }}>
-        <Box sx={{ color: isSelected ? 'accent.fg' : isEligible ? 'success.fg' : 'fg.muted', flexShrink: 0 }}>
+        <Box
+          sx={{ display: 'inline-flex', flexShrink: 0 }}
+          style={{
+            color: isSelected
+              ? 'var(--accent-fg)'
+              : isEligible ? 'var(--success-fg)' : 'var(--fg-muted)',
+          }}
+        >
           <RepoIcon size={12} />
         </Box>
         <Link
@@ -2490,13 +2490,15 @@ function RepoRow({
           <Text
             sx={{
               fontSize: 0,
-              fontWeight: isSelected ? 700 : 600,
-              color: isSelected ? 'accent.fg' : 'fg.default',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
               display: 'block',
               '&:hover': { color: 'accent.fg' },
+            }}
+            style={{
+              fontWeight: isSelected ? 700 : 600,
+              color: isSelected ? 'var(--accent-fg)' : 'var(--fg-default)',
             }}
           >
             {row.repo}
@@ -2547,6 +2549,7 @@ function RepoRow({
 }
 
 function RepoCell({ v, color }: { v: string | number; color?: string }) {
+  // Dynamic color via inline `style` to avoid class explosion.
   return (
     <Text
       sx={{
@@ -2554,10 +2557,10 @@ function RepoCell({ v, color }: { v: string | number; color?: string }) {
         fontVariantNumeric: 'tabular-nums',
         fontSize: '11px',
         fontWeight: 600,
-        color: color ?? 'fg.muted',
         textAlign: 'right',
         pr: '4px',
       }}
+      style={{ color: color ?? 'var(--fg-muted)' }}
     >
       {typeof v === 'number' ? v.toLocaleString() : v}
     </Text>
@@ -3130,7 +3133,7 @@ function PrRow({ pr, onOpen }: { pr: PrDetail; onOpen: () => void }) {
         '&:hover': { bg: 'canvas.default' },
       }}
     >
-      <Box sx={{ color: stateColor, display: 'inline-flex' }}>
+      <Box sx={{ display: 'inline-flex' }} style={{ color: stateColor }}>
         <StateIcon size={14} />
       </Box>
       <Box sx={{ minWidth: 0 }}>
@@ -3193,7 +3196,10 @@ function PrRow({ pr, onOpen }: { pr: PrDetail; onOpen: () => void }) {
         <Text sx={{ fontSize: '9px', color: 'fg.muted', fontWeight: 700, letterSpacing: '0.6px', textTransform: 'uppercase' }}>
           $/Day
         </Text>
-        <Text sx={{ fontFamily: 'mono', fontWeight: 700, color: pr.predictedUsdPerDay > 0 ? 'var(--success-fg)' : 'var(--fg-muted)', fontSize: 1 }}>
+        <Text
+          sx={{ fontFamily: 'mono', fontWeight: 700, fontSize: 1 }}
+          style={{ color: pr.predictedUsdPerDay > 0 ? 'var(--success-fg)' : 'var(--fg-muted)' }}
+        >
           {pr.predictedUsdPerDay > 0 ? formatUsd(pr.predictedUsdPerDay, { style: 'compact' }) : '—'}
         </Text>
       </Box>
@@ -3333,7 +3339,7 @@ function IssueRow({ iss, kind }: { iss: IssueDetail; kind: 'discovered' | 'solve
         '&:hover': { bg: 'canvas.default' },
       }}
     >
-      <Box sx={{ color: stateColor, display: 'inline-flex' }}>
+      <Box sx={{ display: 'inline-flex' }} style={{ color: stateColor }}>
         <StateIcon size={14} />
       </Box>
       <Box sx={{ minWidth: 0 }}>

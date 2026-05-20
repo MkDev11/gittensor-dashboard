@@ -195,6 +195,10 @@ export interface Miner {
   totalAdditions?: number;
   totalDeletions?: number;
   uniqueReposCount?: number;
+  // Per-track eligible repo counts. Server-side enriched from the per-miner
+  // `repositories[]` array so the leaderboard matches the detail page.
+  eligibleRepoCount?: number;
+  issueEligibleRepoCount?: number;
   alphaPerDay?: number;
   taoPerDay?: number;
   usdPerDay?: number;

@@ -5,8 +5,11 @@ export const dynamic = 'force-dynamic';
 
 const MINERS_URL = 'https://api.gittensor.io/miners';
 const PRS_URL = 'https://api.gittensor.io/prs';
-const TTL_MS = 15_000;
-const MINER_TTL_MS = 30_000;
+// Fresh window. Beyond this we still return cached data and refresh in the
+// background (stale-while-revalidate) so requests never wait on a slow
+// upstream once anything is cached.
+const TTL_MS = 30_000;
+const MINER_TTL_MS = 300_000;
 
 export interface RepoEvaluation {
   repo: string;
@@ -53,11 +56,9 @@ interface PerMinerData {
 }
 
 const perMinerCache = new Map<string, { fetched_at: number; data: PerMinerData }>();
+const perMinerInFlight = new Map<string, Promise<PerMinerData>>();
 
-async function fetchPerMiner(githubId: string): Promise<PerMinerData> {
-  const now = Date.now();
-  const hit = perMinerCache.get(githubId);
-  if (hit && now - hit.fetched_at < MINER_TTL_MS) return hit.data;
+async function refreshPerMiner(githubId: string): Promise<PerMinerData> {
   try {
     const raw = await fetchJson<PerMinerRaw>(`${MINERS_URL}/${githubId}`);
     const repoEvals: RepoEvaluation[] = (raw.repositories ?? [])
@@ -83,11 +84,33 @@ async function fetchPerMiner(githubId: string): Promise<PerMinerData> {
       lifetimeUsd: raw.lifetimeUsd,
       repoEvals,
     };
-    perMinerCache.set(githubId, { fetched_at: now, data });
+    perMinerCache.set(githubId, { fetched_at: Date.now(), data });
     return data;
   } catch {
-    return { repoEvals: [] };
+    const hit = perMinerCache.get(githubId);
+    return hit?.data ?? { repoEvals: [] };
   }
+}
+
+// Stale-while-revalidate: any cache returns instantly; stale entries
+// trigger a background refresh so the next request is fresh.
+async function fetchPerMiner(githubId: string): Promise<PerMinerData> {
+  const now = Date.now();
+  const hit = perMinerCache.get(githubId);
+  if (hit) {
+    if (now - hit.fetched_at >= MINER_TTL_MS && !perMinerInFlight.has(githubId)) {
+      const p = refreshPerMiner(githubId).finally(() => perMinerInFlight.delete(githubId));
+      perMinerInFlight.set(githubId, p);
+    }
+    return hit.data;
+  }
+  // Cold cache — must wait, but dedup concurrent first-hits.
+  let p = perMinerInFlight.get(githubId);
+  if (!p) {
+    p = refreshPerMiner(githubId).finally(() => perMinerInFlight.delete(githubId));
+    perMinerInFlight.set(githubId, p);
+  }
+  return p;
 }
 
 interface UpstreamMiner {
@@ -193,9 +216,15 @@ async function refresh(): Promise<Cached> {
   return next;
 }
 
+// Stale-while-revalidate: return cached immediately, refresh stale in background.
 async function getShared(): Promise<Cached> {
   const now = Date.now();
-  if (cache && now - cache.fetched_at < TTL_MS) return cache;
+  if (cache) {
+    if (now - cache.fetched_at >= TTL_MS && !inFlight) {
+      inFlight = refresh().catch(() => cache!).finally(() => { inFlight = null; });
+    }
+    return cache;
+  }
   if (!inFlight) inFlight = refresh().finally(() => { inFlight = null; });
   return inFlight;
 }
@@ -287,9 +316,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }>
     const ghUserKey = miner.githubUsername ? miner.githubUsername.toLowerCase() : null;
     const hotkeyKey = miner.hotkey;
 
-    const perMiner = ghIdKey ? await fetchPerMiner(ghIdKey) : { repoEvals: [] };
-    const { repoEvals, ...lifetimeFields } = perMiner;
-    const minerWithLifetime = { ...miner, ...lifetimeFields };
+    // Kick off the per-miner upstream fetch — runs concurrently with the
+    // PR mapping and DB queries below.
+    const perMinerP: Promise<PerMinerData> = ghIdKey
+      ? fetchPerMiner(ghIdKey)
+      : Promise.resolve({ repoEvals: [] });
 
     const prs: MinerPrDetail[] = shared.prs
       .filter((p) => {
@@ -435,6 +466,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }>
         };
       });
     }
+
+    // Await the per-miner fetch we kicked off above. With stale-while-
+    // revalidate this is usually instant (cache hit) and only blocks on a
+    // truly cold cache.
+    const { repoEvals, ...lifetimeFields } = await perMinerP;
+    const minerWithLifetime = { ...miner, ...lifetimeFields };
 
     const resp: MinerDetailResp = {
       miner: minerWithLifetime,

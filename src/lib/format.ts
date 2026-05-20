@@ -50,11 +50,9 @@ export function formatUsd(n: number, opts: UsdFormatOptions = {}): string {
     return abs >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`;
   }
   if (style === 'compact') {
-    if (abs >= 1) {
-      const fixed = n.toFixed(2);
-      return fixed.endsWith('.00') ? `$${fixed.slice(0, -3)}` : `$${fixed}`;
-    }
-    return `$${n.toFixed(4)}`;
+    // toFixed(2) for everything, then strip trailing zeros:
+    // 97.30 → 97.3, 0.9857 → 0.99, 0.40 → 0.4.
+    return `$${n.toFixed(2).replace(/\.?0+$/, '')}`;
   }
   if (abs >= 100) return `$${n.toFixed(0)}`;
   if (abs >= 1) return `$${n.toFixed(2)}`;

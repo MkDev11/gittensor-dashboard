@@ -6,7 +6,7 @@
  * composes them with state.
  */
 import React from 'react';
-import { Box, Text, Label } from '@primer/react';
+import { Box, Text } from '@primer/react';
 import { StarIcon, StarFillIcon } from '@primer/octicons-react';
 import { formatUsd } from '@/lib/format';
 
@@ -119,31 +119,43 @@ export function credColor(value: number): string {
       : 'var(--fg-muted)';
 }
 
+// Splits a miner's unified $/day across the OSS and Discovery tracks.
+// Score-weighted when eligible in both (50/50 fallback when both scores are 0),
+// full allocation to the single eligible track, or $0 when neither is eligible.
+export function splitEarnings(
+  usdPerDay: number,
+  ossScore: number,
+  issueScore: number,
+  ossEligible: boolean,
+  issueEligible: boolean,
+): { oss: number; disc: number } {
+  const combined = ossScore + issueScore;
+  let ossShare = 0, discShare = 0;
+  if (ossEligible && issueEligible) {
+    ossShare = combined > 0 ? ossScore / combined : 0.5;
+    discShare = 1 - ossShare;
+  } else if (ossEligible) {
+    ossShare = 1;
+  } else if (issueEligible) {
+    discShare = 1;
+  }
+  return { oss: usdPerDay * ossShare, disc: usdPerDay * discShare };
+}
+
 // Projects a miner into the current Mode's view.
 //   - oss / discovery: per-track score, cred, eligibility, $/day, counts.
 //   - total: combined score & counts, score-weighted cred, eligible if
 //     either track is, unified $/day (no double-count).
 export function viewOf(m: Miner, mode: Mode): MinerView {
-  const usd = num(m.usdPerDay);
   const ossScore = num(m.totalScore);
   const issueScore = num(m.issueDiscoveryScore);
-  const combinedScore = ossScore + issueScore;
+  const { oss: ossUsd, disc: discUsd } = splitEarnings(
+    num(m.usdPerDay), ossScore, issueScore, !!m.isEligible, !!m.isIssueEligible,
+  );
 
-  // Split the unified $/day across tracks: full to the only eligible
-  // track, score-weighted if eligible in both (50/50 fallback), or $0
-  // if eligible in neither.
   const ossEligible = !!m.isEligible;
   const issueEligible = !!m.isIssueEligible;
-  let ossShare = 0;
-  let issueShare = 0;
-  if (ossEligible && issueEligible) {
-    ossShare = combinedScore > 0 ? ossScore / combinedScore : 0.5;
-    issueShare = 1 - ossShare;
-  } else if (ossEligible) {
-    ossShare = 1;
-  } else if (issueEligible) {
-    issueShare = 1;
-  }
+  const combinedScore = ossScore + issueScore;
 
   if (mode === 'discovery') {
     return {
@@ -151,7 +163,7 @@ export function viewOf(m: Miner, mode: Mode): MinerView {
       score: issueScore,
       cred: num(m.issueCredibility),
       eligible: issueEligible,
-      usd: usd * issueShare,
+      usd: discUsd,
       counts: {
         primaryLabel: 'Solved',
         primary: m.totalSolvedIssues ?? 0,
@@ -166,7 +178,7 @@ export function viewOf(m: Miner, mode: Mode): MinerView {
       score: ossScore,
       cred: num(m.credibility),
       eligible: ossEligible,
-      usd: usd * ossShare,
+      usd: ossUsd,
       counts: {
         primaryLabel: 'Merged',
         primary: m.totalMergedPrs ?? 0,
@@ -189,7 +201,7 @@ export function viewOf(m: Miner, mode: Mode): MinerView {
     score: combinedScore,
     cred: weightedCred,
     eligible: ossEligible || issueEligible,
-    usd,
+    usd: ossUsd + discUsd,
     counts: {
       primaryLabel: 'Done',
       primary: (m.totalMergedPrs ?? 0) + (m.totalSolvedIssues ?? 0),
@@ -274,7 +286,7 @@ export function RankBadge({
   );
 }
 
-// Avatar + name + UID + "you" label. Eligibility is communicated by
+// Avatar + name + optional UID + "you" label. Eligibility is communicated by
 // the row/card's dim treatment, not a badge.
 export function MinerIdentity({
   miner,
@@ -282,36 +294,40 @@ export function MinerIdentity({
   isTop,
   tier,
   avatarSize,
+  showUid = true,
 }: {
   miner: Miner;
   isMe: boolean;
   isTop: boolean;
   tier: Tier | null;
   avatarSize: number;
+  showUid?: boolean;
 }) {
+  // `isMe` is still used by the row's background highlight — we no
+  // longer paint a "you" badge here.
+  void isMe;
   return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
       <MinerAvatar miner={miner} size={avatarSize} tier={tier} />
-      <Box sx={{ minWidth: 0 }}>
-        <Box sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
-          <Text
-            sx={{
-              fontWeight: isTop ? 800 : 700,
-              fontSize: isTop ? 2 : 1,
-              color: 'fg.default',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            {ghName(miner)}
-          </Text>
-          {isMe && <Label variant="accent" sx={{ fontSize: '10px' }}>you</Label>}
-        </Box>
-        <Text sx={{ display: 'block', fontFamily: 'mono', fontSize: 0, color: 'fg.muted' }}>
-          UID {miner.uid}
+      <Box sx={{ minWidth: 0, display: 'inline-flex', alignItems: 'baseline', gap: 1, flexWrap: 'wrap' }}>
+        <Text
+          sx={{
+            fontWeight: isTop ? 600 : 500,
+            fontSize: 1,
+            color: 'fg.default',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            letterSpacing: '-0.005em',
+          }}
+        >
+          {ghName(miner)}
         </Text>
+        {showUid && (
+          <Text sx={{ fontFamily: 'mono', fontSize: 0, color: 'fg.muted' }}>
+            #{miner.uid}
+          </Text>
+        )}
       </Box>
     </Box>
   );
@@ -531,6 +547,96 @@ export function MetricCell({
       >
         {value}
       </Text>
+    </Box>
+  );
+}
+
+// Dual-segment score bar for Total mode. Left (green) = OSS share,
+// right (purple) = Discovery share. Total width = pct of leader score.
+export function CompositionBar({
+  pct,
+  ossScore,
+  discScore,
+  isTop,
+  tier,
+}: {
+  pct: number;
+  ossScore: number;
+  discScore: number;
+  isTop: boolean;
+  tier: Tier | null;
+}) {
+  const total = ossScore + discScore;
+  const ossFrac = total > 0 ? ossScore / total : 0;
+  const ossPx = pct * ossFrac;
+  const discPx = pct * (1 - ossFrac);
+  return (
+    <Box sx={{ minWidth: 0 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box
+          sx={{
+            flex: 1,
+            position: 'relative',
+            height: isTop ? 10 : 8,
+            borderRadius: 999,
+            bg: 'var(--bg-inset)',
+            overflow: 'hidden',
+            border: '1px solid',
+            borderColor: 'border.muted',
+          }}
+        >
+          <Box
+            sx={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              height: '100%',
+              width: `${ossPx}%`,
+              bg: tier ? tier.accent : 'var(--success-fg)',
+              transition: 'width 300ms ease',
+            }}
+          />
+          <Box
+            sx={{
+              position: 'absolute',
+              left: `${ossPx}%`,
+              top: 0,
+              height: '100%',
+              width: `${discPx}%`,
+              bg: 'var(--done-emphasis)',
+              transition: 'width 300ms ease, left 300ms ease',
+            }}
+          />
+        </Box>
+        <Text
+          sx={{
+            fontFamily: 'mono',
+            fontVariantNumeric: 'tabular-nums',
+            fontSize: 0,
+            color: 'fg.default',
+            fontWeight: 700,
+            minWidth: 36,
+            textAlign: 'right',
+          }}
+        >
+          {pct}%
+        </Text>
+      </Box>
+      <Box sx={{ display: 'flex', gap: 2, mt: '4px' }}>
+        {ossScore > 0 && (
+          <Text sx={{ fontFamily: 'mono', fontSize: '10px', color: tier ? tier.accent : 'var(--success-fg)' }}>
+            OSS {ossScore.toFixed(1)}
+          </Text>
+        )}
+        {discScore > 0 && (
+          <Text sx={{ fontFamily: 'mono', fontSize: '10px', color: 'var(--done-emphasis)' }}>
+            DISC {discScore.toFixed(1)}
+          </Text>
+        )}
+        {total === 0 && (
+          <Text sx={{ fontFamily: 'mono', fontSize: '10px', color: 'fg.muted' }}>Score 0.00</Text>
+        )}
+      </Box>
     </Box>
   );
 }
