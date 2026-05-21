@@ -47,7 +47,7 @@ export default function ManageReposPage() {
       return j;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['user-repos'] });
+      void qc.invalidateQueries({ queryKey: ['user-repos'] });
       setFullName('');
       setWeight('0.01');
       setNotes('');

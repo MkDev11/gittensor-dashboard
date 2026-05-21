@@ -11,7 +11,6 @@ import {
   GitPullRequestIcon,
   BookIcon,
   PeopleIcon,
-  PersonIcon,
 } from '@primer/octicons-react';
 import type { Icon } from '@primer/octicons-react';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -34,7 +33,6 @@ const PRIMARY: NavItem[] = [
   { href: '/repositories', label: 'Repositories', icon: StackIcon },
   { href: '/issues', label: 'Issues', icon: IssueOpenedIcon },
   { href: '/pulls', label: 'Pull Requests', icon: GitPullRequestIcon },
-  { href: '/my-prs', label: 'My PRs', icon: PersonIcon },
 ];
 
 const SECONDARY: NavItem[] = [
