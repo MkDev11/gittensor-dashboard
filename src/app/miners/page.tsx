@@ -119,6 +119,11 @@ export default function MinersPage() {
           // Bigger climbs sort first when desc; null movement sinks.
           return prev != null && now > 0 ? prev - now : Number.NEGATIVE_INFINITY;
         }
+        case 'volume': {
+          const merged = m.totalValidMergedPrs ?? m.totalMergedPrs ?? 0;
+          const solved = m.totalSolvedIssues ?? 0;
+          return merged + solved;
+        }
       }
     };
     const eligibleOf = (m: Miner) => !!m.isEligible || !!m.isIssueEligible;
@@ -141,6 +146,8 @@ export default function MinersPage() {
     if (k === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(k); setSortDir('desc'); }
   };
+  const onSortKey = (k: SortKey) => { setSortKey(k); setSortDir('desc'); };
+  const onToggleSortDir = () => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
 
   const loadingFirst = isLoading && !data;
 
@@ -165,6 +172,10 @@ export default function MinersPage() {
           onPageSize={setPageSize}
           totalItems={sorted.length}
           totalAll={data?.miners.length ?? 0}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onSortKey={onSortKey}
+          onToggleSortDir={onToggleSortDir}
         />
 
         {isError ? (

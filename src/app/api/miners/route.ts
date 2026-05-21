@@ -15,7 +15,7 @@ const DISCOVERY_ACTIVITY_TTL_MS = 60_000;
 const VALID_TOKEN_SCORE = 5;
 // 14-day sparkline window matches the leaderboard row width budget.
 const SPARKLINE_DAYS = 35;
-const TOP_REPOS_PER_MINER = 3;
+const TOP_REPOS_PER_MINER = 5;
 const DAY_MS = 86_400_000;
 
 interface UpstreamRepository {

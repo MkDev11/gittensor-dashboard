@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Box, Text } from '@primer/react';
 import {
   TriangleDownIcon, TriangleUpIcon, CheckIcon, XIcon, StarIcon, StarFillIcon,
-  GitPullRequestIcon, IssueOpenedIcon,
+  GitPullRequestIcon, IssueOpenedIcon, ArrowDownIcon, ArrowUpIcon,
 } from '@primer/octicons-react';
 import { TableRowsSkeleton } from '@/components/Skeleton';
 import { formatUsd, formatRelativeTime } from '@/lib/format';
@@ -32,10 +32,12 @@ import {
  * ========================================================================= */
 
 export type EligibilityFilter = 'all' | 'eligible' | 'ineligible';
-export type SortKey = 'score' | 'cred' | 'usd' | 'repos' | 'active' | 'movement';
+export type SortKey = 'score' | 'cred' | 'usd' | 'repos' | 'active' | 'movement' | 'volume';
 export type SortDir = 'asc' | 'desc';
 
-const COLS = '46px minmax(150px, 1fr) 120px minmax(150px, 1.2fr) 48px 120px 64px 80px 80px 26px';
+// contrib merges PRs/Issues counts with OSS/Disc scores in one cell.
+// Repos moves to end as the 1fr slack absorber — chips spread on wide screens.
+const COLS = '44px minmax(170px, 240px) 124px minmax(88px, 104px) 60px 72px 84px minmax(180px, 1fr) 92px 28px';
 
 function MinerIdentity({
   miner,
@@ -118,50 +120,58 @@ function Sparkline({
   if (!values.length) {
     return <Box title={title} aria-hidden sx={{ width, height, display: 'inline-block' }} />;
   }
-  const max = Math.max(1, ...values);
+  const max = Math.max(...values);
   const cols = values.length;
-  const gap = cols > 20 ? 0 : 1;
-  const colWidth = (width - gap * (cols - 1)) / cols;
   const total = values.reduce((a, b) => a + b, 0);
-  const computedTitle =
-    title ?? `${total} PR${total === 1 ? '' : 's'} over the last ${cols} days`;
+  const last7 = values.slice(-7).reduce((a, b) => a + b, 0);
+  const prior7 = cols >= 14 ? values.slice(-14, -7).reduce((a, b) => a + b, 0) : null;
+  let trendPart = '';
+  if (prior7 != null) {
+    if (prior7 === 0 && last7 > 0) {
+      trendPart = ` · new activity this week`;
+    } else if (prior7 > 0) {
+      const arrow = last7 > prior7 ? '↑' : last7 < prior7 ? '↓' : '·';
+      const pct = Math.round(Math.abs(last7 - prior7) / prior7 * 100);
+      trendPart = ` · ${arrow}${pct}% vs prior 7d`;
+    }
+  }
+  const computedTitle = title
+    ?? (total === 0
+      ? `No PR activity in the last ${cols} days`
+      : `PR activity · ${total} merged in ${cols}d · ${last7} in the last 7d${trendPart}`);
+  const padV = 2;
+
+  const pts = values.map((v, i) => ({
+    x: cols > 1 ? (i / (cols - 1)) * (width - 1) : (width - 1) / 2,
+    y: padV + (max > 0 ? 1 - v / max : 1) * (height - padV * 2),
+  }));
+
+  const linePoints = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const areaD = [
+    `M${pts[0].x.toFixed(1)},${height}`,
+    ...pts.map(p => `L${p.x.toFixed(1)},${p.y.toFixed(1)}`),
+    `L${pts[pts.length - 1].x.toFixed(1)},${height}`,
+    'Z',
+  ].join(' ');
 
   return (
     <Box
       title={computedTitle}
       aria-label={computedTitle}
-      sx={{ display: 'inline-flex', alignItems: 'flex-end', gap: `${gap}px`, width, height }}
+      sx={{ display: 'inline-block', width, height, flexShrink: 0 }}
     >
-      {values.map((v, i) => {
-        // Smooth left→right fade: oldest bars are dim, newest are vivid.
-        const ageFactor = cols > 1 ? i / (cols - 1) : 1;
-        const isRecent = i >= cols - 7;
-        const barH = v === 0 ? 2 : Math.max(3, Math.round((v / max) * height));
-        const color = v === 0
-          ? 'var(--border-default)'
-          : isRecent
-          ? 'var(--success-fg)'
-          : 'var(--accent-fg)';
-        const opacity = v === 0
-          ? 0.2
-          : isRecent
-          ? 0.45 + 0.55 * ageFactor   // recent week: 0.45 → 1.0
-          : 0.15 + 0.45 * ageFactor;  // older: 0.15 → 0.6
-        return (
-          <Box
-            key={i}
-            aria-hidden
-            sx={{
-              width: colWidth,
-              height: barH,
-              borderRadius: '1px',
-              backgroundColor: color,
-              opacity,
-              flexShrink: 0,
-            }}
-          />
-        );
-      })}
+      <svg width={width} height={height} style={{ display: 'block', overflow: 'hidden' }}>
+        <path d={areaD} fill="var(--accent-fg)" opacity={0.08} />
+        <polyline
+          points={linePoints}
+          fill="none"
+          stroke="var(--accent-fg)"
+          strokeWidth="1.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          opacity={0.7}
+        />
+      </svg>
     </Box>
   );
 }
@@ -204,6 +214,71 @@ function MovementCell({
     >
       {up ? '↑' : '↓'}{abs}
     </Text>
+  );
+}
+
+/* ─── Track cell ── two rows, one per track, dot+label+score ─── */
+
+// icon (color key) · count (muted, supporting) · divider · score (primary, most prominent)
+// No text labels — icons are self-explanatory; tooltips provide full detail on hover.
+function ContribCell({
+  merged, solved, ossScore, ossEligible, discScore, discEligible,
+}: {
+  merged: number; solved: number;
+  ossScore: number; ossEligible: boolean;
+  discScore: number; discEligible: boolean;
+}) {
+  return (
+    <Box
+      sx={{
+        gridArea: 'contrib',
+        display: ['none', null, 'flex'],
+        flexDirection: 'column',
+        gap: '5px',
+        minWidth: 0,
+        px: '6px',
+        justifyContent: 'center',
+      }}
+    >
+      {/* OSS / PRs row */}
+      <Box
+        sx={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}
+        title={`${merged} merged PR${merged === 1 ? '' : 's'} · OSS score ${ossScore.toFixed(1)}`}
+      >
+        <Box sx={{ color: ossEligible ? 'accent.fg' : 'fg.muted', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <GitPullRequestIcon size={10} />
+        </Box>
+        <Text sx={{ ...MONO, fontSize: 0, lineHeight: 1, color: merged > 0 ? 'fg.muted' : 'fg.subtle', flexShrink: 0 }}>
+          {merged > 0 ? merged.toLocaleString() : '—'}
+        </Text>
+        <Text sx={{ lineHeight: 1, color: 'fg.subtle', flexShrink: 0, fontSize: '10px' }} aria-hidden>·</Text>
+        <Text
+          sx={{ ...MONO, fontSize: 0, fontWeight: 600, lineHeight: 1, ml: 'auto', flexShrink: 0 }}
+          style={{ color: ossScore > 0 ? (ossEligible ? 'var(--fg-default)' : 'var(--fg-muted)') : 'var(--fg-subtle)' }}
+        >
+          {ossScore > 0 ? ossScore.toFixed(1) : '—'}
+        </Text>
+      </Box>
+      {/* Discovery / Issues row */}
+      <Box
+        sx={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}
+        title={`${solved} solved issue${solved === 1 ? '' : 's'} · Discovery score ${discScore.toFixed(1)}`}
+      >
+        <Box sx={{ color: discEligible ? 'done.fg' : 'fg.muted', display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+          <IssueOpenedIcon size={10} />
+        </Box>
+        <Text sx={{ ...MONO, fontSize: 0, lineHeight: 1, color: solved > 0 ? 'fg.muted' : 'fg.subtle', flexShrink: 0 }}>
+          {solved > 0 ? solved.toLocaleString() : '—'}
+        </Text>
+        <Text sx={{ lineHeight: 1, color: 'fg.subtle', flexShrink: 0, fontSize: '10px' }} aria-hidden>·</Text>
+        <Text
+          sx={{ ...MONO, fontSize: 0, fontWeight: 600, lineHeight: 1, ml: 'auto', flexShrink: 0 }}
+          style={{ color: discScore > 0 ? (discEligible ? 'var(--fg-default)' : 'var(--fg-muted)') : 'var(--fg-subtle)' }}
+        >
+          {discScore > 0 ? discScore.toFixed(1) : '—'}
+        </Text>
+      </Box>
+    </Box>
   );
 }
 
@@ -349,8 +424,18 @@ function StatusBadge({ status }: { status: MinerStatus }) {
 }
 
 /* =========================================================================
- * Toolbar — filter pills + search + page-size selector for the table
+ * Toolbar — filter pills + sort control + search + page-size selector
  * ========================================================================= */
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'score',    label: 'Score' },
+  { key: 'usd',      label: '$/Day' },
+  { key: 'cred',     label: 'Success %' },
+  { key: 'volume',   label: 'Merged · Solved' },
+  { key: 'movement', label: 'Movement' },
+  { key: 'active',   label: 'Last Active' },
+  { key: 'repos',    label: 'Repos' },
+];
 
 export interface ToolbarProps {
   query: string;
@@ -366,6 +451,10 @@ export interface ToolbarProps {
   onPageSize: (n: number) => void;
   totalItems: number;
   totalAll: number;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSortKey: (k: SortKey) => void;
+  onToggleSortDir: () => void;
 }
 
 export function Toolbar({
@@ -376,6 +465,7 @@ export function Toolbar({
   repoFilter, onClearRepoFilter,
   pageSize, onPageSize,
   totalItems, totalAll,
+  sortKey, sortDir, onSortKey, onToggleSortDir,
 }: ToolbarProps) {
   const pills = (
     <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
@@ -428,26 +518,127 @@ export function Toolbar({
     </Box>
   );
 
+  const resultText = totalItems === totalAll
+    ? `${totalItems.toLocaleString()} miners`
+    : `${totalItems.toLocaleString()} of ${totalAll.toLocaleString()}`;
+
   return (
-    <Box sx={{ mt: 1, mb: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {/* Row 1: pills; desktop also gets centered search + rows selector */}
-      <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1, position: 'relative' }}>
+    <Box sx={{ mt: 2, mb: 2 }}>
+      {/* Desktop: single dense row — pills · sort · count · rows · search */}
+      <Box
+        sx={{
+          display: ['none', null, 'flex'],
+          alignItems: 'center',
+          gap: 2,
+          flexWrap: 'wrap',
+        }}
+      >
         {pills}
-        {/* SearchBox centered — desktop only */}
-        <Box sx={{ display: ['none', null, 'block'], position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-          <SearchBox value={query} onChange={setQuery} placeholder="Search miner, UID, hotkey…" size="sm" />
+        {/* Sort: label + key select + direction arrow */}
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+          <Text sx={{ ...LABEL, color: 'fg.muted', textTransform: 'none', fontWeight: 600, letterSpacing: 0, whiteSpace: 'nowrap' }}>
+            Sort:
+          </Text>
+          <Box
+            as="select"
+            value={sortKey}
+            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onSortKey(e.target.value as SortKey)}
+            sx={{
+              bg: 'canvas.default',
+              color: 'fg.default',
+              border: '1px solid',
+              borderColor: 'border.default',
+              borderRadius: 1,
+              px: 2,
+              py: '3px',
+              fontSize: 0,
+              fontFamily: 'inherit',
+              fontWeight: 600,
+              cursor: 'pointer',
+              minWidth: 110,
+              '&:hover': { borderColor: 'border.muted' },
+              '&:focus': { outline: 'none' },
+              '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '1px' },
+            }}
+          >
+            {SORT_OPTIONS.map((o) => (
+              <option key={o.key} value={o.key}>{o.label}</option>
+            ))}
+          </Box>
+          <Box
+            as="button"
+            onClick={onToggleSortDir}
+            aria-label={sortDir === 'desc' ? 'Sort descending' : 'Sort ascending'}
+            title={sortDir === 'desc' ? 'Descending' : 'Ascending'}
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 26,
+              height: 26,
+              bg: 'canvas.default',
+              color: 'fg.default',
+              border: '1px solid',
+              borderColor: 'border.default',
+              borderRadius: 1,
+              cursor: 'pointer',
+              flexShrink: 0,
+              '&:hover': { bg: 'canvas.inset', borderColor: 'border.muted' },
+              '&:focus': { outline: 'none' },
+              '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '1px' },
+            }}
+          >
+            {sortDir === 'desc' ? <ArrowDownIcon size={14} /> : <ArrowUpIcon size={14} />}
+          </Box>
         </Box>
-        {/* RowSizeSelector — desktop only on this row */}
-        <Box sx={{ ml: 'auto', display: ['none', null, 'inline-flex'], alignItems: 'center', gap: 2 }}>
-          <RowSizeSelector value={pageSize} onChange={onPageSize} />
+        <Text sx={{ ...MONO, fontSize: 0, color: 'fg.muted', whiteSpace: 'nowrap', ml: 'auto' }}>
+          {resultText}
+        </Text>
+        <RowSizeSelector value={pageSize} onChange={onPageSize} />
+        <Box sx={{ flex: '0 1 auto', width: 240, maxWidth: 320, display: 'flex' }}>
+          <SearchBox value={query} onChange={setQuery} placeholder="Search miner, UID, hotkey…" size="sm" />
         </Box>
       </Box>
-      {/* Row 2: SearchBox + RowSizeSelector side by side — mobile only */}
-      <Box sx={{ display: ['flex', null, 'none'], alignItems: 'center', gap: 2 }}>
-        <Box sx={{ flex: 1 }}>
-          <SearchBox value={query} onChange={setQuery} placeholder="Search miner, UID, hotkey…" size="sm" />
+      {/* Mobile: pills wrap, then sort + rows; search below */}
+      <Box sx={{ display: ['flex', null, 'none'], flexDirection: 'column', gap: 2 }}>
+        {pills}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+            <Text sx={{ ...LABEL, color: 'fg.muted', textTransform: 'none', fontWeight: 600, letterSpacing: 0 }}>Sort:</Text>
+            <Box
+              as="select"
+              value={sortKey}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onSortKey(e.target.value as SortKey)}
+              sx={{
+                bg: 'canvas.default', color: 'fg.default', border: '1px solid',
+                borderColor: 'border.default', borderRadius: 1, px: 2, py: '3px',
+                fontSize: 0, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>{o.label}</option>
+              ))}
+            </Box>
+            <Box
+              as="button"
+              onClick={onToggleSortDir}
+              aria-label={sortDir === 'desc' ? 'Sort descending' : 'Sort ascending'}
+              sx={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 26, height: 26, bg: 'canvas.default', color: 'fg.default',
+                border: '1px solid', borderColor: 'border.default', borderRadius: 1, cursor: 'pointer',
+              }}
+            >
+              {sortDir === 'desc' ? <ArrowDownIcon size={14} /> : <ArrowUpIcon size={14} />}
+            </Box>
+          </Box>
+          <RowSizeSelector value={pageSize} onChange={onPageSize} />
         </Box>
-        <RowSizeSelector value={pageSize} onChange={onPageSize} />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{ flex: 1 }}>
+            <SearchBox value={query} onChange={setQuery} placeholder="Search miner, UID, hotkey…" size="sm" />
+          </Box>
+        </Box>
       </Box>
     </Box>
   );
@@ -677,7 +868,7 @@ function LeaderRow({
                "rank activity activity activity"
                "rank meta     meta  meta"`,
               null,
-              `"rank ident spark repos cred track score lastactive usd star"`,
+              `"rank ident spark contrib cred score usd repos lastactive star"`,
             ],
             alignItems: 'center',
             columnGap: [2, null, 1],
@@ -724,7 +915,7 @@ function LeaderRow({
             <Sparkline values={daily35} width={108} height={22} />
           </Box>
 
-          <Box sx={{ gridArea: 'repos', display: ['none', null, 'flex'], alignItems: 'center', flexWrap: 'wrap', gap: '4px', minWidth: 0, pl: 4 }}>
+          <Box sx={{ gridArea: 'repos', display: ['none', null, 'flex'], alignItems: 'center', flexWrap: 'wrap', gap: '4px', minWidth: 0, pl: 2 }}>
             {topRepos.length === 0 ? (
               <Text sx={{ ...MONO, fontSize: '10px', color: 'fg.subtle' }}>—</Text>
             ) : (
@@ -739,6 +930,15 @@ function LeaderRow({
               ))
             )}
           </Box>
+
+          <ContribCell
+            merged={miner.totalValidMergedPrs ?? mergedTotal}
+            solved={solvedTotal}
+            ossScore={ossScore}
+            ossEligible={!!miner.isEligible}
+            discScore={discScore}
+            discEligible={!!miner.isIssueEligible}
+          />
 
           {/* Mobile-only: sparkline + repos side by side */}
           <Box sx={{ gridArea: 'activity', display: ['flex', null, 'none'], alignItems: 'center', gap: '8px', minWidth: 0 }}>
@@ -762,41 +962,6 @@ function LeaderRow({
             </Box>
           </Box>
 
-          <Box
-            sx={{
-              gridArea: 'track',
-              display: ['none', null, 'flex'],
-              flexDirection: 'column',
-              gap: '3px',
-              minWidth: 0,
-              pl: 4,
-              pr: '4px',
-            }}
-          >
-            <DualTrackBar
-              ossScore={ossScore}
-              ossEligible={!!miner.isEligible}
-              discScore={discScore}
-              discEligible={!!miner.isIssueEligible}
-              height={5}
-            />
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', gap: '4px' }}>
-              <Text
-                sx={{ ...MONO, fontSize: '9px', color: ossScore > 0 ? (miner.isEligible ? 'accent.fg' : 'fg.muted') : 'fg.subtle', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}
-                title="OSS · Pull Requests"
-              >
-                <GitPullRequestIcon size={9} />
-                {ossScore.toFixed(1)}
-              </Text>
-              <Text
-                sx={{ ...MONO, fontSize: '9px', color: discScore > 0 ? (miner.isIssueEligible ? 'done.fg' : 'fg.muted') : 'fg.subtle', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '2px' }}
-                title="Discovery · Issues"
-              >
-                <IssueOpenedIcon size={9} />
-                {discScore.toFixed(1)}
-              </Text>
-            </Box>
-          </Box>
 
           <Box
             sx={{
@@ -948,51 +1113,18 @@ export function LeaderTable({
           bg: 'canvas.subtle',
         }}
       >
-        <SortHdr active={sortKey === 'movement'} dir={sortDir} onClick={() => onSort('movement')} align="center" title="Rank · Δ since yesterday">#</SortHdr>
-        <ColHdr align="left">Miner</ColHdr>
-        <ColHdr align="left" title="PR activity over the last 35 days">Activity</ColHdr>
-        <ColHdr align="left" title="Top repositories this miner contributes to" pl={4}>Top Repos</ColHdr>
-        <SortHdr active={sortKey === 'cred'} dir={sortDir} onClick={() => onSort('cred')}>Cred</SortHdr>
-        <ColHdr align="left" title="OSS (pull requests) and Discovery (issues) track scores" pl={4}>OSS · Disc</ColHdr>
-        <SortHdr active={sortKey === 'score'} dir={sortDir} onClick={() => onSort('score')}>Score</SortHdr>
+        <SortHdr active={sortKey === 'movement'} dir={sortDir} onClick={() => onSort('movement')} align="center" title="Current rank · Change since yesterday">#</SortHdr>
+        <ColHdr align="left" title="Miner identity — GitHub username and UID">Miner</ColHdr>
+        <ColHdr align="left" title="Pull request activity over the last 35 days">Trend</ColHdr>
+        <ColHdr align="left" title="Merged pull requests and solved issues with OSS and Discovery track scores">Contributions</ColHdr>
+        <SortHdr active={sortKey === 'cred'} dir={sortDir} onClick={() => onSort('cred')} title="Success rate — merged PRs + solved issues as a percentage of all submitted work">Success %</SortHdr>
+        <SortHdr active={sortKey === 'score'} dir={sortDir} onClick={() => onSort('score')} title="Combined OSS + Discovery score">Score</SortHdr>
+        <SortHdr active={sortKey === 'usd'} dir={sortDir} onClick={() => onSort('usd')} title="Estimated daily earnings in USD" align="right">$/Day</SortHdr>
+        <ColHdr align="left" title="Top repositories this miner contributes to" pl={2}>Top Repos</ColHdr>
         <SortHdr active={sortKey === 'active'} dir={sortDir} onClick={() => onSort('active')} title="Most recent OSS or Discovery activity">Last Active</SortHdr>
-        <SortHdr active={sortKey === 'usd'} dir={sortDir} onClick={() => onSort('usd')}>$/Day</SortHdr>
         <span />
       </Box>
 
-      <Box
-        sx={{
-          display: ['flex', null, 'none'],
-          alignItems: 'center',
-          gap: '4px',
-          px: 2,
-          py: '6px',
-          borderBottom: '1px solid',
-          borderColor: 'border.muted',
-          bg: 'canvas.subtle',
-          overflowX: 'auto',
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-          '&::-webkit-scrollbar': { display: 'none' },
-        }}
-      >
-        <Text sx={{ ...LABEL, flexShrink: 0, pr: 1 }}>Sort</Text>
-        {([
-          ['score',    'Score'],
-          ['cred',     'Cred'],
-          ['movement', 'Move'],
-          ['active',   'Active'],
-          ['repos',    'Repos'],
-          ['usd',      '$/Day'],
-        ] as [SortKey, string][]).map(([k, label]) => (
-          <Pill key={k} active={sortKey === k} onClick={() => onSort(k)}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-              {label}
-              {sortKey === k && (sortDir === 'desc' ? <TriangleDownIcon size={10} /> : <TriangleUpIcon size={10} />)}
-            </span>
-          </Pill>
-        ))}
-      </Box>
 
       {loading ? (
         <Box sx={{ p: 2 }}>
