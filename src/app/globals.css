@@ -380,6 +380,160 @@ select {
   color: var(--fg-default);
 }
 
+/* Stable dashboard micro-card classes. These avoid generating hundreds of
+ * Primer Box classes for repeated, frequently refreshed PR cards. */
+.best-work-mini-link {
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+
+.best-work-mini-card {
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  padding: 12px;
+  min-width: 0;
+  height: 100%;
+  min-height: 132px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-content: space-between;
+  transition: border-color 80ms ease, transform 80ms ease;
+}
+
+.best-work-mini-card:hover {
+  border-color: var(--border-default);
+  transform: translateY(-1px);
+}
+
+.best-work-mini-top,
+.best-work-mini-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.best-work-mini-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.best-work-mini-repo-avatar,
+.best-work-mini-author-avatar {
+  width: 14px;
+  height: 14px;
+  background: var(--bg-inset);
+  flex-shrink: 0;
+}
+
+.best-work-mini-repo-avatar {
+  border-radius: 3px;
+}
+
+.best-work-mini-author-avatar {
+  border-radius: 999px;
+}
+
+.best-work-mini-repo-name,
+.best-work-mini-author-name {
+  color: var(--fg-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.best-work-mini-repo-name {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+.best-work-mini-title {
+  display: block;
+  color: var(--fg-default);
+  font-weight: 700;
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.best-work-mini-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.gt-metric-chip,
+.gt-role-badge {
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+.gt-metric-chip {
+  padding: 0 4px;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-weight: 400;
+}
+
+.gt-metric-chip[title] {
+  cursor: help;
+}
+
+.gt-metric-chip--accent,
+.gt-role-badge--maintainer {
+  border-color: var(--accent-glow);
+  background: var(--accent-subtle);
+  color: var(--accent-fg);
+}
+
+.gt-metric-chip--success {
+  border-color: rgba(76, 183, 130, 0.45);
+  background: var(--success-subtle);
+  color: var(--success-fg);
+}
+
+.gt-role-badge {
+  padding: 1px 4px;
+}
+
+.gt-role-badge--contributor {
+  border-color: var(--border-default);
+  background: var(--neutral-subtle);
+  color: var(--fg-muted);
+}
+
+.gt-line-changes {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.gt-line-changes-add {
+  color: var(--success-fg);
+}
+
+.gt-line-changes-del {
+  color: var(--danger-fg);
+}
+
 /* ── Animations ──────────────────────────────────────────────────────────── */
 
 @keyframes gtSpin {

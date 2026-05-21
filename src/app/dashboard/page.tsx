@@ -2241,29 +2241,29 @@ function BestWorkMiniPr({ row }: { row: BestWorkPull }) {
   const pr = row.pr;
   const author = pr.author_login ?? 'unknown';
   return (
-    <Link href={pullHref(pr)} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
-      <Box sx={{ border: '1px solid', borderColor: 'border.muted', borderRadius: 2, px: 3, py: 3, minWidth: 0, height: '100%', minHeight: 132, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '12px', alignContent: 'space-between', transition: 'border-color 80ms ease, transform 80ms ease', '&:hover': { borderColor: 'border.default', transform: 'translateY(-1px)' } }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-            <Box as="img" src={`https://github.com/${pr.repo_full_name.split('/')[0]}.png?size=40`} alt="" sx={{ width: 14, height: 14, borderRadius: 1, bg: 'canvas.inset', flexShrink: 0 }} />
-            <Text sx={{ color: 'fg.muted', fontFamily: 'mono', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pr.repo_full_name}</Text>
-          </Box>
+    <Link href={pullHref(pr)} target="_blank" rel="noreferrer" className="best-work-mini-link">
+      <article className="best-work-mini-card">
+        <div className="best-work-mini-top">
+          <span className="best-work-mini-identity">
+            <img src={`https://github.com/${pr.repo_full_name.split('/')[0]}.png?size=40`} alt="" className="best-work-mini-repo-avatar" />
+            <span className="best-work-mini-repo-name">{pr.repo_full_name}</span>
+          </span>
           <MetricChip tone="success" title="Modeled subnet emission share (reward) represented by this PR.">{fmtPct(row.reward)}</MetricChip>
-        </Box>
-        <Text sx={{ display: 'block', fontWeight: 700, fontSize: 0, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{pr.number} {pr.title}</Text>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minWidth: 0 }}>
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-            <Box as="img" src={`https://github.com/${author}.png?size=40`} alt="" sx={{ width: 14, height: 14, borderRadius: 99, bg: 'canvas.inset', flexShrink: 0 }} />
-            <Text sx={{ color: 'fg.muted', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{author}</Text>
+        </div>
+        <span className="best-work-mini-title">#{pr.number} {pr.title}</span>
+        <div className="best-work-mini-bottom">
+          <span className="best-work-mini-identity">
+            <img src={`https://github.com/${author}.png?size=40`} alt="" className="best-work-mini-author-avatar" />
+            <span className="best-work-mini-author-name">{author}</span>
             <RoleBadge association={pr.author_association} />
-          </Box>
+          </span>
           <LineChanges additions={pr.additions} deletions={pr.deletions} />
-        </Box>
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
+        </div>
+        <div className="best-work-mini-metrics">
           <MetricChip tone="accent" title="Gittensor validated score for this PR.">score {fmtNumber(num(pr.score))}</MetricChip>
           <MetricChip title="This PR's score divided by total scored PR points in the same repo.">share {fmtPct(row.repoShare)}</MetricChip>
-        </Box>
-      </Box>
+        </div>
+      </article>
     </Link>
   );
 }
@@ -2327,15 +2327,10 @@ function FormulaTerm({ label, value, tone = 'muted' }: { label: string; value: s
 }
 
 function MetricChip({ children, tone = 'muted', title }: { children: React.ReactNode; tone?: 'muted' | 'accent' | 'success'; title?: string }) {
-  const palette = tone === 'accent'
-    ? { border: 'accent.muted', bg: 'accent.subtle', color: 'accent.fg' }
-    : tone === 'success'
-      ? { border: 'success.muted', bg: 'success.subtle', color: 'success.fg' }
-      : { border: 'border.muted', bg: 'canvas.subtle', color: 'fg.muted' };
   return (
-    <Box title={title} as="span" sx={{ border: '1px solid', borderColor: palette.border, borderRadius: 2, bg: palette.bg, color: palette.color, cursor: title ? 'help' : 'inherit', fontFamily: 'mono', fontSize: 0, px: 1, lineHeight: '15px', whiteSpace: 'nowrap' }}>
+    <span title={title} className={`gt-metric-chip gt-metric-chip--${tone}`}>
       {children}
-    </Box>
+    </span>
   );
 }
 
@@ -3285,24 +3280,17 @@ function stageStatus(stage: PipelineColumn['key']): { label: string; bg: string;
 
 function RoleBadge({ association }: { association: string | null | undefined }) {
   const role = roleForAssociation(association);
-  const badge = role === 'maintainer'
-    ? { bg: 'accent.subtle', border: 'accent.muted', color: 'accent.fg' }
-    : { bg: 'neutral.subtle', border: 'border.default', color: 'fg.muted' };
-  return (
-    <Box as="span" sx={{ border: '1px solid', borderColor: badge.border, borderRadius: 2, bg: badge.bg, color: badge.color, fontSize: 0, fontWeight: 700, px: 1, py: '1px', lineHeight: '16px', whiteSpace: 'nowrap' }}>
-      {role}
-    </Box>
-  );
+  return <span className={`gt-role-badge gt-role-badge--${role}`}>{role}</span>;
 }
 
 function LineChanges({ additions, deletions }: { additions?: number | null; deletions?: number | null }) {
   const add = typeof additions === 'number' && Number.isFinite(additions) ? '+' + fmtCount(additions) : '+?';
   const del = typeof deletions === 'number' && Number.isFinite(deletions) ? '-' + fmtCount(deletions) : '-?';
   return (
-    <Box as="span" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, fontFamily: 'mono', fontSize: 0, whiteSpace: 'nowrap' }}>
-      <Text sx={{ color: 'success.fg' }}>{add}</Text>
-      <Text sx={{ color: 'danger.fg' }}>{del}</Text>
-    </Box>
+    <span className="gt-line-changes">
+      <span className="gt-line-changes-add">{add}</span>
+      <span className="gt-line-changes-del">{del}</span>
+    </span>
   );
 }
 
