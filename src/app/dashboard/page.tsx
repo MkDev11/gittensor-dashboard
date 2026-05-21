@@ -1669,7 +1669,7 @@ function StatSparkline({ points, tone, duration, unit }: { points: number[]; ton
   const hitWidth = Math.max(12, innerW / Math.max(1, n));
 
   return (
-    <Box ref={containerRef} onMouseLeave={() => setHoveredIndex(null)} sx={{ position: 'relative', width: '100%', height: '100%', zIndex: hoveredIndex === null ? 'auto' : 20 }}>
+    <Box ref={containerRef} onMouseLeave={() => setHoveredIndex(null)} style={{ zIndex: hoveredIndex === null ? 'auto' : 20 }} sx={{ position: 'relative', width: '100%', height: '100%' }}>
       <style>{`
         @keyframes stat-spark-draw { from { stroke-dashoffset: 1; opacity: 0.22; } to { stroke-dashoffset: 0; opacity: 1; } }
         @keyframes stat-spark-pop { from { transform: scale(0.65); opacity: 0.12; } to { transform: scale(1); opacity: 1; } }
@@ -1736,11 +1736,10 @@ function StatSparkline({ points, tone, duration, unit }: { points: number[]; ton
       </svg>
       {hoveredIndex !== null && hasActivity && (
         <Box
+          style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}
           sx={{
             position: 'absolute',
-            left: `${tooltipLeft}%`,
             bottom: 'calc(100% + 6px)',
-            transform: tooltipTransform,
             minWidth: 132,
             backgroundColor: 'color-mix(in srgb, var(--canvas-overlay, var(--bgColor-overlay)) 84%, transparent)',
             backdropFilter: 'blur(8px)',
@@ -1759,7 +1758,7 @@ function StatSparkline({ points, tone, duration, unit }: { points: number[]; ton
             {bucketRangeLabel(hoveredIndex, duration)}
           </Text>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: 99, bg: color, flexShrink: 0 }} />
+            <Box style={{ backgroundColor: color }} sx={{ width: 8, height: 8, borderRadius: 99, flexShrink: 0 }} />
             <Text sx={{ color: 'fg.muted', flex: 1, fontSize: 0, whiteSpace: 'nowrap' }}>{unit}</Text>
             <Text sx={{ color: 'fg.default', fontWeight: 700, fontFamily: 'mono', fontSize: 0 }}>{formatValue(hoveredValue)}</Text>
           </Box>
@@ -2344,16 +2343,15 @@ function InlineProgress({ pct, segments, color = 'accent.emphasis' }: { pct: num
   return (
     <Box sx={{ position: 'relative', height: 6, borderRadius: 999, bg: 'canvas.inset', overflow: 'visible', minWidth: 44 }}>
       {segments && segments.length > 0 ? (
-        <Box sx={{ position: 'absolute', inset: 0, width: `${Math.max(4, Math.min(100, pct * 100))}%`, display: 'flex', overflow: 'visible', borderRadius: 999 }}>
+        <Box style={{ width: `${Math.max(4, Math.min(100, pct * 100))}%` }} sx={{ position: 'absolute', inset: 0, display: 'flex', overflow: 'visible', borderRadius: 999 }}>
           {segments.map((segment) => (
             <Box
               key={segment.key}
               title={segment.tooltip}
+              style={{ width: `${Math.max(4, Math.min(100, segment.pct * 100))}%`, backgroundColor: segment.color }}
               sx={{
                 position: 'relative',
-                width: `${Math.max(4, Math.min(100, segment.pct * 100))}%`,
                 minWidth: 4,
-                bg: segment.color,
                 '&:first-of-type': { borderTopLeftRadius: 999, borderBottomLeftRadius: 999 },
                 '&:last-of-type': { borderTopRightRadius: 999, borderBottomRightRadius: 999 },
                 '&:hover': { filter: 'brightness(1.22)' },
@@ -2362,7 +2360,7 @@ function InlineProgress({ pct, segments, color = 'accent.emphasis' }: { pct: num
           ))}
         </Box>
       ) : (
-        <Box sx={{ position: 'absolute', inset: 0, width: `${Math.max(4, Math.min(100, pct * 100))}%`, bg: color, borderRadius: 999 }} />
+        <Box style={{ width: `${Math.max(4, Math.min(100, pct * 100))}%`, backgroundColor: color }} sx={{ position: 'absolute', inset: 0, borderRadius: 999 }} />
       )}
     </Box>
   );
@@ -2558,7 +2556,7 @@ function PipelineColumnBars({ pulls, stage, label, color, duration, selectedInde
         : 'translateX(-50%)';
 
   return (
-    <Box onMouseLeave={() => setHoveredIndex(null)} sx={{ position: 'relative', mt: 2, height: 46, bg: 'transparent', px: 2, py: 1, overflow: 'visible', cursor: 'default', zIndex: hoveredIndex === null ? 1 : 30 }}>
+    <Box onMouseLeave={() => setHoveredIndex(null)} style={{ zIndex: hoveredIndex === null ? 1 : 30 }} sx={{ position: 'relative', mt: 2, height: 46, bg: 'transparent', px: 2, py: 1, overflow: 'visible', cursor: 'default' }}>
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="42" preserveAspectRatio="none" role="img" aria-label={`${label} pull request activity`}>
         {values.map((value, index) => {
           const x = index * (barWidth + gap);
@@ -2603,11 +2601,10 @@ function PipelineColumnBars({ pulls, stage, label, color, duration, selectedInde
       </svg>
       {hoveredIndex !== null && (
         <Box
+          style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}
           sx={{
             position: 'absolute',
-            left: `${tooltipLeft}%`,
             bottom: 'calc(100% + 8px)',
-            transform: tooltipTransform,
             minWidth: 148,
             bg: 'canvas.overlay',
             backgroundColor: 'color-mix(in srgb, var(--canvas-overlay, var(--bgColor-overlay)) 82%, transparent)',
@@ -2626,7 +2623,7 @@ function PipelineColumnBars({ pulls, stage, label, color, duration, selectedInde
             {bucketRangeLabel(hoveredIndex, duration)}
           </Text>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: 99, bg: color, flexShrink: 0 }} />
+            <Box style={{ backgroundColor: color }} sx={{ width: 8, height: 8, borderRadius: 99, flexShrink: 0 }} />
             <Text sx={{ color: 'fg.muted', flex: 1, fontSize: 0, whiteSpace: 'nowrap' }}>{label} PRs</Text>
             <Text sx={{ color: 'fg.default', fontWeight: 700, fontFamily: 'mono', fontSize: 0 }}>{fmtCount(hoveredValue)}</Text>
           </Box>
@@ -2659,7 +2656,7 @@ function IssueColumnTrend({ issues, stage, label, color, duration, selectedIndex
         : 'translateX(-50%)';
 
   return (
-    <Box onMouseLeave={() => setHoveredIndex(null)} sx={{ position: 'relative', mt: 2, height: 40, bg: 'transparent', px: 2, py: 1, overflow: 'visible', cursor: 'default', zIndex: hoveredIndex === null ? 1 : 30 }}>
+    <Box onMouseLeave={() => setHoveredIndex(null)} style={{ zIndex: hoveredIndex === null ? 1 : 30 }} sx={{ position: 'relative', mt: 2, height: 40, bg: 'transparent', px: 2, py: 1, overflow: 'visible', cursor: 'default' }}>
       <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="34" preserveAspectRatio="none" role="img" aria-label={`${label} issue activity`}>
         {values.map((value, index) => {
           const x = index * (cellWidth + gap);
@@ -2703,11 +2700,10 @@ function IssueColumnTrend({ issues, stage, label, color, duration, selectedIndex
       </svg>
       {hoveredIndex !== null && (
         <Box
+          style={{ left: `${tooltipLeft}%`, transform: tooltipTransform }}
           sx={{
             position: 'absolute',
-            left: `${tooltipLeft}%`,
             bottom: 'calc(100% + 8px)',
-            transform: tooltipTransform,
             minWidth: 158,
             bg: 'canvas.overlay',
             backgroundColor: 'color-mix(in srgb, var(--canvas-overlay, var(--bgColor-overlay)) 84%, transparent)',
@@ -2726,7 +2722,7 @@ function IssueColumnTrend({ issues, stage, label, color, duration, selectedIndex
             {bucketRangeLabel(hoveredIndex, duration)}
           </Text>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Box sx={{ width: 8, height: 8, borderRadius: 99, bg: color, flexShrink: 0 }} />
+            <Box style={{ backgroundColor: color }} sx={{ width: 8, height: 8, borderRadius: 99, flexShrink: 0 }} />
             <Text sx={{ color: 'fg.muted', flex: 1, fontSize: 0, whiteSpace: 'nowrap' }}>{label} issues</Text>
             <Text sx={{ color: 'fg.default', fontWeight: 700, fontFamily: 'mono', fontSize: 0 }}>{fmtCount(hoveredValue)}</Text>
           </Box>
