@@ -199,13 +199,39 @@ export interface Miner {
   totalOpenPrs?: number;
   totalClosedPrs?: number;
   totalMergedPrs?: number;
+  // Server-enriched: merged PRs with tokenScore >= 5.
+  totalValidMergedPrs?: number;
+  // Server-enriched ISO timestamps.
+  lastOssActivityAt?: string | null;
+  lastDiscoveryActivityAt?: string | null;
   totalPrs?: number;
   totalAdditions?: number;
   totalDeletions?: number;
   uniqueReposCount?: number;
+  // Per-track eligible repo counts. Server-side enriched from the per-miner
+  // `repositories[]` array so the leaderboard matches the detail page.
+  eligibleRepoCount?: number;
+  issueEligibleRepoCount?: number;
   alphaPerDay?: number;
   taoPerDay?: number;
   usdPerDay?: number;
+  // Upstream timestamp from the validator's miner record. Equals `evaluatedAt`
+  // and is reset whenever the validator re-indexes the row — NOT a reliable
+  // proxy for when the UID was actually registered on the network.
+  createdAt?: string;
+  // Server-enriched: PR-count buckets for the validator's PR_LOOKBACK_DAYS
+  // window, oldest→newest. Length equals PR_LOOKBACK_DAYS.
+  dailyLookback?: number[];
+  // Server-enriched: repos this miner contributes to most (top 3 by PR count).
+  topRepos?: MinerTopRepo[];
+  // Server-enriched: rank held at the start of the previous UTC day.
+  // Null until the server has observed at least one daily rollover.
+  previousRank?: number | null;
+}
+
+export interface MinerTopRepo {
+  name: string;
+  count: number;
 }
 
 export interface AuthorCredibility {

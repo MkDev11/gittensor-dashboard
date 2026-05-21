@@ -33,8 +33,11 @@ export interface UsdFormatOptions {
    *
    * 'price': ≥1 → 2 digits, <1 → 4 digits.
    * Use for market prices that always show cents.
+   *
+   * 'compact': ≥1 → 2 digits but trims a trailing `.00` so whole
+   * dollars read cleanly ($212, $79.06). <1 → 4 digits like 'price'.
    */
-  style?: 'adaptive' | 'price';
+  style?: 'adaptive' | 'price' | 'compact';
   /** Returned for 0 or non-finite values. Default '$0'. */
   fallback?: string;
 }
@@ -45,6 +48,11 @@ export function formatUsd(n: number, opts: UsdFormatOptions = {}): string {
   const abs = Math.abs(n);
   if (style === 'price') {
     return abs >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(4)}`;
+  }
+  if (style === 'compact') {
+    // toFixed(2) for everything, then strip trailing zeros:
+    // 97.30 → 97.3, 0.9857 → 0.99, 0.40 → 0.4.
+    return `$${n.toFixed(2).replace(/\.?0+$/, '')}`;
   }
   if (abs >= 100) return `$${n.toFixed(0)}`;
   if (abs >= 1) return `$${n.toFixed(2)}`;

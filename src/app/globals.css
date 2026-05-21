@@ -37,6 +37,15 @@
   --done-fg: #a584ff;
   --done-emphasis: #8866ee;
 
+  /* Medal accents for the miners podium — silver (#2) and bronze (#3).
+   * Gold (#1) reuses --attention-*. */
+  --silver-fg: #d6dae0;
+  --silver-emphasis: #c0c4cc;
+  --silver-subtle: rgba(192, 196, 204, 0.18);
+  --bronze-fg: #e29456;
+  --bronze-emphasis: #cd7f32;
+  --bronze-subtle: rgba(205, 127, 50, 0.18);
+
   /* Menu / list hover surface — Linear uses a very subtle tint, no full bg fill */
   --menu-item-hover-bg: rgba(94, 106, 210, 0.12);
   --menu-item-hover-fg: #f7f8f8;
@@ -124,6 +133,14 @@
   --danger-emphasis: #a72424;
   --done-fg: #5635c3;
   --done-emphasis: #5635c3;
+
+  /* Medal accents (light) — darker so they stay legible on white. */
+  --silver-fg: #6b7280;
+  --silver-emphasis: #6b7280;
+  --silver-subtle: rgba(107, 114, 128, 0.12);
+  --bronze-fg: #92532b;
+  --bronze-emphasis: #92532b;
+  --bronze-subtle: rgba(146, 83, 43, 0.12);
 
   --menu-item-hover-bg: rgba(94, 106, 210, 0.08);
   --menu-item-hover-fg: #161617;
