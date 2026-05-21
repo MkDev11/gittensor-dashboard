@@ -10,7 +10,7 @@ const MINERS_URL = 'https://api.gittensor.io/miners';
 const REPOS_URL = 'https://api.gittensor.io/dash/repos';
 const TTL_MS = 30_000;
 const TOP_MINERS_LIMIT = 5;
-const OSS_WINDOW_DAYS = 35;
+const OSS_WINDOW_DAYS = 30;
 const OSS_WINDOW_MS = OSS_WINDOW_DAYS * 86_400_000;
 
 interface UpstreamPr {
@@ -59,17 +59,19 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 function localContributorsForRepo(fullName: string): RepoMiner[] {
   try {
+    const cutoffIso = new Date(Date.now() - OSS_WINDOW_MS).toISOString();
     const rows = getReadDb()
       .prepare(
         `SELECT author_login as author, COUNT(*) as prCount,
                 SUM(CASE WHEN merged = 1 THEN 1 ELSE 0 END) as mergedCount
          FROM pulls
          WHERE repo_full_name = ? COLLATE NOCASE AND author_login IS NOT NULL AND author_login != ''
+           AND COALESCE(NULLIF(merged_at, ''), created_at) >= ?
          GROUP BY author_login
          ORDER BY mergedCount DESC, prCount DESC
          LIMIT ?`,
       )
-      .all(fullName, TOP_MINERS_LIMIT) as Array<{ author: string; prCount: number; mergedCount: number }>;
+      .all(fullName, cutoffIso, TOP_MINERS_LIMIT) as Array<{ author: string; prCount: number; mergedCount: number }>;
     return rows.map((r) => ({
       githubId: '',
       githubUsername: r.author,
@@ -305,14 +307,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       .sort((a, b) => b.issueCount - a.issueCount || b.candidateIssueCount - a.candidateIssueCount || b.solvedIssueCount - a.solvedIssueCount)
       .slice(0, TOP_MINERS_LIMIT);
 
-    return NextResponse.json({
+    const body: RepoMinersResponse = {
       fullName,
       issueDiscoveryEnabled,
       ossContributions,
       ossContributionsTotalScore,
       issueDiscoveries,
       fetched_at: shared.fetched_at,
-    });
+    };
+    return NextResponse.json(body);
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 502 });
   }

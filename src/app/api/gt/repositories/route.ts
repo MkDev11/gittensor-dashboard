@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import type { GtRepo, GtPrSummary, GtReposResponse } from '@/types/entities';
+import type { GtRepo, GtPrSummary } from '@/types/entities';
 import { getReadDb } from '@/lib/db';
 import { getLiveReposAsyncServer } from '@/lib/repos-server';
 import { withRotation } from '@/lib/github';
@@ -20,11 +20,16 @@ interface UpstreamRepoConfig {
   weight?: string | number;
   emission_share?: string | number;
   maintainerCut?: string | number;
+  maintainer_cut?: string | number;
   issueDiscoveryShare?: string | number;
+  issue_discovery_share?: string | number;
   trustedLabelPipeline?: boolean;
+  trusted_label_pipeline?: boolean;
   labelMultipliers?: Record<string, number> | null;
+  label_multipliers?: Record<string, number> | null;
   inactiveAt?: string | null;
   inactive_at?: string | null;
+  eligibilityMode?: boolean;
   eligibility_mode?: boolean;
 }
 
@@ -41,6 +46,7 @@ interface UpstreamRepo {
   emissionShare?: string | number;
   inactiveAt?: string | null;
   inactive_at?: string | null;
+  eligibilityMode?: boolean;
   eligibility_mode?: boolean;
 }
 
@@ -103,13 +109,27 @@ function nullableNum(v: unknown): number | null {
 }
 
 function repoWeight(repo: UpstreamRepo): number {
-  return num(repo.config?.emission_share ?? repo.config?.emissionShare ?? repo.config?.weight ?? repo.emission_share ?? repo.emissionShare ?? repo.weight);
+  return num(repo.config?.emissionShare ?? repo.config?.emission_share ?? repo.config?.weight ?? repo.emissionShare ?? repo.emission_share ?? repo.weight);
 }
 
 function repoInactiveAt(repo: UpstreamRepo): string | null {
   const inactiveAt = repo.config?.inactive_at ?? repo.config?.inactiveAt ?? repo.inactive_at ?? repo.inactiveAt ?? null;
-  if (repo.config?.eligibility_mode === false || repo.eligibility_mode === false) return inactiveAt ?? 'ineligible';
+  if (
+    repo.config?.eligibilityMode === false ||
+    repo.config?.eligibility_mode === false ||
+    repo.eligibilityMode === false ||
+    repo.eligibility_mode === false
+  ) return inactiveAt ?? 'ineligible';
   return inactiveAt;
+}
+
+function repoConfigNumber(repo: UpstreamRepo, camel: keyof UpstreamRepoConfig, snake: keyof UpstreamRepoConfig): number | null {
+  return nullableNum(repo.config?.[camel] ?? repo.config?.[snake]);
+}
+
+function repoConfigBoolean(repo: UpstreamRepo, camel: keyof UpstreamRepoConfig, snake: keyof UpstreamRepoConfig): boolean | null {
+  const value = repo.config?.[camel] ?? repo.config?.[snake];
+  return typeof value === 'boolean' ? value : null;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -123,21 +143,53 @@ interface CountRow {
   cnt: number;
 }
 
-function countOpenByRepo(table: 'pulls' | 'issues'): Map<string, number> {
+interface OpenPrPressure {
+  total: number;
+  maxByAuthor: number;
+  authorCount: number;
+}
+
+function countOpenIssuesByRepo(): Map<string, number> {
   // Local DB may be empty (e.g. tests, fresh checkout) — swallow and return
   // empty so the route degrades to zero counts rather than 500ing.
   try {
-    const sql =
-      table === 'pulls'
-        ? `SELECT repo_full_name as repo, COUNT(*) as cnt
-           FROM pulls WHERE state = 'open' AND draft = 0
-           GROUP BY repo_full_name`
-        : `SELECT repo_full_name as repo, COUNT(*) as cnt
-           FROM issues WHERE state = 'open'
-           GROUP BY repo_full_name`;
-    const rows = getReadDb().prepare(sql).all() as CountRow[];
+    const rows = getReadDb()
+      .prepare(
+        `SELECT repo_full_name as repo, COUNT(*) as cnt
+         FROM issues WHERE state = 'open'
+         GROUP BY repo_full_name`,
+      )
+      .all() as CountRow[];
     const m = new Map<string, number>();
     for (const r of rows) m.set(r.repo.toLowerCase(), r.cnt);
+    return m;
+  } catch {
+    return new Map();
+  }
+}
+
+function openPrPressureByRepo(): Map<string, OpenPrPressure> {
+  // Gittensor's excessive-open-PR rule is per miner within a repo. The UI
+  // therefore needs the busiest author's open count, not repo-wide average PRs.
+  try {
+    const rows = getReadDb()
+      .prepare(
+        `SELECT repo_full_name as repo,
+                COUNT(*) as cnt
+         FROM pulls
+         WHERE state = 'open' AND draft = 0
+         GROUP BY repo_full_name, COALESCE(NULLIF(author_login, ''), '(unknown)')`,
+      )
+      .all() as CountRow[];
+    const m = new Map<string, OpenPrPressure>();
+    for (const r of rows) {
+      const key = r.repo.toLowerCase();
+      const current = m.get(key) ?? { total: 0, maxByAuthor: 0, authorCount: 0 };
+      current.total += r.cnt;
+      current.maxByAuthor = Math.max(current.maxByAuthor, r.cnt);
+      current.authorCount += 1;
+      m.set(key, current);
+    }
     return m;
   } catch {
     return new Map();
@@ -214,8 +266,8 @@ async function refresh(): Promise<Cached> {
     fetchJson<UpstreamPr[]>(PRS_URL),
     getLiveReposAsyncServer(),
   ]);
-  const openPrByRepo = countOpenByRepo('pulls');
-  const openIssueByRepo = countOpenByRepo('issues');
+  const openPrPressure = openPrPressureByRepo();
+  const openIssueByRepo = countOpenIssuesByRepo();
   const dbLastPrByRepo = lastPrAtByRepo();
   const sn74ByRepo = new Map<string, (typeof sn74.repos)[number]>();
   for (const r of sn74.repos) sn74ByRepo.set(r.fullName.toLowerCase(), r);
@@ -351,6 +403,10 @@ async function refresh(): Promise<Cached> {
     const cfg = r.config ?? null;
     const lc = r.fullName.toLowerCase();
     const sn74Repo = sn74ByRepo.get(lc);
+    const issueDiscoveryShare = repoConfigNumber(r, 'issueDiscoveryShare', 'issue_discovery_share');
+    const maintainerCut = repoConfigNumber(r, 'maintainerCut', 'maintainer_cut');
+    const trustedLabelPipeline = repoConfigBoolean(r, 'trustedLabelPipeline', 'trusted_label_pipeline');
+    const openPrs = openPrPressure.get(lc);
     return {
       fullName: r.fullName,
       owner: r.owner,
@@ -372,24 +428,17 @@ async function refresh(): Promise<Cached> {
         const t = Math.max(dbT, aggT);
         return t > 0 ? new Date(t).toISOString() : null;
       })(),
-      openPrCount: openPrByRepo.get(lc) ?? 0,
+      openPrCount: openPrs?.total ?? 0,
+      openPrMaxByAuthor: openPrs?.maxByAuthor ?? 0,
+      openPrAuthorCount: openPrs?.authorCount ?? 0,
       openIssueCount: openIssueByRepo.get(lc) ?? 0,
       excessivePrPenaltyThreshold: sn74Repo?.excessivePrPenaltyThreshold ?? null,
       mergedPrSeries14d: seriesByRepo.get(lc) ?? new Array<number>(SERIES_DAYS).fill(0),
-      labelMultipliers: cfg?.labelMultipliers ?? sn74Repo?.labelMultipliers ?? null,
-      issueDiscoveryShare:
-        typeof cfg?.issueDiscoveryShare !== 'undefined'
-          ? num(cfg.issueDiscoveryShare)
-          : sn74Repo?.issueDiscoveryShare ?? null,
-      maintainerCut:
-        typeof cfg?.maintainerCut !== 'undefined'
-          ? num(cfg.maintainerCut)
-          : sn74Repo?.maintainerCut ?? null,
+      labelMultipliers: cfg?.labelMultipliers ?? cfg?.label_multipliers ?? sn74Repo?.labelMultipliers ?? null,
+      issueDiscoveryShare: issueDiscoveryShare ?? sn74Repo?.issueDiscoveryShare ?? null,
+      maintainerCut: maintainerCut ?? sn74Repo?.maintainerCut ?? null,
       minCredibility: sn74Repo?.minCredibility ?? null,
-      trustedLabelPipeline:
-        typeof cfg?.trustedLabelPipeline === 'boolean'
-          ? cfg.trustedLabelPipeline
-          : sn74Repo?.trustedLabelPipeline ?? null,
+      trustedLabelPipeline: trustedLabelPipeline ?? sn74Repo?.trustedLabelPipeline ?? null,
       stars: starsByRepo.get(lc)?.stars ?? null,
     };
   });
@@ -472,7 +521,7 @@ async function refresh(): Promise<Cached> {
   return next;
 }
 
-function payload(c: Cached, source: 'live' | 'cache' | 'stale'): GtReposResponse {
+function payload(c: Cached, source: 'live' | 'cache' | 'stale') {
   // "Active" = not deprioritized AND currently earning. Zero-weight non-inactive
   // repos are accepted by SN74 but don't produce rewards, so they fall outside
   // the earning subset users expect from this count.

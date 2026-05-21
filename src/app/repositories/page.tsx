@@ -62,12 +62,12 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
 ];
 
 function capacityUtilization(r: GtRepo): number {
-  // The threshold is per-author (one contributor can hold up to N open PRs
-  // before the penalty applies), so the meaningful repo-level signal is
-  // avg-open-PRs-per-known-contributor, NOT the raw openPrCount.
+  // Gittensor's open-PR pressure is per miner within a repo. Use the busiest
+  // author's open PR count against the base threshold instead of averaging
+  // across contributors, which can hide a single overloaded author.
   const thr = r.excessivePrPenaltyThreshold ?? 0;
-  if (thr <= 0 || r.contributorCount <= 0) return 0;
-  return r.openPrCount / r.contributorCount / thr;
+  if (thr <= 0) return 0;
+  return r.openPrMaxByAuthor / thr;
 }
 
 function avatarUrl(owner: string): string {
@@ -149,13 +149,12 @@ export default function RepositoriesPage() {
     if (!data?.repos) return empty;
     const active = data.repos.filter((r) => r.isActive);
 
-    // Threshold is per-author, so utilization must divide by contributors.
-    // Repos without a configured threshold are skipped — headroom unknowable.
+    // Threshold is per miner. Repos without a configured threshold are skipped
+    // because headroom is unknowable.
     const utilization = (r: GtRepo): number | null => {
       const thr = r.excessivePrPenaltyThreshold;
       if (thr == null || thr <= 0) return null;
-      const contributors = Math.max(r.contributorCount, 1);
-      return r.openPrCount / contributors / thr;
+      return r.openPrMaxByAuthor / thr;
     };
     const underutilized = active
       .map((r) => ({ r, u: utilization(r) }))
@@ -456,14 +455,12 @@ export default function RepositoriesPage() {
           >
             <OpportunityCard
               title="Underutilized capacity"
-              hint="High weight, room for more PRs"
+              hint="High weight, below base per-author PR pressure"
               accent="success"
               rows={underutilized}
               empty="No repos with open capacity right now."
               renderRight={(r) => {
                 const thr = r.excessivePrPenaltyThreshold ?? 0;
-                const contributors = Math.max(r.contributorCount, 1);
-                const avg = r.openPrCount / contributors;
                 return (
                   <Box sx={{ textAlign: 'right' }}>
                     <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default' }}>
@@ -471,9 +468,9 @@ export default function RepositoriesPage() {
                     </Text>
                     <Text
                       sx={{ display: 'block', fontSize: 0, color: 'fg.muted' }}
-                      title={`${r.openPrCount} open PRs across ${r.contributorCount} contributors`}
+                      title={`${r.openPrCount} open PRs across ${r.openPrAuthorCount} author${r.openPrAuthorCount === 1 ? '' : 's'}; busiest author has ${r.openPrMaxByAuthor}`}
                     >
-                      {avg.toFixed(1)}/{thr > 0 ? thr : '∞'} per author
+                      max {r.openPrMaxByAuthor}/{thr > 0 ? thr : '∞'}
                     </Text>
                   </Box>
                 );
@@ -1297,12 +1294,13 @@ function RepoCard({
         </RepoCell>
         <RepoCell
           label="Capacity"
-          hint="Open-PR pressure: avg open PRs per known contributor vs. the per-author excessive-PR penalty threshold. Red ≥ 100% — penalty applies."
+          hint="Open-PR pressure: busiest author vs. the base per-author excessive-PR threshold. The validator can raise a miner's threshold with token score."
         >
           <CapacityGauge
             open={r.openPrCount}
             threshold={r.excessivePrPenaltyThreshold}
-            contributors={r.contributorCount}
+            maxByAuthor={r.openPrMaxByAuthor}
+            authorCount={r.openPrAuthorCount}
           />
         </RepoCell>
         <RepoCell
@@ -1493,7 +1491,7 @@ function RepoTable({
               current={sortKey}
               dir={sortDir}
               onSort={onSort}
-              hint="Open-PR pressure: avg open PRs per known contributor vs. the per-author excessive-PR penalty threshold. Red ≥ 100% — penalty applies."
+              hint="Open-PR pressure: busiest author vs. the base per-author excessive-PR threshold. The validator can raise a miner's threshold with token score."
             >
               Capacity
             </Th>
@@ -1668,7 +1666,8 @@ function RepoTable({
                     <CapacityGauge
                       open={r.openPrCount}
                       threshold={r.excessivePrPenaltyThreshold}
-                      contributors={r.contributorCount}
+                      maxByAuthor={r.openPrMaxByAuthor}
+                      authorCount={r.openPrAuthorCount}
                     />
                   </Box>
                   <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
@@ -1890,11 +1889,13 @@ function Sparkline({
 function CapacityGauge({
   open,
   threshold,
-  contributors,
+  maxByAuthor,
+  authorCount,
 }: {
   open: number;
   threshold: number | null;
-  contributors: number;
+  maxByAuthor: number;
+  authorCount: number;
 }) {
   if (threshold == null || threshold <= 0) {
     return (
@@ -1903,33 +1904,19 @@ function CapacityGauge({
       </Box>
     );
   }
-  if (contributors <= 0) {
-    // No merged contributors yet — comparing total openPrCount against a
-    // per-author threshold is meaningless. Render an em-dash with an
-    // explanatory tooltip rather than a misleading full-red bar.
-    return (
-      <Box
-        sx={{ color: 'fg.muted', fontSize: 0 }}
-        title={`${open} open PR${open === 1 ? '' : 's'}, no merged contributors yet — capacity ratio not meaningful`}
-      >
-        —
-      </Box>
-    );
-  }
-  const avg = open / contributors;
-  const pct = Math.min(100, (avg / threshold) * 100);
-  // 0–49% green, 50–80% amber, >80% red.
-  const tone = pct > 80 ? 'danger' : pct >= 50 ? 'attention' : 'success';
+  const pct = Math.min(100, (maxByAuthor / threshold) * 100);
+  // Over the base threshold is red; near the base threshold is amber.
+  const tone = maxByAuthor > threshold ? 'danger' : pct >= 80 ? 'attention' : 'success';
   return (
     <Box
       sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'stretch', gap: '3px', minWidth: 80 }}
-      title={`${open} open PR${open === 1 ? '' : 's'} across ${contributors} contributor${contributors === 1 ? '' : 's'} — avg ${avg.toFixed(2)} / ${threshold} per-author limit`}
+      title={`Busiest author has ${maxByAuthor} open PR${maxByAuthor === 1 ? '' : 's'} vs. the base ${threshold} per-author threshold; ${open} total open PR${open === 1 ? '' : 's'} across ${authorCount} author${authorCount === 1 ? '' : 's'}. High-token miners may have a higher validator threshold.`}
     >
       <Box sx={{ width: '100%', height: 6, bg: 'canvas.inset', borderRadius: 999, overflow: 'hidden' }}>
         <Box sx={{ height: '100%', bg: `${tone}.emphasis` }} style={{ width: `${pct}%` }} />
       </Box>
       <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontSize: 0, color: `${tone}.fg` }}>
-        {avg.toFixed(1)} / {threshold}
+        {maxByAuthor} / {threshold}
       </Text>
     </Box>
   );

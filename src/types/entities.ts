@@ -74,6 +74,10 @@ export interface GtRepo {
   lastPrAt: string | null;
   /** Local DB count of pulls where state='open' and draft=0. */
   openPrCount: number;
+  /** Highest open, non-draft PR count held by a single author in this repo. */
+  openPrMaxByAuthor: number;
+  /** Number of authors/groups represented in the open, non-draft PR count. */
+  openPrAuthorCount: number;
   /** Local DB count of issues where state='open'. */
   openIssueCount: number;
   /** Excessive-PR penalty threshold from SN74 policy. Null when unknown. */
