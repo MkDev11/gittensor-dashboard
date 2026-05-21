@@ -31,13 +31,15 @@ export async function register() {
     if (process.env.POLLER_ENABLED !== '0') {
       const { startPoller } = await import('@/lib/poller');
       startPoller();
-      setTimeout(async () => {
-        try {
-          const { runClosingBackfillSweep } = await import('@/lib/refresh');
-          await runClosingBackfillSweep();
-        } catch (err) {
-          console.warn('[instrumentation] closing-backfill sweep failed:', err);
-        }
+      setTimeout(() => {
+        void (async () => {
+          try {
+            const { runClosingBackfillSweep } = await import('@/lib/refresh');
+            await runClosingBackfillSweep();
+          } catch (err) {
+            console.warn('[instrumentation] closing-backfill sweep failed:', err);
+          }
+        })();
       }, 30_000).unref?.();
     } else {
       console.log('[instrumentation] poller disabled by POLLER_ENABLED=0');
