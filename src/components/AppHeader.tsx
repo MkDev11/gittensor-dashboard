@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 import { Box, Text } from '@primer/react';
 import {
   StackIcon,
-  RepoIcon,
   ChecklistIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
@@ -29,21 +28,25 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: ChecklistIcon },
-  { href: '/opportunities', label: 'Opportunities', icon: TelescopeIcon },
-  { href: '/', label: 'Explorer', icon: RepoIcon },
-  { href: '/repositories', label: 'Repositories', icon: StackIcon },
+  { href: '/explorer', label: 'Explorer', icon: TelescopeIcon },
   { href: '/miners', label: 'Miners', icon: PeopleIcon },
-  { href: '/my-work', label: 'My Work', icon: PersonIcon },
-  { href: '/bounties', label: 'Bounties', icon: IssueOpenedIcon },
+  { href: '/repositories', label: 'Repositories', icon: StackIcon },
   { href: '/issues', label: 'Issues', icon: IssueOpenedIcon },
   { href: '/pulls', label: 'Pull Requests', icon: GitPullRequestIcon },
   { href: '/my-prs', label: 'My PRs', icon: PersonIcon },
   { href: '/docs', label: 'Docs', icon: BookIcon },
 ];
 
-const mobilePrimaryHrefs = new Set(['/dashboard', '/opportunities', '/', '/my-work']);
-const mobilePrimaryItems = navItems.filter((item) => mobilePrimaryHrefs.has(item.href));
-const mobileOverflowItems = navItems.filter((item) => !mobilePrimaryHrefs.has(item.href));
+const mobilePrimaryHrefs = ['/dashboard', '/explorer', '/miners', '/repositories'];
+const mobileOverflowHrefs = ['/issues', '/pulls', '/my-prs', '/docs'];
+const mobilePrimaryHrefSet = new Set(mobilePrimaryHrefs);
+const mobilePrimaryItems = mobilePrimaryHrefs
+  .map((href) => navItems.find((item) => item.href === href))
+  .filter((item): item is NavItem => Boolean(item));
+const mobileOverflowItems = [
+  ...mobileOverflowHrefs.map((href) => navItems.find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item)),
+  ...navItems.filter((item) => !mobilePrimaryHrefSet.has(item.href) && !mobileOverflowHrefs.includes(item.href)),
+];
 
 // Routes that should render full-bleed without the nav header (pre-auth screens).
 const HIDE_HEADER_ROUTES = new Set(['/sign-in']);
@@ -231,6 +234,7 @@ export default function AppHeader() {
         {mobilePrimaryItems.map((item) => (
           <MobileNavLink key={item.href} href={item.href} label={item.label} icon={item.icon} active={isActive(item.href)} />
         ))}
+        {mobileOverflowItems.length > 0 && (
         <Box sx={{ position: 'relative', minWidth: 0 }}>
           <button
             ref={moreButtonRef}
@@ -319,6 +323,7 @@ export default function AppHeader() {
             </div>
           )}
         </Box>
+        )}
       </Box>
     </div>
   );

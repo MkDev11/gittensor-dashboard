@@ -218,7 +218,7 @@ a {
    * gap (e.g. `top: calc(var(--header-height) + 16px)`). */
   --header-height: 0px;
   --bottom-nav-height: 0px;
-  --poller-status-height: 36px;
+  --poller-status-height: 28px;
 }
 
 body {
@@ -267,7 +267,7 @@ html[data-top-header] {
   html[data-top-header] {
     --header-height: 96px;
     --bottom-nav-height: calc(72px + env(safe-area-inset-bottom));
-    --poller-status-height: 48px;
+    --poller-status-height: 44px;
   }
 }
 

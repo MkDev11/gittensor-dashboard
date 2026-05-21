@@ -86,13 +86,16 @@ interface Miner {
   id?: string;
   uid?: number;
   githubUsername?: string;
-  githubId?: string;
+  github_username?: string;
+  githubId?: string | number;
+  github_id?: string | number;
   isEligible?: boolean;
   isIssueEligible?: boolean;
   failedReason?: string | null;
   credibility?: string | number;
   issueCredibility?: string | number;
   issueDiscoveryScore?: string | number;
+  issue_discovery_score?: string | number;
   totalScore?: string | number;
   totalMergedPrs?: number;
   totalOpenPrs?: number;
@@ -101,6 +104,42 @@ interface Miner {
   uniqueReposCount?: number;
   alphaPerDay?: number;
   usdPerDay?: number;
+  repoEvaluations?: Record<string, MinerRepoEvaluation> | MinerRepoEvaluation[];
+  repo_evaluations?: Record<string, MinerRepoEvaluation> | MinerRepoEvaluation[];
+  issueDiscoveryIssues?: MinerIssueDiscoveryIssue[];
+  issue_discovery_issues?: MinerIssueDiscoveryIssue[];
+}
+
+interface MinerRepoEvaluation {
+  repositoryFullName?: string;
+  repository_full_name?: string;
+  issueDiscoveryScore?: string | number;
+  issue_discovery_score?: string | number;
+}
+
+interface MinerIssueDiscoveryIssue {
+  number?: string | number;
+  issueNumber?: string | number;
+  issue_number?: string | number;
+  repositoryFullName?: string;
+  repository_full_name?: string;
+  repoFullName?: string;
+  repo_full_name?: string;
+  discoveryEarnedScore?: string | number;
+  discovery_earned_score?: string | number;
+}
+
+interface IssueDiscoveryIndex {
+  repoHasScores: Set<string>;
+  issueScores: Map<string, number>;
+  hasScoreDetail: boolean;
+  aggregateScore: number;
+}
+
+interface IssueDiscoveryState {
+  enabled: boolean;
+  eligible: boolean;
+  reason?: string;
 }
 
 interface MinersResp {
@@ -108,6 +147,25 @@ interface MinersResp {
   fetched_at?: number;
   source?: string;
   miners: Miner[];
+}
+
+interface RepoMaintainer {
+  github_id?: string;
+  githubId?: string;
+  login?: string;
+  association?: string;
+}
+
+interface RepoMaintainersResp {
+  count: number;
+  fetched_at?: number;
+  source?: string;
+  repos: Array<{
+    repo_full_name: string;
+    generated_at: string | null;
+    maintainers: RepoMaintainer[];
+    error?: string;
+  }>;
 }
 
 interface IssuesResp {
@@ -221,12 +279,90 @@ function durationLabel(date: Date, key: DurationKey): string {
   return date.toLocaleDateString(undefined, { weekday: 'short' });
 }
 
-function rewardParts(repo: RepoEntry): { pr: number; issue: number } {
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function rewardParts(repo: RepoEntry, hasRegisteredMaintainers = false): { pr: number; issue: number; maintainer: number } {
   const total = repo.emissionShare * OSS_SHARE;
-  const maintainer = total * Math.min(1, Math.max(0, repo.maintainerCut));
+  const maintainer = hasRegisteredMaintainers ? total * clamp01(repo.maintainerCut) : 0;
   const afterMaintainer = Math.max(0, total - maintainer);
   const issue = afterMaintainer * repo.issueDiscoveryShare;
-  return { pr: afterMaintainer - issue, issue };
+  return { pr: afterMaintainer - issue, issue, maintainer };
+}
+
+function effectivePrPool(repo: RepoEntry, hasIssueScores: boolean, hasRegisteredMaintainers = false): number {
+  const parts = rewardParts(repo, hasRegisteredMaintainers);
+  if (parts.pr <= 0) return 0;
+  if (parts.issue <= 0) return parts.pr;
+  return hasIssueScores ? parts.pr : parts.pr + parts.issue;
+}
+
+function normalizedGithubId(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const id = String(value).trim();
+  return id && id !== '0' ? id : null;
+}
+
+function normalizedRepoName(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const repo = value.trim().toLowerCase();
+  return repo.includes('/') ? repo : null;
+}
+
+function issueNumber(value: unknown): number | null {
+  const n = typeof value === 'string' ? Number.parseInt(value, 10) : typeof value === 'number' ? value : Number.NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function repoEvaluationRows(miner: Miner): Array<{ repo: string; score: number }> {
+  const raw = miner.repoEvaluations ?? miner.repo_evaluations;
+  if (!raw) return [];
+  const rows = Array.isArray(raw) ? raw.map((row): [string | null, MinerRepoEvaluation] => [null, row]) : Object.entries(raw);
+  return rows.flatMap(([fallbackRepo, row]) => {
+    const repo = normalizedRepoName(row.repositoryFullName ?? row.repository_full_name ?? fallbackRepo);
+    if (!repo) return [];
+    return [{ repo, score: num(row.issueDiscoveryScore ?? row.issue_discovery_score) }];
+  });
+}
+
+function issueDiscoveryRows(miner: Miner): Array<{ key: string; repo: string; score: number }> {
+  const raw = miner.issueDiscoveryIssues ?? miner.issue_discovery_issues ?? [];
+  return raw.flatMap((row) => {
+    const repo = normalizedRepoName(row.repositoryFullName ?? row.repository_full_name ?? row.repoFullName ?? row.repo_full_name);
+    const number = issueNumber(row.issueNumber ?? row.issue_number ?? row.number);
+    if (!repo || !number) return [];
+    return [{
+      key: pullKey(repo, number),
+      repo,
+      score: num(row.discoveryEarnedScore ?? row.discovery_earned_score),
+    }];
+  });
+}
+
+function buildIssueDiscoveryIndex(miners: Miner[]): IssueDiscoveryIndex {
+  const repoHasScores = new Set<string>();
+  const issueScores = new Map<string, number>();
+  let hasScoreDetail = false;
+  let aggregateScore = 0;
+
+  for (const miner of miners) {
+    aggregateScore += num(miner.issueDiscoveryScore ?? miner.issue_discovery_score);
+    const repoRows = repoEvaluationRows(miner);
+    const issueRows = issueDiscoveryRows(miner);
+    if (repoRows.length > 0 || issueRows.length > 0) hasScoreDetail = true;
+
+    for (const row of repoRows) {
+      if (row.score > 0) repoHasScores.add(row.repo);
+    }
+    for (const row of issueRows) {
+      if (row.score <= 0) continue;
+      repoHasScores.add(row.repo);
+      issueScores.set(row.key, (issueScores.get(row.key) ?? 0) + row.score);
+    }
+  }
+
+  return { repoHasScores, issueScores, hasScoreDetail, aggregateScore };
 }
 
 function issueBoost(issue: IssueDto, repo: RepoEntry): number {
@@ -315,11 +451,6 @@ function linkedPullClosedUnmerged(issue: IssueDto, pullByKey: Map<string, PullDt
   return !merged && state === 'closed';
 }
 
-function linkedPullScored(issue: IssueDto, pullByKey: Map<string, PullDto>, pr: NonNullable<IssueDto['linked_prs']>[number]): boolean {
-  const official = linkedPull(issue, pullByKey, pr.number);
-  return official ? hasOfficialScore(official) : false;
-}
-
 function linkedPullSameAuthor(issue: IssueDto, pullByKey: Map<string, PullDto>, pr: NonNullable<IssueDto['linked_prs']>[number]): boolean {
   const issueAuthor = lower(issue.author_login);
   if (!issueAuthor) return false;
@@ -327,20 +458,60 @@ function linkedPullSameAuthor(issue: IssueDto, pullByKey: Map<string, PullDto>, 
   return lower(official?.author_login ?? pr.author_login) === issueAuthor;
 }
 
+function linkedPullOfficialScore(issue: IssueDto, pullByKey: Map<string, PullDto>, pr: NonNullable<IssueDto['linked_prs']>[number]): number | null {
+  const official = linkedPull(issue, pullByKey, pr.number);
+  return official && hasOfficialScore(official) ? official.score ?? 0 : null;
+}
+
+function linkedPullsOfficialScore(issue: IssueDto, pullByKey: Map<string, PullDto>, prs: NonNullable<IssueDto['linked_prs']>): number | null {
+  const scores = prs.flatMap((pr) => {
+    const score = linkedPullOfficialScore(issue, pullByKey, pr);
+    return score === null ? [] : [score];
+  });
+  return scores.length > 0 ? scores.reduce((sum, score) => sum + score, 0) : null;
+}
+
+function rewardableIssueLinkedPrs(issue: IssueDto, pullByKey: Map<string, PullDto>, repoByName: Map<string, RepoEntry>): NonNullable<IssueDto['linked_prs']> {
+  const linkedPrs = issue.linked_prs ?? [];
+  return issueDiscoveryEnabled(issue, repoByName) && !isMaintainerAssociation(issue.author_association)
+    ? linkedPrs.filter((pr) => !linkedPullSameAuthor(issue, pullByKey, pr))
+    : [];
+}
+
 function issueDiscoveryEnabled(issue: IssueDto, repoByName: Map<string, RepoEntry>): boolean {
   const repo = repoByName.get(issue.repo_full_name.toLowerCase());
   return Boolean(repo && !repo.inactiveAt && repo.issueDiscoveryShare > 0);
 }
 
-function issuePipelineKey(issue: IssueDto, pullByKey: Map<string, PullDto>, repoByName: Map<string, RepoEntry>): IssuePipelineColumn['key'] {
+function issueDiscoveryState(issue: IssueDto, repoByName: Map<string, RepoEntry>, issueMinerEligibilityByLogin: Map<string, boolean>): IssueDiscoveryState {
+  const author = lower(issue.author_login);
+  if (!issueDiscoveryEnabled(issue, repoByName)) {
+    return { enabled: false, eligible: false };
+  }
+  if (!author) {
+    return { enabled: true, eligible: false, reason: 'Issue discovery is enabled for this repo, but the issue author is missing.' };
+  }
+  if (isMaintainerAssociation(issue.author_association)) {
+    return { enabled: true, eligible: false, reason: 'Repo maintainers and owners do not earn issue-discovery rewards for their own repo.' };
+  }
+  const eligible = issueMinerEligibilityByLogin.get(author);
+  if (eligible === true) {
+    return { enabled: true, eligible: true };
+  }
+  if (eligible === false) {
+    return { enabled: true, eligible: false, reason: 'Issue discovery is enabled for this repo, but this miner is not currently issue-eligible.' };
+  }
+  return { enabled: true, eligible: false, reason: 'Issue discovery is enabled for this repo, but this author is not in the live miner list.' };
+}
+
+function issuePipelineKey(issue: IssueDto, pullByKey: Map<string, PullDto>, repoByName: Map<string, RepoEntry>, issueScores?: Map<string, number>): IssuePipelineColumn['key'] {
   if (lower(issue.state) === 'open') return 'opened';
   const linkedPrs = issue.linked_prs ?? [];
   if (lower(issue.state_reason) === 'not_planned') return 'closed';
   if (lower(issue.state_reason) === 'completed') {
-    const rewardableLinkedPrs = issueDiscoveryEnabled(issue, repoByName) && !isMaintainerAssociation(issue.author_association)
-      ? linkedPrs.filter((pr) => !linkedPullSameAuthor(issue, pullByKey, pr))
-      : [];
-    if (rewardableLinkedPrs.some((pr) => linkedPullScored(issue, pullByKey, pr))) return 'scored';
+    const rewardableLinkedPrs = rewardableIssueLinkedPrs(issue, pullByKey, repoByName);
+    if ((issueScores?.get(pullKey(issue.repo_full_name, issue.number)) ?? 0) > 0) return 'scored';
+    if (linkedPullsOfficialScore(issue, pullByKey, rewardableLinkedPrs) !== null) return 'scored';
     if (rewardableLinkedPrs.some((pr) => linkedPullMerged(issue, pullByKey, pr))) return 'completed';
     if (linkedPrs.some((pr) => linkedPullClosedUnmerged(issue, pullByKey, pr))) return 'closed';
     return 'closed';
@@ -412,6 +583,54 @@ function buildActivityPoints(pulls: PullDto[], issues: IssueDto[], activeRepoSet
   return points;
 }
 
+function summarizeActivity(points: DayPoint[]): { prEvents: number; issueEvents: number; totalEvents: number } {
+  return points.reduce(
+    (acc, point) => {
+      acc.prEvents += point.openedPrs + point.mergedPrs + point.closedPrs;
+      acc.issueEvents += point.openedIssues + point.resolvedIssues;
+      acc.totalEvents = acc.prEvents + acc.issueEvents;
+      return acc;
+    },
+    { prEvents: 0, issueEvents: 0, totalEvents: 0 },
+  );
+}
+
+function bucketValues<T>(
+  duration: ReturnType<typeof durationConfig>,
+  items: T[],
+  timestampOf: (item: T) => number,
+  valueOf: (item: T) => number = () => 1,
+): number[] {
+  const now = Date.now();
+  const start = now - duration.ms;
+  const bucketMs = duration.ms / duration.buckets;
+  const values = Array.from({ length: duration.buckets }, () => 0);
+  for (const item of items) {
+    const timestamp = timestampOf(item);
+    if (!Number.isFinite(timestamp) || timestamp < start || timestamp > now) continue;
+    const idx = Math.min(values.length - 1, Math.max(0, Math.floor((timestamp - start) / bucketMs)));
+    values[idx] += valueOf(item);
+  }
+  return values;
+}
+
+function bucketUniqueActors(
+  duration: ReturnType<typeof durationConfig>,
+  events: Array<{ timestamp: number; actor: string | null | undefined }>,
+): number[] {
+  const now = Date.now();
+  const start = now - duration.ms;
+  const bucketMs = duration.ms / duration.buckets;
+  const buckets = Array.from({ length: duration.buckets }, () => new Set<string>());
+  for (const event of events) {
+    const actor = lower(event.actor);
+    if (!actor || !Number.isFinite(event.timestamp) || event.timestamp < start || event.timestamp > now) continue;
+    const idx = Math.min(buckets.length - 1, Math.max(0, Math.floor((event.timestamp - start) / bucketMs)));
+    buckets[idx].add(actor);
+  }
+  return buckets.map((bucket) => bucket.size);
+}
+
 function buildPullPipeline(pulls: PullDto[]): PipelineColumn[] {
   const columns: PipelineColumn[] = [
     { key: 'draft', title: 'Drafting', caption: 'draft PRs', color: 'var(--fg-muted)', pulls: [] },
@@ -436,17 +655,17 @@ function buildPullPipeline(pulls: PullDto[]): PipelineColumn[] {
   return columns;
 }
 
-function buildIssuePipeline(issues: IssueDto[], activeRepoSet: Set<string>, pullByKey: Map<string, PullDto>, repoByName: Map<string, RepoEntry>): IssuePipelineColumn[] {
+function buildIssuePipeline(issues: IssueDto[], activeRepoSet: Set<string>, pullByKey: Map<string, PullDto>, repoByName: Map<string, RepoEntry>, issueScores: Map<string, number>): IssuePipelineColumn[] {
   const columns: IssuePipelineColumn[] = [
     { key: 'opened', title: 'Opened', caption: 'open issues', color: 'var(--success-fg)', issues: [] },
-    { key: 'closed', title: 'Closed', caption: 'closed / not planned', color: 'var(--danger-fg)', issues: [] },
+    { key: 'closed', title: 'Closed', caption: 'not validation-ready', color: 'var(--danger-fg)', issues: [] },
     { key: 'completed', title: 'Completed', caption: 'pending Gittensor validation', color: 'var(--accent-fg)', issues: [] },
-    { key: 'scored', title: 'Scored', caption: 'official score', color: 'var(--done-fg)', issues: [] },
+    { key: 'scored', title: 'Scored', caption: 'PR scored / discovery', color: 'var(--done-fg)', issues: [] },
   ];
   const byKey = new Map(columns.map((column) => [column.key, column]));
   for (const issue of issues) {
     if (!activeRepoSet.has(issue.repo_full_name.toLowerCase())) continue;
-    const key = issuePipelineKey(issue, pullByKey, repoByName);
+    const key = issuePipelineKey(issue, pullByKey, repoByName, issueScores);
     byKey.get(key)?.issues.push(issue);
   }
   for (const column of columns) {
@@ -524,11 +743,43 @@ export default function DashboardPage() {
   const activeRepos = useMemo(() => repos.filter((repo) => !repo.inactiveAt && repo.emissionShare > 0), [repos]);
   const activeRepoNames = useMemo(() => activeRepos.map((repo) => repo.fullName).sort(), [activeRepos]);
   const activeRepoSet = useMemo(() => new Set(activeRepoNames.map((repo) => repo.toLowerCase())), [activeRepoNames]);
+  const maintainerCutRepoNames = useMemo(() => activeRepos.filter((repo) => repo.maintainerCut > 0).map((repo) => repo.fullName).sort(), [activeRepos]);
+  const repoMaintainersQuery = useQuery<RepoMaintainersResp>({
+    queryKey: ['dashboard-repo-maintainers', maintainerCutRepoNames],
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ repos: maintainerCutRepoNames.join(',') });
+      const response = await fetch('/api/gt/repo-maintainers?' + params.toString(), { signal });
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.json();
+    },
+    enabled: maintainerCutRepoNames.length > 0,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+  const registeredMinerGithubIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const miner of minersQuery.data?.miners ?? []) {
+      const id = normalizedGithubId(miner.githubId ?? miner.github_id);
+      if (id) ids.add(id);
+    }
+    return ids;
+  }, [minersQuery.data?.miners]);
+  const repoHasRegisteredMaintainers = useMemo(() => {
+    const reposWithRegisteredMaintainers = new Set<string>();
+    if (registeredMinerGithubIds.size === 0) return reposWithRegisteredMaintainers;
+    for (const row of repoMaintainersQuery.data?.repos ?? []) {
+      const hasRegistered = row.maintainers.some((maintainer) => {
+        const id = normalizedGithubId(maintainer.github_id ?? maintainer.githubId);
+        return Boolean(id && registeredMinerGithubIds.has(id));
+      });
+      if (hasRegistered) reposWithRegisteredMaintainers.add(row.repo_full_name.toLowerCase());
+    }
+    return reposWithRegisteredMaintainers;
+  }, [registeredMinerGithubIds, repoMaintainersQuery.data?.repos]);
   const fetchWindowMs = useMemo(() => {
-    if (durationKey !== '30d') return duration.ms;
-    const maxRepoLookbackMs = activeRepos.reduce((max, repo) => Math.max(max, repoLookbackDays(repo) * DAY_MS), duration.ms);
-    return maxRepoLookbackMs;
-  }, [activeRepos, duration.ms, durationKey]);
+    const maxDurationMs = DURATION_OPTIONS.reduce((max, option) => Math.max(max, option.ms), 0);
+    return activeRepos.reduce((max, repo) => Math.max(max, repoLookbackDays(repo) * DAY_MS), maxDurationMs);
+  }, [activeRepos]);
 
   useEffect(() => {
     setPrPipelineRepoFilters((prev) => cleanSelectedRepos(prev, activeRepoSet));
@@ -631,6 +882,11 @@ export default function DashboardPage() {
       return pullTimestamp(pr) >= now - repoWindowMs(durationKey, duration.ms, repo);
     });
   }, [duration.ms, durationKey, pipelinePulls, repoByName]);
+  const scoredPulls = useMemo(() => {
+    return pipelinePulls
+      .filter(hasOfficialScore)
+      .sort((a, b) => num(b.score) - num(a.score) || pullTimestamp(b) - pullTimestamp(a));
+  }, [pipelinePulls]);
   const scoredRangePulls = useMemo(() => {
     return rangePulls
       .filter(hasOfficialScore)
@@ -690,9 +946,46 @@ export default function DashboardPage() {
       .sort((a, b) => b.trend - a.trend || b.prs - a.prs || b.score - a.score || a.repo.fullName.localeCompare(b.repo.fullName))
       .slice(0, 3);
   }, [activeRepos, activeRepoSet, duration.ms, durationKey, gtRepoByName, pipelinePulls, repoByName]);
+  const prPipelineRepos = useMemo(() => Array.from(new Set(rangePulls.map((pr) => pr.repo_full_name))).sort(), [rangePulls]);
+  const prPipelineRepoFilterSet = useMemo(() => new Set(prPipelineRepoFilters.map((repo) => repo.toLowerCase())), [prPipelineRepoFilters]);
+  const filteredRangePulls = useMemo(() => {
+    if (prPipelineRepoFilterSet.size === 0) return rangePulls;
+    return rangePulls.filter((pr) => prPipelineRepoFilterSet.has(pr.repo_full_name.toLowerCase()));
+  }, [prPipelineRepoFilterSet, rangePulls]);
+  const prPipeline = useMemo(() => buildPullPipeline(filteredRangePulls), [filteredRangePulls]);
+  const issueDiscoveryIndex = useMemo(() => buildIssueDiscoveryIndex(minersQuery.data?.miners ?? []), [minersQuery.data?.miners]);
+  const repoHasIssueScores = issueDiscoveryIndex.repoHasScores;
+  const issueScores = issueDiscoveryIndex.issueScores;
+  const issueDiscoveryDetailUnavailable = !issueDiscoveryIndex.hasScoreDetail && issueDiscoveryIndex.aggregateScore > 0;
+  const repoHasIssueScoresForRewards = useMemo(() => {
+    const reposWithIssueScores = new Set(repoHasIssueScores);
+    if (issueDiscoveryDetailUnavailable) {
+      for (const repo of activeRepos) {
+        if (!repo.inactiveAt && repo.issueDiscoveryShare > 0) reposWithIssueScores.add(repo.fullName.toLowerCase());
+      }
+    }
+    return reposWithIssueScores;
+  }, [activeRepos, issueDiscoveryDetailUnavailable, repoHasIssueScores]);
+  const issueMinerEligibilityByLogin = useMemo(() => {
+    const authors = new Map<string, boolean>();
+    for (const miner of minersQuery.data?.miners ?? []) {
+      const username = lower(miner.githubUsername ?? miner.github_username);
+      if (username) authors.set(username, miner.isIssueEligible === true);
+    }
+    return authors;
+  }, [minersQuery.data?.miners]);
+  const rangeIssues = useMemo(() => {
+    const now = Date.now();
+    return issues.filter((issue) => {
+      const repo = repoByName.get(issue.repo_full_name.toLowerCase());
+      const stage = issuePipelineKey(issue, pipelinePullByKey, repoByName, issueScores);
+      return issuePipelineTimestamp(issue, stage) >= now - repoWindowMs(durationKey, duration.ms, repo);
+    });
+  }, [duration.ms, durationKey, issueScores, issues, pipelinePullByKey, repoByName]);
+  const bestWorkPulls = useMemo(() => buildBestWorkPulls(scoredRangePulls, scoredPulls, repoByName, repoHasIssueScoresForRewards, repoHasRegisteredMaintainers), [repoByName, repoHasIssueScoresForRewards, repoHasRegisteredMaintainers, scoredPulls, scoredRangePulls]);
   const bestWorkAuthors = useMemo(() => {
     const repoScoreTotals = new Map<string, number>();
-    for (const pr of scoredRangePulls) {
+    for (const pr of scoredPulls) {
       const score = num(pr.score);
       if (score <= 0) continue;
       const repoKey = pr.repo_full_name.toLowerCase();
@@ -706,7 +999,7 @@ export default function DashboardPage() {
       const repoKey = pr.repo_full_name.toLowerCase();
       const repo = repoByName.get(repoKey);
       const repoTotalScore = repoScoreTotals.get(repoKey) ?? 0;
-      const repoRewardPool = repo ? rewardParts(repo).pr : 0;
+      const repoRewardPool = repo ? effectivePrPool(repo, repoHasIssueScoresForRewards.has(repoKey), repoHasRegisteredMaintainers.has(repoKey)) : 0;
       if (!repo || repoTotalScore <= 0 || repoRewardPool <= 0) continue;
 
       const reward = repoRewardPool * (rawScore / repoTotalScore);
@@ -738,29 +1031,14 @@ export default function DashboardPage() {
       .filter((row) => row.reward > 0 && row.repoSegments.length > 0)
       .sort((a, b) => b.reward - a.reward || b.rawScore - a.rawScore || b.prs - a.prs)
       .slice(0, 3);
-  }, [repoByName, scoredRangePulls]);
-  const prPipelineRepos = useMemo(() => Array.from(new Set(rangePulls.map((pr) => pr.repo_full_name))).sort(), [rangePulls]);
-  const prPipelineRepoFilterSet = useMemo(() => new Set(prPipelineRepoFilters.map((repo) => repo.toLowerCase())), [prPipelineRepoFilters]);
-  const filteredRangePulls = useMemo(() => {
-    if (prPipelineRepoFilterSet.size === 0) return rangePulls;
-    return rangePulls.filter((pr) => prPipelineRepoFilterSet.has(pr.repo_full_name.toLowerCase()));
-  }, [prPipelineRepoFilterSet, rangePulls]);
-  const prPipeline = useMemo(() => buildPullPipeline(filteredRangePulls), [filteredRangePulls]);
-  const rangeIssues = useMemo(() => {
-    const now = Date.now();
-    return issues.filter((issue) => {
-      const repo = repoByName.get(issue.repo_full_name.toLowerCase());
-      const stage = issuePipelineKey(issue, pipelinePullByKey, repoByName);
-      return issuePipelineTimestamp(issue, stage) >= now - repoWindowMs(durationKey, duration.ms, repo);
-    });
-  }, [duration.ms, durationKey, issues, pipelinePullByKey, repoByName]);
+  }, [repoByName, repoHasIssueScoresForRewards, repoHasRegisteredMaintainers, scoredPulls, scoredRangePulls]);
   const issuePipelineRepos = useMemo(() => Array.from(new Set(rangeIssues.map((issue) => issue.repo_full_name))).sort(), [rangeIssues]);
   const issuePipelineRepoFilterSet = useMemo(() => new Set(issuePipelineRepoFilters.map((repo) => repo.toLowerCase())), [issuePipelineRepoFilters]);
   const filteredRangeIssues = useMemo(() => {
     if (issuePipelineRepoFilterSet.size === 0) return rangeIssues;
     return rangeIssues.filter((issue) => issuePipelineRepoFilterSet.has(issue.repo_full_name.toLowerCase()));
   }, [issuePipelineRepoFilterSet, rangeIssues]);
-  const issuePipeline = useMemo(() => buildIssuePipeline(filteredRangeIssues, activeRepoSet, pipelinePullByKey, repoByName), [activeRepoSet, pipelinePullByKey, filteredRangeIssues, repoByName]);
+  const issuePipeline = useMemo(() => buildIssuePipeline(filteredRangeIssues, activeRepoSet, pipelinePullByKey, repoByName, issueScores), [activeRepoSet, pipelinePullByKey, filteredRangeIssues, issueScores, repoByName]);
 
   const recentActivity = useMemo<RecentActivityItem[]>(() => {
     const items: RecentActivityItem[] = [];
@@ -793,7 +1071,7 @@ export default function DashboardPage() {
       const repo = repoByName.get(issue.repo_full_name.toLowerCase());
       const isOpen = lower(issue.state) === 'open';
       const multiplier = repo ? issueBoost(issue, repo) : 1;
-      const parts = repo ? rewardParts(repo) : null;
+      const parts = repo ? rewardParts(repo, repoHasRegisteredMaintainers.has(issue.repo_full_name.toLowerCase())) : null;
       const isBounty = Boolean(isOpen && repo && !repo.inactiveAt && repo.emissionShare > 0 && ((parts?.issue ?? 0) > 0 || multiplier > 1));
 
       if (isBounty && repo && parts) {
@@ -848,7 +1126,7 @@ export default function DashboardPage() {
       seen.add(item.id);
     }
     return selected.sort((a, b) => b.timestamp - a.timestamp);
-  }, [activeRepoSet, issues, pipelinePulls, repoByName]);
+  }, [activeRepoSet, issues, pipelinePulls, repoByName, repoHasRegisteredMaintainers]);
 
   const scoredPrCount = scoredRangePulls.length;
   const openPrCount = rangePulls.filter((pr) => pr.state?.toLowerCase() === 'open' && !pr.merged_at).length;
@@ -858,10 +1136,12 @@ export default function DashboardPage() {
     const counts: Record<IssuePipelineColumn['key'], number> = { opened: 0, closed: 0, completed: 0, scored: 0 };
     for (const issue of rangeIssues) {
       if (!activeRepoSet.has(issue.repo_full_name.toLowerCase())) continue;
-      counts[issuePipelineKey(issue, pipelinePullByKey, repoByName)] += 1;
+      counts[issuePipelineKey(issue, pipelinePullByKey, repoByName, issueScores)] += 1;
     }
     return counts;
-  }, [activeRepoSet, pipelinePullByKey, rangeIssues, repoByName]);
+  }, [activeRepoSet, issueScores, pipelinePullByKey, rangeIssues, repoByName]);
+  const activity = useMemo<DayPoint[]>(() => buildActivityPoints(pipelinePulls, issues, activeRepoSet, duration), [activeRepoSet, duration, issues, pipelinePulls]);
+  const activitySummary = useMemo(() => summarizeActivity(activity), [activity]);
   const rangeStats = useMemo(() => {
     const repoSet = new Set<string>();
     const actorSet = new Set<string>();
@@ -879,19 +1159,46 @@ export default function DashboardPage() {
 
     const topPrScore = scoredRangePulls.length > 0 ? Math.max(0, num(scoredRangePulls[0].score)) : 0;
     return {
-      workItems: rangePulls.length + rangeIssues.length,
+      workItems: activitySummary.totalEvents,
       repos: repoSet.size,
       actors: actorSet.size,
       prScore,
       avgPrScore: scoredRangePulls.length > 0 ? prScore / scoredRangePulls.length : 0,
       topPrScore,
     };
-  }, [rangeIssues, rangePulls, scoredRangePulls]);
+  }, [activitySummary.totalEvents, rangeIssues, rangePulls, scoredRangePulls]);
   const resolvedIssueCount = issueStageCounts.completed + issueStageCounts.scored;
-  const openWorkCount = openPrCount + issueStageCounts.opened;
-  const isLoading = reposQuery.isLoading || gtReposQuery.isLoading || minersQuery.isLoading || issuesQuery.isLoading;
+  const statSparkDuration = useMemo(() => {
+    const ms = activeRepos.reduce((max, repo) => Math.max(max, repoWindowMs(durationKey, duration.ms, repo)), duration.ms);
+    return { ...duration, ms };
+  }, [activeRepos, duration, duration.ms, durationKey]);
+  const statSparks = useMemo(() => {
+    const resolvedIssues = rangeIssues.filter((issue) => {
+      const stage = issuePipelineKey(issue, pipelinePullByKey, repoByName, issueScores);
+      return stage === 'completed' || stage === 'scored';
+    });
+    const actorEvents = [
+      ...rangePulls.map((pr) => ({ timestamp: pullTimestamp(pr), actor: pr.author_login })),
+      ...rangeIssues.map((issue) => {
+        const stage = issuePipelineKey(issue, pipelinePullByKey, repoByName, issueScores);
+        return { timestamp: issuePipelineTimestamp(issue, stage), actor: issue.author_login };
+      }),
+    ];
 
-  const activity = useMemo<DayPoint[]>(() => buildActivityPoints(pipelinePulls, issues, activeRepoSet, duration), [activeRepoSet, duration, issues, pipelinePulls]);
+    return {
+      network: activity.map((point) => point.openedPrs + point.mergedPrs + point.closedPrs + point.openedIssues + point.resolvedIssues),
+      oss: bucketValues(statSparkDuration, scoredRangePulls, (pr) => pipelineTimestamp(pr, 'scored')),
+      discoveries: bucketValues(statSparkDuration, resolvedIssues, (issue) => issuePipelineTimestamp(issue, issuePipelineKey(issue, pipelinePullByKey, repoByName, issueScores))),
+      score: bucketValues(statSparkDuration, scoredRangePulls, (pr) => pipelineTimestamp(pr, 'scored'), (pr) => Math.max(0, num(pr.score))),
+      contributors: bucketUniqueActors(statSparkDuration, actorEvents),
+    };
+  }, [activity, issueScores, pipelinePullByKey, rangeIssues, rangePulls, repoByName, scoredRangePulls, statSparkDuration]);
+  const pipelineChartDuration = useMemo(() => ({
+    ...statSparkDuration,
+    buckets: duration.key === '7d' ? 14 : duration.buckets,
+  }), [duration.buckets, duration.key, statSparkDuration]);
+  const openWorkCount = openPrCount + issueStageCounts.opened;
+  const isLoading = reposQuery.isLoading || gtReposQuery.isLoading || minersQuery.isLoading || issuesQuery.isLoading || (maintainerCutRepoNames.length > 0 && repoMaintainersQuery.isLoading);
 
   if (isLoading && !reposQuery.data) {
     return (
@@ -943,21 +1250,23 @@ export default function DashboardPage() {
       </PageLayout.Header>
 
       <PageLayout.Content>
-        <Box sx={{ maxWidth: 1480, mx: 'auto', width: '100%', display: 'grid', gap: 3, position: 'relative' }}>
+        <Box sx={{ maxWidth: 1480, mx: 'auto', width: '100%', display: 'grid', gap: 3, position: 'relative', mb: [-2, null, -3] }}>
           <Box sx={{ position: 'sticky', top: ['calc(var(--header-height) + 8px)', null, null, null, '72px'], zIndex: 160, display: 'flex', justifyContent: 'flex-end', pointerEvents: 'none', mt: [2, null, 0], mb: -1 }}>
             <Box sx={{ pointerEvents: 'auto', borderRadius: 2, boxShadow: 'shadow.medium', bg: 'canvas.default' }}>
               <DurationPicker value={durationKey} onChange={setDurationKey} />
             </Box>
           </Box>
-          <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', 'repeat(2, minmax(0, 1fr))', null, 'repeat(5, minmax(0, 1fr))'], gap: 3 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 3 }}>
             <StatCard
               tone="blue"
               icon={<GraphIcon size={21} />}
-              label={`Active Network · ${duration.label}`}
+              label="Network Activity"
               value={fmtCount(rangeStats.workItems)}
+              spark={statSparks.network}
+              tooltip="Total lifecycle events in the selected range: PRs opened, merged, or closed plus issues opened or resolved."
               metrics={[
-                { label: 'PRs', value: fmtCount(rangePulls.length), tone: rangePulls.length > 0 ? 'accent' : 'muted' },
-                { label: 'Issues', value: fmtCount(rangeIssues.length), tone: rangeIssues.length > 0 ? 'attention' : 'muted' },
+                { label: 'PRs', value: fmtCount(activitySummary.prEvents), tone: activitySummary.prEvents > 0 ? 'accent' : 'muted' },
+                { label: 'Issues', value: fmtCount(activitySummary.issueEvents), tone: activitySummary.issueEvents > 0 ? 'attention' : 'muted' },
               ]}
             />
             <StatCard
@@ -965,6 +1274,8 @@ export default function DashboardPage() {
               icon={<GitMergeIcon size={21} />}
               label="OSS Contributions"
               value={fmtCount(scoredPrCount)}
+              spark={statSparks.oss}
+              tooltip="Officially scored OSS contribution PRs. Merged PRs awaiting validator scoring are shown separately."
               metrics={[
                 { label: 'Merged', value: fmtCount(mergedPrCount), tone: mergedPrCount > 0 ? 'success' : 'muted' },
                 { label: 'Awaiting score', value: fmtCount(awaitingScore), tone: awaitingScore > 0 ? 'attention' : 'success' },
@@ -975,6 +1286,8 @@ export default function DashboardPage() {
               icon={<CheckCircleIcon size={21} />}
               label="Discoveries"
               value={fmtCount(resolvedIssueCount)}
+              spark={statSparks.discoveries}
+              tooltip={issueDiscoveryDetailUnavailable ? "Scored includes completed issues whose linked solver PR has an official Gittensor score. Discovery badges show enabled repos plus eligibility; Discovery +score appears only when per-issue discovery_earned_score is exposed." : "Scored includes completed issues whose linked solver PR has an official Gittensor score. Discovery badges show enabled repos, eligibility, and discovery_earned_score when available."}
               metrics={[
                 { label: 'Scored', value: fmtCount(issueStageCounts.scored), tone: issueStageCounts.scored > 0 ? 'accent' : 'muted' },
                 { label: 'Awaiting score', value: fmtCount(issueStageCounts.completed), tone: issueStageCounts.completed > 0 ? 'attention' : 'success' },
@@ -985,6 +1298,8 @@ export default function DashboardPage() {
               icon={<ZapIcon size={21} />}
               label="OSS Score"
               value={fmtNumber(rangeStats.prScore)}
+              spark={statSparks.score}
+              tooltip="Sum of official Gittensor OSS PR scores in the selected range. Average and top use scored PRs only."
               metrics={[
                 { label: 'Avg score', value: fmtNumber(rangeStats.avgPrScore), tone: rangeStats.avgPrScore > 0 ? 'success' : 'muted' },
                 { label: 'Top score', value: fmtNumber(rangeStats.topPrScore), tone: rangeStats.topPrScore > 0 ? 'accent' : 'muted' },
@@ -995,24 +1310,26 @@ export default function DashboardPage() {
               icon={<PeopleIcon size={21} />}
               label="Active Contributors"
               value={fmtCount(rangeStats.actors)}
+              spark={statSparks.contributors}
+              tooltip="Unique GitHub contributors seen in the selected range. Open PRs/issues shows the current open work queue."
               metrics={[
-                { label: 'Repos', value: fmtCount(rangeStats.repos), tone: rangeStats.repos > 0 ? 'accent' : 'muted' },
-                { label: 'Open queue', value: fmtCount(openWorkCount), tone: openWorkCount > 0 ? 'attention' : 'success' },
+                { label: 'Active repos', value: fmtCount(rangeStats.repos), tone: rangeStats.repos > 0 ? 'accent' : 'muted' },
+                { label: 'Open PRs/issues', value: fmtCount(openWorkCount), tone: openWorkCount > 0 ? 'attention' : 'success' },
               ]}
             />
           </Box>
 
-          <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'minmax(0, 1.05fr) minmax(420px, 0.95fr)'], gap: 3, alignItems: 'stretch' }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, null, 'minmax(0, 1.05fr) minmax(380px, 0.95fr)'], gap: 3, alignItems: 'stretch' }}>
             <Panel title="Activity Over Time" action={<RangePill label={duration.label} />}>
               <LineChart points={activity} />
             </Panel>
-            <Panel title="Recent Activity" action={<LinkPill href="/opportunities">View all</LinkPill>}>
+            <Panel title="Recent Activity" action={<LinkPill href="/explorer">View all</LinkPill>}>
               <RecentActivity items={recentActivity} />
             </Panel>
           </Box>
 
           <BestWorkShowcase
-            pulls={scoredRangePulls.slice(0, 7)}
+            pulls={bestWorkPulls.slice(0, 7)}
             totalScored={scoredRangePulls.length}
             trendingRepos={trendingRepos}
             authorLeaders={bestWorkAuthors}
@@ -1022,6 +1339,7 @@ export default function DashboardPage() {
           <PullRequestPipeline
             columns={prPipeline}
             durationLabel={duration.label}
+            chartDuration={pipelineChartDuration}
             repos={prPipelineRepos}
             selectedRepos={prPipelineRepoFilters}
             onRepoToggle={(repo) => setPrPipelineRepoFilters((prev) => toggleSelectedRepo(prev, repo))}
@@ -1031,11 +1349,15 @@ export default function DashboardPage() {
           <IssuePipeline
             columns={issuePipeline}
             durationLabel={duration.label}
+            chartDuration={pipelineChartDuration}
             repos={issuePipelineRepos}
             selectedRepos={issuePipelineRepoFilters}
             onRepoToggle={(repo) => setIssuePipelineRepoFilters((prev) => toggleSelectedRepo(prev, repo))}
             onRepoClear={() => setIssuePipelineRepoFilters([])}
+            issueScores={issueScores}
             pullByKey={pipelinePullByKey}
+            repoByName={repoByName}
+            issueMinerEligibilityByLogin={issueMinerEligibilityByLogin}
           />
 
         </Box>
@@ -1114,8 +1436,9 @@ function DurationPicker({ value, onChange }: { value: DurationKey; onChange: (va
             sx={{
               appearance: 'none',
               border: 0,
-              borderLeft: option.key === DURATION_OPTIONS[0].key ? 0 : '1px solid',
-              borderColor: 'border.muted',
+              borderLeftWidth: option.key === DURATION_OPTIONS[0].key ? 0 : 1,
+              borderLeftStyle: 'solid',
+              borderLeftColor: 'border.muted',
               bg: selected ? 'accent.subtle' : 'transparent',
               color: selected ? 'accent.fg' : 'fg.muted',
               cursor: 'pointer',
@@ -1153,6 +1476,14 @@ function statColor(tone: StatTone) {
   return { bg: 'accent.subtle', fg: 'accent.fg' };
 }
 
+function statSparkColor(tone: StatTone): string {
+  if (tone === 'green') return '#10b981';
+  if (tone === 'purple') return '#8b5cf6';
+  if (tone === 'amber') return '#f59e0b';
+  if (tone === 'red') return '#ef4444';
+  return '#3b82f6';
+}
+
 function statMetricColor(tone: StatMetricTone = 'muted'): string {
   if (tone === 'success') return 'success.fg';
   if (tone === 'attention') return 'attention.fg';
@@ -1161,20 +1492,25 @@ function statMetricColor(tone: StatMetricTone = 'muted'): string {
   return 'fg.muted';
 }
 
-function StatCard({ tone, icon, label, value, suffix, metrics }: { tone: StatTone; icon: React.ReactNode; label: string; value: string; suffix?: string; metrics: StatMetric[] }) {
+function StatCard({ tone, icon, label, value, suffix, metrics, tooltip, spark }: { tone: StatTone; icon: React.ReactNode; label: string; value: string; suffix?: string; metrics: StatMetric[]; tooltip?: string; spark?: number[] }) {
   const color = statColor(tone);
   return (
-    <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', boxShadow: 'shadow.small', p: 3, minWidth: 0, transition: 'border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease', '&:hover': { borderColor: color.fg, transform: 'translateY(-1px)', boxShadow: 'shadow.medium' } }}>
+    <Box title={tooltip} sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', boxShadow: 'shadow.small', p: 3, minWidth: 0, overflow: 'hidden', cursor: tooltip ? 'help' : 'default', transition: 'border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease', '&:hover': { borderColor: color.fg, transform: 'translateY(-1px)', boxShadow: 'shadow.medium' } }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr)', gap: 2, alignItems: 'start' }}>
         <Box sx={{ width: 38, height: 38, borderRadius: 2, bg: color.bg, color: color.fg, display: 'grid', placeItems: 'center' }}>{icon}</Box>
         <Box sx={{ minWidth: 0 }}>
-          <Text sx={{ display: 'block', color: 'fg.muted', fontSize: 0, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</Text>
+          <Text sx={{ display: 'block', color: 'fg.muted', fontSize: 0, fontWeight: 600, lineHeight: 1.25, minWidth: 0, overflowWrap: 'anywhere' }}>{label}</Text>
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mt: 1 }}>
             <Text sx={{ color: 'fg.default', fontSize: 4, lineHeight: 1, fontWeight: 700, fontFamily: 'mono' }}>{value}</Text>
             {suffix && <Text sx={{ color: 'fg.muted', fontSize: 0, fontWeight: 600 }}>{suffix}</Text>}
           </Box>
         </Box>
       </Box>
+      {spark && (
+        <Box sx={{ mt: 2, height: 48, minWidth: 0, overflow: 'hidden' }}>
+          <StatSparkline points={spark} tone={tone} variant="wide" />
+        </Box>
+      )}
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 2, mt: 3 }}>
         {metrics.slice(0, 2).map((metric) => (
           <Box key={metric.label} sx={{ minWidth: 0, borderTop: '1px solid', borderColor: 'border.muted', pt: 2 }}>
@@ -1185,6 +1521,63 @@ function StatCard({ tone, icon, label, value, suffix, metrics }: { tone: StatTon
           </Box>
         ))}
       </Box>
+    </Box>
+  );
+}
+
+function StatSparkline({ points, tone, variant = 'inline' }: { points: number[]; tone: StatTone; variant?: 'inline' | 'wide' }) {
+  const values = points.length > 0 ? points : [0, 0];
+  const wide = variant === 'wide';
+  const width = wide ? 160 : 96;
+  const height = wide ? 54 : 24;
+  const pad = wide ? { x: 4, y: 7 } : { x: 3, y: 4 };
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const isFlat = max === min;
+  const span = Math.max(1, max - min);
+  const color = statSparkColor(tone);
+  const coords = values.map((value, index) => ({
+    x: pad.x + (index * (width - pad.x * 2)) / Math.max(1, values.length - 1),
+    y: isFlat ? height / 2 : pad.y + (1 - (value - min) / span) * (height - pad.y * 2),
+  }));
+  const line = smoothPath(coords);
+  const area = coords.length > 0
+    ? line + ' L ' + coords[coords.length - 1].x + ' ' + (height - pad.y) + ' L ' + coords[0].x + ' ' + (height - pad.y) + ' Z'
+    : '';
+  const last = coords[coords.length - 1] ?? { x: width - pad.x, y: height / 2 };
+  const sparkKey = values.map((value) => Math.round(value * 100) / 100).join('-');
+
+  return (
+    <Box aria-hidden="true" sx={wide ? { width: '100%', height: '100%', opacity: 0.94, overflow: 'hidden' } : { width: 'clamp(48px, 4.8vw, 72px)', height: '20px', flex: '0 1 clamp(44px, 30%, 72px)', minWidth: 44, maxWidth: '34%', opacity: 0.9, overflow: 'hidden' }}>
+      <style>{`
+        @keyframes stat-spark-draw {
+          from { stroke-dashoffset: 1; opacity: 0.35; }
+          to { stroke-dashoffset: 0; opacity: 1; }
+        }
+        @keyframes stat-spark-pulse {
+          0%, 100% { transform: scale(0.82); opacity: 0.58; }
+          50% { transform: scale(1.18); opacity: 0.18; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .stat-spark-line, .stat-spark-pulse { animation: none !important; opacity: 1 !important; stroke-dashoffset: 0 !important; }
+        }
+      `}</style>
+      <svg key={sparkKey} viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" preserveAspectRatio="none" focusable="false">
+        <path d={area} fill={color} opacity={wide ? '0.16' : '0.12'} />
+        <path
+          className="stat-spark-line"
+          d={line}
+          fill="none"
+          stroke={color}
+          strokeWidth={wide ? '2.6' : '2'}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          pathLength={1}
+          style={{ strokeDasharray: 1, strokeDashoffset: 1, animation: 'stat-spark-draw 720ms cubic-bezier(0.22, 1, 0.36, 1) forwards' }}
+        />
+        <circle className="stat-spark-pulse" cx={last.x} cy={last.y} r="5" fill={color} opacity="0.18" style={{ transformOrigin: `${last.x}px ${last.y}px`, animation: 'stat-spark-pulse 1.8s ease-in-out infinite' }} />
+        <circle cx={last.x} cy={last.y} r="2.4" fill={color} stroke="var(--canvas-default)" strokeWidth="1.4" />
+      </svg>
     </Box>
   );
 }
@@ -1227,7 +1620,22 @@ function niceCeil(value: number): number {
 
 function LineChart({ points }: { points: DayPoint[] }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const width = 900;
+  // Track the real rendered width so the viewBox matches the box 1:1 — a fixed
+  // viewBox with `width="100%"` letterboxes (shrinks + centers) on narrow
+  // screens, leaving big empty bands above/below the plot.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [measuredWidth, setMeasuredWidth] = useState(900);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w && w > 0) setMeasuredWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const width = Math.max(280, measuredWidth);
   const height = 300;
   const pad = { left: 40, right: 16, top: 14, bottom: 32 };
   const plotWidth = width - pad.left - pad.right;
@@ -1278,13 +1686,11 @@ function LineChart({ points }: { points: DayPoint[] }) {
           .activity-line, .activity-dot { animation: none !important; opacity: 1 !important; stroke-dashoffset: 0 !important; }
         }
       `}</style>
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2, flexWrap: 'wrap', gap: 3, rowGap: 2 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', rowGap: 2 }}>
-          {totals.map((series) => <ActivityLegend key={series.key} color={series.color} label={series.label} total={series.total} />)}
-        </Box>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: '18px', rowGap: '8px', mb: 2 }}>
+        {totals.map((series) => <ActivityLegend key={series.key} color={series.color} label={series.label} total={series.total} />)}
       </Box>
-      <Box sx={{ width: '100%', overflow: 'hidden', border: '1px solid', borderColor: 'border.muted', borderRadius: 2 }}>
-        <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} role="img" aria-label="Network activity over time" onMouseLeave={() => setHoveredIndex(null)}>
+      <Box ref={containerRef} sx={{ width: '100%', overflow: 'hidden', border: '1px solid', borderColor: 'border.muted', borderRadius: 2 }}>
+        <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" role="img" aria-label="Network activity over time" onMouseLeave={() => setHoveredIndex(null)}>
           {/* Stacked bands intentionally use a flat fill (no gradient) — the
               previous top→bottom gradient faded each band's lower edge to ~18%
               opacity, which over a dark canvas became near-black and made the
@@ -1434,9 +1840,9 @@ function LineChart({ points }: { points: DayPoint[] }) {
 
 function ActivityLegend({ color, label, total }: { color: string; label: string; total: number }) {
   return (
-    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: 0, minWidth: 0 }}>
+    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: 0, whiteSpace: 'nowrap' }}>
       <Box sx={{ width: 7, height: 7, borderRadius: 99, bg: color, flexShrink: 0 }} />
-      <Text sx={{ color: 'fg.muted', whiteSpace: 'nowrap' }}>{label}</Text>
+      <Text sx={{ color: 'fg.muted' }}>{label}</Text>
       <Text sx={{ color: 'fg.default', fontFamily: 'mono', fontWeight: 600 }}>{fmtCount(total)}</Text>
     </Box>
   );
@@ -1447,6 +1853,38 @@ function pullHref(pr: PullDto): string {
   return pr.html_url ?? 'https://github.com/' + pr.repo_full_name + '/pull/' + pr.number;
 }
 
+type BestWorkPull = {
+  pr: PullDto;
+  reward: number;
+  repoPool: number;
+  repoShare: number;
+  repoScoreTotal: number;
+  maintainerCutApplied: boolean;
+};
+
+function buildBestWorkPulls(pulls: PullDto[], scorePoolPulls: PullDto[], repoByName: Map<string, RepoEntry>, repoHasIssueScores: Set<string>, repoHasRegisteredMaintainers: Set<string>): BestWorkPull[] {
+  const repoScoreTotals = new Map<string, number>();
+  for (const pr of scorePoolPulls) {
+    const score = Math.max(0, num(pr.score));
+    if (score <= 0) continue;
+    const repoKey = pr.repo_full_name.toLowerCase();
+    repoScoreTotals.set(repoKey, (repoScoreTotals.get(repoKey) ?? 0) + score);
+  }
+
+  return pulls
+    .map((pr) => {
+      const repoKey = pr.repo_full_name.toLowerCase();
+      const score = Math.max(0, num(pr.score));
+      const repo = repoByName.get(repoKey);
+      const maintainerCutApplied = Boolean(repo && repoHasRegisteredMaintainers.has(repoKey));
+      const repoPool = repo ? effectivePrPool(repo, repoHasIssueScores.has(repoKey), maintainerCutApplied) : 0;
+      const repoScoreTotal = repoScoreTotals.get(repoKey) ?? 0;
+      const repoShare = repoScoreTotal > 0 ? score / repoScoreTotal : 0;
+      return { pr, reward: repoPool * repoShare, repoPool, repoShare, repoScoreTotal, maintainerCutApplied };
+    })
+    .sort((a, b) => b.reward - a.reward || num(b.pr.score) - num(a.pr.score) || pullTimestamp(b.pr) - pullTimestamp(a.pr));
+}
+
 function BestWorkShowcase({
   pulls,
   totalScored,
@@ -1454,7 +1892,7 @@ function BestWorkShowcase({
   authorLeaders,
   durationLabel,
 }: {
-  pulls: PullDto[];
+  pulls: BestWorkPull[];
   totalScored: number;
   trendingRepos: Array<{ repo: RepoEntry; stats?: GtRepo; trend: number; prs: number; score: number }>;
   authorLeaders: AuthorLeader[];
@@ -1471,40 +1909,41 @@ function BestWorkShowcase({
           <Heading sx={{ fontSize: 1, m: 0 }}>Best Work</Heading>
           <RangePill label={durationLabel} />
         </Box>
-        <Text sx={{ color: 'fg.muted', fontSize: 0, fontFamily: 'mono' }}>{fmtCount(totalScored)} official scored PRs</Text>
+        <Text sx={{ color: 'fg.muted', fontSize: 0, fontFamily: 'mono' }}>{fmtCount(totalScored)} official scored PRs · ranked by modeled reward</Text>
       </Box>
       {top ? (
-        <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'minmax(0, 1.2fr) minmax(320px, 0.8fr)'], gap: 0 }}>
-          <Box sx={{ p: [3, null, 4], borderRight: [0, null, '1px solid'], borderBottom: ['1px solid', null, 0], borderColor: 'border.muted', minWidth: 0 }}>
-            <Link href={pullHref(top)} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none', display: 'block' }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, '92px minmax(0, 1fr)'], gap: 2, alignItems: 'stretch' }}>
-                <Box sx={{ border: '1px solid', borderColor: 'accent.muted', borderRadius: 2, bg: 'accent.subtle', display: 'grid', placeItems: 'center', minHeight: [74, null, 92], px: 2 }}>
+        <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, null, 'minmax(0, 1.2fr) minmax(320px, 0.8fr)'], gap: 0 }}>
+          <Box sx={{ p: [2, null, 3], borderRightWidth: [0, null, null, 1], borderRightStyle: 'solid', borderRightColor: 'border.default', borderBottomWidth: [1, null, null, 0], borderBottomStyle: 'solid', borderBottomColor: 'border.default', minWidth: 0 }}>
+            <Box>
+              <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, '72px minmax(0, 1fr)'], gap: [2, null, 3], alignItems: 'start' }}>
+                <Box sx={{ border: '1px solid', borderColor: 'success.muted', borderRadius: 2, bg: 'success.subtle', display: 'grid', placeItems: 'center', width: 72, height: 72, px: 1, gridRow: [1, null, 'auto'] }}>
                   <Box sx={{ textAlign: 'center' }}>
-                    <Text sx={{ display: 'block', color: 'fg.muted', fontSize: 0, fontFamily: 'mono', textTransform: 'uppercase' }}>top score</Text>
-                    <Text sx={{ display: 'block', color: 'accent.fg', fontSize: 4, fontFamily: 'mono', fontWeight: 800, lineHeight: 1 }}>{fmtNumber(num(top.score))}</Text>
+                    <Text sx={{ display: 'block', color: 'fg.muted', fontSize: 0, fontFamily: 'mono', textTransform: 'uppercase', lineHeight: 1.1 }}>Reward</Text>
+                    <Text sx={{ display: 'block', color: 'success.fg', fontSize: 3, fontFamily: 'mono', fontWeight: 800, lineHeight: 1.05 }}>{fmtPct(top.reward)}</Text>
                   </Box>
                 </Box>
-                <Box sx={{ minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: 2 }}>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1, minWidth: 0, flexWrap: 'wrap' }}>
-                      <RepoChip repo={top.repo_full_name} />
-                      <Text sx={{ color: 'fg.muted', fontSize: 0 }}>{relative(top.merged_at ?? top.updated_at)}</Text>
-                    </Box>
-                    <Heading sx={{ m: 0, fontSize: [2, null, 2], lineHeight: 1.18 }}>{`#${top.number} ${top.title}`}</Heading>
+                <Box sx={{ minWidth: 0, display: 'grid', gap: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, flexWrap: 'wrap' }}>
+                    <RepoChip repo={top.pr.repo_full_name} />
+                    <Text sx={{ color: 'fg.muted', fontSize: 0 }}>{relative(top.pr.merged_at ?? top.pr.updated_at)}</Text>
                   </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'space-between', flexWrap: 'wrap' }}>
-                    <AuthorInline pr={top} />
-                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                      <LineChanges additions={top.additions} deletions={top.deletions} />
-                      <ScoreValue pr={top} color="var(--accent-fg)" />
+                  <Link href={pullHref(top.pr)} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none' }}>
+                    <Heading sx={{ m: 0, fontSize: [2, null, 2], lineHeight: 1.15, '&:hover': { color: 'accent.fg' } }}>{`#${top.pr.number} ${top.pr.title}`}</Heading>
+                  </Link>
+                  <Text sx={{ color: 'fg.muted', fontSize: 0, lineHeight: '16px' }}>Why #1: highest reward in {durationLabel}</Text>
+                  <FormulaInline row={top} />
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, justifyContent: 'space-between', flexWrap: 'wrap', mt: 1 }}>
+                    <AuthorInline pr={top.pr} />
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <LineChanges additions={top.pr.additions} deletions={top.pr.deletions} />
                     </Box>
                   </Box>
                 </Box>
               </Box>
-            </Link>
+            </Box>
             {runnersUp.length > 0 && (
-              <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'repeat(2, minmax(0, 1fr))'], gap: 2, mt: 3 }}>
-                {runnersUp.map((pr) => <BestWorkMiniPr key={pr.id} pr={pr} />)}
+              <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'repeat(2, minmax(0, 1fr))'], gap: 2, mt: 2 }}>
+                {runnersUp.map((row) => <BestWorkMiniPr key={row.pr.id} row={row} />)}
               </Box>
             )}
           </Box>
@@ -1539,17 +1978,18 @@ function BestWorkShowcase({
                 };
               })}
             />
-            <BestWorkRankList
-              icon={<PeopleIcon size={14} />}
-              title="Top Rewarded Contributors"
-              empty="No rewarded contributors yet."
-              rows={authorLeaders.map((row) => {
+            <Box sx={{ borderTop: '1px solid', borderColor: 'border.default', pt: 3 }}>
+              <BestWorkRankList
+                icon={<PeopleIcon size={14} />}
+                title="Top Rewarded Contributors"
+                empty="No rewarded contributors yet."
+                rows={authorLeaders.map((row) => {
                 const topRepo = row.repoSegments[0];
                 const segments = row.repoSegments.map((segment, segmentIndex) => ({
                   key: segment.repo,
                   pct: row.reward > 0 ? segment.reward / row.reward : 0,
                   color: segmentColor(segmentIndex),
-                  tooltip: `${segment.repo} · ${fmtPct(segment.reward)} PR reward · ${fmtNumber(segment.rawScore)} raw score · ${fmtCount(segment.prs)} PRs`,
+                  tooltip: `${segment.repo} · ${fmtPct(segment.reward)} reward · ${fmtNumber(segment.rawScore)} raw score · ${fmtCount(segment.prs)} PRs`,
                 }));
                 return {
                   key: row.author,
@@ -1579,8 +2019,9 @@ function BestWorkShowcase({
                     </>
                   ),
                 };
-              })}
-            />
+                })}
+              />
+            </Box>
           </Box>
         </Box>
       ) : (
@@ -1612,7 +2053,8 @@ function AuthorInline({ pr }: { pr: PullDto }) {
   );
 }
 
-function BestWorkMiniPr({ pr }: { pr: PullDto }) {
+function BestWorkMiniPr({ row }: { row: BestWorkPull }) {
+  const pr = row.pr;
   const author = pr.author_login ?? 'unknown';
   return (
     <Link href={pullHref(pr)} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
@@ -1622,12 +2064,22 @@ function BestWorkMiniPr({ pr }: { pr: PullDto }) {
             <Box as="img" src={`https://github.com/${pr.repo_full_name.split('/')[0]}.png?size=40`} alt="" sx={{ width: 14, height: 14, borderRadius: 1, bg: 'canvas.inset', flexShrink: 0 }} />
             <Text sx={{ color: 'fg.muted', fontFamily: 'mono', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pr.repo_full_name}</Text>
           </Box>
-          <Text sx={{ color: 'accent.fg', fontFamily: 'mono', fontWeight: 700, fontSize: 0, whiteSpace: 'nowrap' }}>{fmtSignedNumber(num(pr.score))}</Text>
+          <MetricChip tone="success" title="Modeled subnet emission share represented by this PR.">reward {fmtPct(row.reward)}</MetricChip>
         </Box>
         <Text sx={{ display: 'block', fontWeight: 700, fontSize: 0, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{pr.number} {pr.title}</Text>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 2, minWidth: 0 }}>
-          <Box as="img" src={`https://github.com/${author}.png?size=40`} alt="" sx={{ width: 14, height: 14, borderRadius: 99, bg: 'canvas.inset', flexShrink: 0 }} />
-          <Text sx={{ color: 'fg.muted', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{author}</Text>
+        <Box sx={{ display: 'grid', gap: 1, mt: 2, minWidth: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minWidth: 0 }}>
+            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+              <Box as="img" src={`https://github.com/${author}.png?size=40`} alt="" sx={{ width: 14, height: 14, borderRadius: 99, bg: 'canvas.inset', flexShrink: 0 }} />
+              <Text sx={{ color: 'fg.muted', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{author}</Text>
+              <RoleBadge association={pr.author_association} />
+            </Box>
+            <LineChanges additions={pr.additions} deletions={pr.deletions} />
+          </Box>
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
+            <MetricChip tone="accent" title="Gittensor validated score for this PR.">score {fmtNumber(num(pr.score))}</MetricChip>
+            <MetricChip title="This PR's score divided by total scored PR points in the same repo.">share {fmtPct(row.repoShare)}</MetricChip>
+          </Box>
         </Box>
       </Box>
     </Link>
@@ -1649,14 +2101,57 @@ function segmentColor(index: number): string {
   return colors[index % colors.length];
 }
 
-function MetricChip({ children, tone = 'muted' }: { children: React.ReactNode; tone?: 'muted' | 'accent' | 'success' }) {
+function FormulaSymbol({ children }: { children: React.ReactNode }) {
+  return <Text sx={{ color: 'fg.subtle', fontFamily: 'mono', fontSize: 0, lineHeight: '16px' }}>{children}</Text>;
+}
+
+function FormulaGroup({ children, title }: { children: React.ReactNode; title: string }) {
+  return (
+    <Box title={title} sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, border: '1px solid', borderColor: 'border.muted', borderRadius: 2, bg: 'canvas.subtle', px: 1, py: '2px', cursor: 'help', maxWidth: 'max-content', flexShrink: 0, overflow: 'hidden' }}>
+      {children}
+    </Box>
+  );
+}
+
+function FormulaInline({ row }: { row: BestWorkPull }) {
+  return (
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, flexWrap: 'wrap', pb: '1px' }}>
+      <FormulaGroup title="PR share = this PR's Gittensor score divided by the repo's total scored PR points.">
+        <FormulaTerm tone="accent" label="score" value={fmtNumber(num(row.pr.score))} />
+        <FormulaSymbol>/</FormulaSymbol>
+        <FormulaTerm label="repo total" value={fmtNumber(row.repoScoreTotal)} />
+        <FormulaSymbol>=</FormulaSymbol>
+        <FormulaTerm label="share" value={fmtPct(row.repoShare)} />
+      </FormulaGroup>
+      <FormulaGroup title={row.maintainerCutApplied ? "Reward = PR share multiplied by the PR pool after active maintainer_cut and issue-pool spillover." : "Reward = PR share multiplied by the PR pool. Maintainer_cut is skipped unless registered maintainer miners exist."}>
+        <FormulaTerm label="share" value={fmtPct(row.repoShare)} />
+        <FormulaSymbol>x</FormulaSymbol>
+        <FormulaTerm label="PR pool" value={fmtPct(row.repoPool)} />
+        <FormulaSymbol>=</FormulaSymbol>
+        <FormulaTerm tone="success" label="reward" value={fmtPct(row.reward)} />
+      </FormulaGroup>
+    </Box>
+  );
+}
+
+function FormulaTerm({ label, value, tone = 'muted' }: { label: string; value: string; tone?: 'muted' | 'accent' | 'success' }) {
+  const color = tone === 'success' ? 'success.fg' : tone === 'accent' ? 'accent.fg' : 'fg.muted';
+  return (
+    <Box as="span" sx={{ display: 'inline-flex', alignItems: 'baseline', gap: '4px', minWidth: 0, fontFamily: 'mono', fontSize: 0, lineHeight: '16px', whiteSpace: 'nowrap' }}>
+      <Box as="span" sx={{ color: 'fg.muted' }}>{label}</Box>
+      <Box as="span" sx={{ color, fontWeight: 800 }}>{value}</Box>
+    </Box>
+  );
+}
+
+function MetricChip({ children, tone = 'muted', title }: { children: React.ReactNode; tone?: 'muted' | 'accent' | 'success'; title?: string }) {
   const palette = tone === 'accent'
     ? { border: 'accent.muted', bg: 'accent.subtle', color: 'accent.fg' }
     : tone === 'success'
       ? { border: 'success.muted', bg: 'success.subtle', color: 'success.fg' }
       : { border: 'border.muted', bg: 'canvas.subtle', color: 'fg.muted' };
   return (
-    <Box as="span" sx={{ border: '1px solid', borderColor: palette.border, borderRadius: 2, bg: palette.bg, color: palette.color, fontFamily: 'mono', fontSize: 0, px: 1, lineHeight: '15px', whiteSpace: 'nowrap' }}>
+    <Box title={title} as="span" sx={{ border: '1px solid', borderColor: palette.border, borderRadius: 2, bg: palette.bg, color: palette.color, cursor: title ? 'help' : 'inherit', fontFamily: 'mono', fontSize: 0, px: 1, lineHeight: '15px', whiteSpace: 'nowrap' }}>
       {children}
     </Box>
   );
@@ -1735,11 +2230,35 @@ function BestWorkRankList({ icon, title, empty, rows }: { icon: React.ReactNode;
   );
 }
 
-function PullRequestPipeline({ columns, durationLabel, repos, selectedRepos, onRepoToggle, onRepoClear }: { columns: PipelineColumn[]; durationLabel: string; repos: string[]; selectedRepos: string[]; onRepoToggle: (repo: string) => void; onRepoClear: () => void }) {
+function PullRequestPipeline({ columns, durationLabel, chartDuration, repos, selectedRepos, onRepoToggle, onRepoClear }: { columns: PipelineColumn[]; durationLabel: string; chartDuration: ReturnType<typeof durationConfig>; repos: string[]; selectedRepos: string[]; onRepoToggle: (repo: string) => void; onRepoClear: () => void }) {
+  const [bucketFilters, setBucketFilters] = useState<Partial<Record<PipelineColumn['key'], number>>>({});
   const active = columns
     .filter((column) => column.key === 'draft' || column.key === 'submitted')
     .reduce((sum, column) => sum + column.pulls.length, 0);
   const total = columns.reduce((sum, column) => sum + column.pulls.length, 0);
+  const selectedRepoKey = selectedRepos.map((repo) => repo.toLowerCase()).sort().join('|');
+
+  useEffect(() => {
+    setBucketFilters({});
+  }, [chartDuration.key, chartDuration.ms, chartDuration.buckets, selectedRepoKey]);
+
+  const toggleBucketFilter = (columnKey: PipelineColumn['key'], index: number) => {
+    setBucketFilters((prev) => {
+      const next = { ...prev };
+      if (next[columnKey] === index) delete next[columnKey];
+      else next[columnKey] = index;
+      return next;
+    });
+  };
+
+  const clearBucketFilter = (columnKey: PipelineColumn['key']) => {
+    setBucketFilters((prev) => {
+      const next = { ...prev };
+      delete next[columnKey];
+      return next;
+    });
+  };
+
   return (
     <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', minWidth: 0, overflow: 'visible', boxShadow: 'shadow.small' }}>
       <Box sx={{ position: 'relative', zIndex: 20, minHeight: 48, px: 3, py: 2, borderBottom: '1px solid', borderColor: 'border.default', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
@@ -1754,36 +2273,315 @@ function PullRequestPipeline({ columns, durationLabel, repos, selectedRepos, onR
         </Box>
       </Box>
       <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'repeat(5, minmax(220px, 1fr))'], overflowX: ['visible', null, 'auto'] }}>
-        {columns.map((column, index) => (
-          <Box key={column.key} sx={{ p: 3, borderLeft: [0, null, index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))'], borderTop: [index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))', null, 0], minWidth: 0 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
-              <Box sx={{ minWidth: 0 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Box sx={{ width: 7, height: 7, borderRadius: 99, bg: column.color, flexShrink: 0 }} />
-                  <Text sx={{ fontWeight: 700, fontSize: 0 }}>{column.title} · {column.pulls.length}</Text>
+        {columns.map((column, index) => {
+          const selectedBucket = bucketFilters[column.key] ?? null;
+          const visiblePulls = selectedBucket === null
+            ? column.pulls
+            : column.pulls.filter((pr) => bucketIndexForTimestamp(chartDuration, pipelineTimestamp(pr, column.key)) === selectedBucket);
+          const countLabel = selectedBucket === null
+            ? fmtCount(column.pulls.length)
+            : fmtCount(visiblePulls.length) + '/' + fmtCount(column.pulls.length);
+          return (
+            <Box key={column.key} sx={{ p: 3, borderLeft: [0, null, index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))'], borderTop: [index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))', null, 0], minWidth: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Box sx={{ width: 7, height: 7, borderRadius: 99, bg: column.color, flexShrink: 0 }} />
+                    <Text sx={{ fontWeight: 700, fontSize: 0 }}>{column.title} · {countLabel}</Text>
+                  </Box>
+                  <Text sx={{ display: 'block', color: 'fg.muted', fontFamily: 'mono', fontSize: 0, mt: 1 }}>{column.caption}</Text>
                 </Box>
-                <Text sx={{ display: 'block', color: 'fg.muted', fontFamily: 'mono', fontSize: 0, mt: 1 }}>{column.caption}</Text>
+              </Box>
+              <PipelineColumnBars pulls={column.pulls} stage={column.key} label={column.title} color={column.color} duration={chartDuration} selectedIndex={selectedBucket} onSelectIndex={(bucketIndex) => toggleBucketFilter(column.key, bucketIndex)} />
+              {selectedBucket !== null && (
+                <PipelineBucketFilter label={selectedBucketLabel(selectedBucket, chartDuration, visiblePulls.length)} onClear={() => clearBucketFilter(column.key)} />
+              )}
+              <Box sx={{ display: 'grid', gap: 2, mt: 2 }}>
+                {visiblePulls.slice(0, 3).map((pr) => <PipelinePullCard key={pr.id} pr={pr} color={column.color} stage={column.key} />)}
+                {visiblePulls.length === 0 && <PipelineEmpty label={selectedBucket === null ? pipelineEmptyLabel(column.key) : 'No PRs in selected time'} />}
+                {visiblePulls.length > 3 && (
+                  <Text sx={{ color: 'fg.muted', fontSize: 0, fontFamily: 'mono', textAlign: 'right' }}>+{visiblePulls.length - 3} more</Text>
+                )}
               </Box>
             </Box>
-            <Box sx={{ display: 'grid', gap: 2 }}>
-              {column.pulls.slice(0, 3).map((pr) => <PipelinePullCard key={pr.id} pr={pr} color={column.color} stage={column.key} />)}
-              {column.pulls.length === 0 && <PipelineEmpty label={pipelineEmptyLabel(column.key)} />}
-              {column.pulls.length > 3 && (
-                <Text sx={{ color: 'fg.muted', fontSize: 0, fontFamily: 'mono', textAlign: 'right' }}>+{column.pulls.length - 3} more</Text>
-              )}
-            </Box>
-          </Box>
-        ))}
+          );
+        })}
       </Box>
     </Box>
   );
 }
 
-function IssuePipeline({ columns, durationLabel, repos, selectedRepos, onRepoToggle, onRepoClear, pullByKey }: { columns: IssuePipelineColumn[]; durationLabel: string; repos: string[]; selectedRepos: string[]; onRepoToggle: (repo: string) => void; onRepoClear: () => void; pullByKey: Map<string, PullDto> }) {
+function bucketRangeLabel(index: number, duration: ReturnType<typeof durationConfig>): string {
+  const now = Date.now();
+  const start = now - duration.ms;
+  const bucketMs = duration.ms / duration.buckets;
+  const bucketStart = new Date(start + index * bucketMs);
+  const bucketEnd = new Date(Math.min(now, start + (index + 1) * bucketMs));
+  if (duration.key === '24h') {
+    return bucketStart.toLocaleTimeString(undefined, { hour: 'numeric' }) + '–' + bucketEnd.toLocaleTimeString(undefined, { hour: 'numeric' });
+  }
+  if (duration.key === '7d') {
+    return bucketStart.toLocaleDateString(undefined, { weekday: 'short', hour: 'numeric' });
+  }
+  return bucketStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function bucketIndexForTimestamp(duration: ReturnType<typeof durationConfig>, timestamp: number): number | null {
+  if (!Number.isFinite(timestamp)) return null;
+  const now = Date.now();
+  const start = now - duration.ms;
+  if (timestamp < start || timestamp > now) return null;
+  const bucketMs = duration.ms / duration.buckets;
+  return Math.min(duration.buckets - 1, Math.max(0, Math.floor((timestamp - start) / bucketMs)));
+}
+
+function selectedBucketLabel(index: number, duration: ReturnType<typeof durationConfig>, count: number): string {
+  return bucketRangeLabel(index, duration) + ' · ' + fmtCount(count);
+}
+
+function PipelineBucketFilter({ label, onClear }: { label: string; onClear: () => void }) {
+  return (
+    <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minWidth: 0, border: '1px solid', borderColor: 'border.muted', borderRadius: 2, bg: 'canvas.subtle', px: 2, py: 1 }}>
+      <Text sx={{ minWidth: 0, color: 'fg.muted', fontSize: 0, fontFamily: 'mono', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</Text>
+      <Box
+        as="button"
+        type="button"
+        onClick={onClear}
+        sx={{ appearance: 'none', border: 0, bg: 'transparent', color: 'accent.fg', fontSize: 0, fontWeight: 700, p: 0, cursor: 'pointer', flexShrink: 0, '&:hover': { textDecoration: 'underline' } }}
+      >
+        Clear
+      </Box>
+    </Box>
+  );
+}
+
+function PipelineColumnBars({ pulls, stage, label, color, duration, selectedIndex, onSelectIndex }: { pulls: PullDto[]; stage: PipelineColumn['key']; label: string; color: string; duration: ReturnType<typeof durationConfig>; selectedIndex: number | null; onSelectIndex: (index: number) => void }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const values = bucketValues(duration, pulls, (pr) => pipelineTimestamp(pr, stage));
+  const width = 220;
+  const height = 42;
+  const gap = values.length > 18 ? 2 : 4;
+  const barWidth = Math.max(2, (width - gap * Math.max(0, values.length - 1)) / Math.max(1, values.length));
+  const max = Math.max(1, ...values);
+  const hasActivity = values.some((value) => value > 0);
+  const hoveredValue = hoveredIndex === null ? 0 : values[hoveredIndex] ?? 0;
+  const tooltipLeft = hoveredIndex === null ? 0 : ((hoveredIndex + 0.5) / Math.max(1, values.length)) * 100;
+  const tooltipTransform = hoveredIndex === null
+    ? 'translateX(-50%)'
+    : hoveredIndex < values.length * 0.22
+      ? 'translateX(0)'
+      : hoveredIndex > values.length * 0.78
+        ? 'translateX(-100%)'
+        : 'translateX(-50%)';
+
+  return (
+    <Box onMouseLeave={() => setHoveredIndex(null)} sx={{ position: 'relative', mt: 2, height: 46, bg: 'transparent', px: 2, py: 1, overflow: 'visible', cursor: 'default', zIndex: hoveredIndex === null ? 1 : 30 }}>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="42" preserveAspectRatio="none" role="img" aria-label={`${label} pull request activity`}>
+        {values.map((value, index) => {
+          const x = index * (barWidth + gap);
+          const barHeight = value > 0 ? Math.max(4, (value / max) * (height - 6)) : 2;
+          const y = height - 1 - barHeight;
+          const hovered = hoveredIndex === index;
+          const selected = selectedIndex === index;
+          return (
+            <g key={index}>
+              <rect
+                x={x}
+                y={y}
+                width={barWidth}
+                height={barHeight}
+                rx="1.5"
+                fill={value > 0 ? color : 'var(--border-muted)'}
+                opacity={hovered || selected ? 1 : value > 0 ? 0.86 : hasActivity ? 0.18 : 0.12}
+                style={{ transition: 'opacity 120ms ease' }}
+              />
+              <rect
+                x={Math.max(0, x - gap / 2)}
+                y={0}
+                width={barWidth + gap}
+                height={height}
+                fill="transparent"
+                onMouseEnter={() => setHoveredIndex(index)}
+                onFocus={() => setHoveredIndex(index)}
+                onClick={() => onSelectIndex(index)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onSelectIndex(index);
+                  }
+                }}
+                onBlur={() => setHoveredIndex(null)}
+                tabIndex={0}
+                style={{ outline: 'none', cursor: 'pointer' }}
+              />
+            </g>
+          );
+        })}
+      </svg>
+      {hoveredIndex !== null && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: `${tooltipLeft}%`,
+            bottom: 'calc(100% + 8px)',
+            transform: tooltipTransform,
+            minWidth: 148,
+            bg: 'canvas.overlay',
+            backgroundColor: 'color-mix(in srgb, var(--canvas-overlay, var(--bgColor-overlay)) 82%, transparent)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            border: '1px solid',
+            borderColor: 'border.default',
+            borderRadius: 2,
+            boxShadow: 'shadow.medium',
+            px: 2,
+            py: 2,
+            pointerEvents: 'none',
+          }}
+        >
+          <Text sx={{ display: 'block', color: 'fg.default', fontWeight: 700, fontSize: 0, mb: 1 }}>
+            {bucketRangeLabel(hoveredIndex, duration)}
+          </Text>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: 99, bg: color, flexShrink: 0 }} />
+            <Text sx={{ color: 'fg.muted', flex: 1, fontSize: 0, whiteSpace: 'nowrap' }}>{label} PRs</Text>
+            <Text sx={{ color: 'fg.default', fontWeight: 700, fontFamily: 'mono', fontSize: 0 }}>{fmtCount(hoveredValue)}</Text>
+          </Box>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+
+function IssueColumnTrend({ issues, stage, label, color, duration, selectedIndex, onSelectIndex }: { issues: IssueDto[]; stage: IssuePipelineColumn['key']; label: string; color: string; duration: ReturnType<typeof durationConfig>; selectedIndex: number | null; onSelectIndex: (index: number) => void }) {
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const values = bucketValues(duration, issues, (issue) => issuePipelineTimestamp(issue, stage));
+  const width = 220;
+  const height = 34;
+  const gap = values.length > 18 ? 2 : 4;
+  const cellWidth = Math.max(4, (width - gap * Math.max(0, values.length - 1)) / Math.max(1, values.length));
+  const cellHeight = 22;
+  const cellY = 6;
+  const max = Math.max(1, ...values);
+  const hasActivity = values.some((value) => value > 0);
+  const hoveredValue = hoveredIndex === null ? 0 : values[hoveredIndex] ?? 0;
+  const tooltipLeft = hoveredIndex === null ? 0 : ((hoveredIndex + 0.5) / Math.max(1, values.length)) * 100;
+  const tooltipTransform = hoveredIndex === null
+    ? 'translateX(-50%)'
+    : hoveredIndex < values.length * 0.22
+      ? 'translateX(0)'
+      : hoveredIndex > values.length * 0.78
+        ? 'translateX(-100%)'
+        : 'translateX(-50%)';
+
+  return (
+    <Box onMouseLeave={() => setHoveredIndex(null)} sx={{ position: 'relative', mt: 2, height: 40, bg: 'transparent', px: 2, py: 1, overflow: 'visible', cursor: 'default', zIndex: hoveredIndex === null ? 1 : 30 }}>
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height="34" preserveAspectRatio="none" role="img" aria-label={`${label} issue activity`}>
+        {values.map((value, index) => {
+          const x = index * (cellWidth + gap);
+          const intensity = value > 0 ? 0.22 + (value / max) * 0.68 : hasActivity ? 0.08 : 0.06;
+          const hovered = hoveredIndex === index;
+          const selected = selectedIndex === index;
+          return (
+            <g key={index}>
+              <rect
+                x={x}
+                y={cellY}
+                width={cellWidth}
+                height={cellHeight}
+                rx="3"
+                fill={value > 0 ? color : 'var(--border-muted)'}
+                opacity={hovered || selected ? 1 : intensity}
+                style={{ transition: 'opacity 120ms ease' }}
+              />
+              <rect
+                x={Math.max(0, x - gap / 2)}
+                y={0}
+                width={cellWidth + gap}
+                height={height}
+                fill="transparent"
+                onMouseEnter={() => setHoveredIndex(index)}
+                onFocus={() => setHoveredIndex(index)}
+                onClick={() => onSelectIndex(index)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onSelectIndex(index);
+                  }
+                }}
+                onBlur={() => setHoveredIndex(null)}
+                tabIndex={0}
+                style={{ outline: 'none', cursor: 'pointer' }}
+              />
+            </g>
+          );
+        })}
+      </svg>
+      {hoveredIndex !== null && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: `${tooltipLeft}%`,
+            bottom: 'calc(100% + 8px)',
+            transform: tooltipTransform,
+            minWidth: 158,
+            bg: 'canvas.overlay',
+            backgroundColor: 'color-mix(in srgb, var(--canvas-overlay, var(--bgColor-overlay)) 84%, transparent)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            border: '1px solid',
+            borderColor: 'border.default',
+            borderRadius: 2,
+            boxShadow: 'shadow.medium',
+            px: 2,
+            py: 2,
+            pointerEvents: 'none',
+          }}
+        >
+          <Text sx={{ display: 'block', color: 'fg.default', fontWeight: 700, fontSize: 0, mb: 1 }}>
+            {bucketRangeLabel(hoveredIndex, duration)}
+          </Text>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: 99, bg: color, flexShrink: 0 }} />
+            <Text sx={{ color: 'fg.muted', flex: 1, fontSize: 0, whiteSpace: 'nowrap' }}>{label} issues</Text>
+            <Text sx={{ color: 'fg.default', fontWeight: 700, fontFamily: 'mono', fontSize: 0 }}>{fmtCount(hoveredValue)}</Text>
+          </Box>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function IssuePipeline({ columns, durationLabel, chartDuration, repos, selectedRepos, onRepoToggle, onRepoClear, issueScores, pullByKey, repoByName, issueMinerEligibilityByLogin }: { columns: IssuePipelineColumn[]; durationLabel: string; chartDuration: ReturnType<typeof durationConfig>; repos: string[]; selectedRepos: string[]; onRepoToggle: (repo: string) => void; onRepoClear: () => void; issueScores: Map<string, number>; pullByKey: Map<string, PullDto>; repoByName: Map<string, RepoEntry>; issueMinerEligibilityByLogin: Map<string, boolean> }) {
+  const [bucketFilters, setBucketFilters] = useState<Partial<Record<IssuePipelineColumn['key'], number>>>({});
   const active = columns.find((column) => column.key === 'opened')?.issues.length ?? 0;
   const total = columns.reduce((sum, column) => sum + column.issues.length, 0);
+  const selectedRepoKey = selectedRepos.map((repo) => repo.toLowerCase()).sort().join('|');
+
+  useEffect(() => {
+    setBucketFilters({});
+  }, [chartDuration.key, chartDuration.ms, chartDuration.buckets, selectedRepoKey]);
+
+  const toggleBucketFilter = (columnKey: IssuePipelineColumn['key'], index: number) => {
+    setBucketFilters((prev) => {
+      const next = { ...prev };
+      if (next[columnKey] === index) delete next[columnKey];
+      else next[columnKey] = index;
+      return next;
+    });
+  };
+
+  const clearBucketFilter = (columnKey: IssuePipelineColumn['key']) => {
+    setBucketFilters((prev) => {
+      const next = { ...prev };
+      delete next[columnKey];
+      return next;
+    });
+  };
+
   return (
-    <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', minWidth: 0, overflow: 'hidden', boxShadow: 'shadow.small' }}>
+    <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', minWidth: 0, overflow: 'visible', boxShadow: 'shadow.small' }}>
       <Box sx={{ position: 'relative', zIndex: 20, minHeight: 48, px: 3, py: 2, borderBottom: '1px solid', borderColor: 'border.default', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
           <Heading sx={{ fontSize: 1, m: 0 }}>Issue Pipeline</Heading>
@@ -1796,64 +2594,128 @@ function IssuePipeline({ columns, durationLabel, repos, selectedRepos, onRepoTog
         </Box>
       </Box>
       <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'repeat(4, minmax(240px, 1fr))'], overflowX: ['visible', null, 'auto'] }}>
-        {columns.map((column, index) => (
-          <Box key={column.key} sx={{ p: 3, borderLeft: [0, null, index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))'], borderTop: [index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))', null, 0], minWidth: 0 }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
-              <Box sx={{ minWidth: 0 }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Box sx={{ width: 7, height: 7, borderRadius: 99, bg: column.color, flexShrink: 0 }} />
-                  <Text sx={{ fontWeight: 700, fontSize: 0 }}>{column.title} · {column.issues.length}</Text>
+        {columns.map((column, index) => {
+          const selectedBucket = bucketFilters[column.key] ?? null;
+          const visibleIssues = selectedBucket === null
+            ? column.issues
+            : column.issues.filter((issue) => bucketIndexForTimestamp(chartDuration, issuePipelineTimestamp(issue, column.key)) === selectedBucket);
+          const countLabel = selectedBucket === null
+            ? fmtCount(column.issues.length)
+            : fmtCount(visibleIssues.length) + '/' + fmtCount(column.issues.length);
+          const caption = column.caption;
+          return (
+            <Box key={column.key} sx={{ p: 3, borderLeft: [0, null, index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))'], borderTop: [index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))', null, 0], minWidth: 0 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
+                <Box sx={{ minWidth: 0 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                    <Box sx={{ width: 7, height: 7, borderRadius: 99, bg: column.color, flexShrink: 0 }} />
+                    <Text sx={{ fontWeight: 700, fontSize: 0 }}>{column.title} · {countLabel}</Text>
+                  </Box>
+                  <Text sx={{ display: 'block', color: 'fg.muted', fontFamily: 'mono', fontSize: 0, mt: 1 }}>{caption}</Text>
                 </Box>
-                <Text sx={{ display: 'block', color: 'fg.muted', fontFamily: 'mono', fontSize: 0, mt: 1 }}>{column.caption}</Text>
+              </Box>
+              <IssueColumnTrend issues={column.issues} stage={column.key} label={column.title} color={column.color} duration={chartDuration} selectedIndex={selectedBucket} onSelectIndex={(bucketIndex) => toggleBucketFilter(column.key, bucketIndex)} />
+              {selectedBucket !== null && (
+                <PipelineBucketFilter label={selectedBucketLabel(selectedBucket, chartDuration, visibleIssues.length)} onClear={() => clearBucketFilter(column.key)} />
+              )}
+              <Box sx={{ display: 'grid', gap: 2, mt: 2 }}>
+                {visibleIssues.slice(0, 3).map((issue) => {
+                  const issueScore = issueScores.get(pullKey(issue.repo_full_name, issue.number)) ?? null;
+                  const linkedPrScore = linkedPullsOfficialScore(issue, pullByKey, rewardableIssueLinkedPrs(issue, pullByKey, repoByName));
+                  const discoveryState = issueDiscoveryState(issue, repoByName, issueMinerEligibilityByLogin);
+                  return <IssuePipelineCard key={issue.id} issue={issue} stage={column.key} color={column.color} issueScore={issueScore} linkedPrScore={linkedPrScore} discoveryState={discoveryState} />;
+                })}
+                {visibleIssues.length === 0 && <PipelineEmpty label={selectedBucket === null ? issuePipelineEmptyLabel(column.key) : 'No issues in selected time'} />}
+                {visibleIssues.length > 3 && (
+                  <Text sx={{ color: 'fg.muted', fontSize: 0, fontFamily: 'mono', textAlign: 'right' }}>+{visibleIssues.length - 3} more</Text>
+                )}
               </Box>
             </Box>
-            <Box sx={{ display: 'grid', gap: 2 }}>
-              {column.issues.slice(0, 3).map((issue) => <IssuePipelineCard key={issue.id} issue={issue} stage={column.key} color={column.color} pullByKey={pullByKey} />)}
-              {column.issues.length === 0 && <PipelineEmpty label={issuePipelineEmptyLabel(column.key)} />}
-              {column.issues.length > 3 && (
-                <Text sx={{ color: 'fg.muted', fontSize: 0, fontFamily: 'mono', textAlign: 'right' }}>+{column.issues.length - 3} more</Text>
-              )}
-            </Box>
-          </Box>
-        ))}
+          );
+        })}
       </Box>
     </Box>
   );
 }
 
-function issueStageStatus(stage: IssuePipelineColumn['key']): { label: string; bg: string; border: string; color: string } {
+function issueStageStatus(stage: IssuePipelineColumn['key'], issue?: IssueDto): { label: string; bg: string; border: string; color: string; title?: string } {
+  const reason = lower(issue?.state_reason);
   if (stage === 'opened') return { label: 'open', bg: 'success.subtle', border: 'success.muted', color: 'success.fg' };
-  if (stage === 'completed') return { label: 'pending', bg: 'accent.subtle', border: 'accent.muted', color: 'accent.fg' };
+  if (stage === 'completed') return { label: 'pending', bg: 'accent.subtle', border: 'accent.muted', color: 'accent.fg', title: 'Completed issue with a merged rewardable linked PR, waiting for Gittensor scoring.' };
   if (stage === 'scored') return { label: 'scored', bg: 'done.subtle', border: 'done.muted', color: 'done.fg' };
+  if (reason === 'completed') return { label: 'completed', bg: 'attention.subtle', border: 'attention.muted', color: 'attention.fg', title: 'GitHub marked this issue completed, but the dashboard has no merged/scored rewardable linked PR for Gittensor validation yet.' };
+  if (reason === 'not_planned') return { label: 'not planned', bg: 'danger.subtle', border: 'danger.muted', color: 'danger.fg' };
   return { label: 'closed', bg: 'danger.subtle', border: 'danger.muted', color: 'danger.fg' };
 }
 
-function IssuePipelineStatusBadge({ stage }: { stage: IssuePipelineColumn['key'] }) {
-  const status = issueStageStatus(stage);
+function IssuePipelineStatusBadge({ stage, issue }: { stage: IssuePipelineColumn['key']; issue: IssueDto }) {
+  const status = issueStageStatus(stage, issue);
   return (
-    <Box as="span" sx={{ border: '1px solid', borderColor: status.border, borderRadius: 2, bg: status.bg, color: status.color, fontSize: 0, fontWeight: 700, px: 1, py: '1px', lineHeight: '16px', whiteSpace: 'nowrap' }}>
+    <Box title={status.title} as="span" sx={{ border: '1px solid', borderColor: status.border, borderRadius: 2, bg: status.bg, color: status.color, fontSize: 0, fontWeight: 700, px: 1, py: '1px', lineHeight: '16px', whiteSpace: 'nowrap' }}>
       {status.label}
     </Box>
   );
 }
 
-function issueOfficialScore(issue: IssueDto, pullByKey: Map<string, PullDto>): number | null {
-  const scores: number[] = [];
-  for (const linked of issue.linked_prs ?? []) {
-    const pr = linkedPull(issue, pullByKey, linked.number);
-    if (pr && hasOfficialScore(pr)) scores.push(pr.score ?? 0);
-  }
-  if (scores.length === 0) return null;
-  return scores.reduce((sum, score) => sum + score, 0);
-}
-
-function IssueScoreValue({ issue, pullByKey, color }: { issue: IssueDto; pullByKey: Map<string, PullDto>; color: string }) {
-  const score = issueOfficialScore(issue, pullByKey);
+function LinkedPrScoreBadge({ score, color }: { score: number | null; color: string }) {
   if (score === null) return null;
   return (
-    <Box title="Linked solver PR official score" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color, fontSize: 0, fontFamily: 'mono', whiteSpace: 'nowrap' }}>
+    <Box title="Linked solver PR official Gittensor score" sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color, fontSize: 0, fontFamily: 'mono', whiteSpace: 'nowrap' }}>
       <Box sx={{ width: 6, height: 6, borderRadius: 99, bg: color }} />
-      {fmtSignedNumber(score)}
+      PR {fmtSignedNumber(score)}
+    </Box>
+  );
+}
+
+function IssueDiscoveryBadge({ score, discoveryState, stage }: { score: number | null; discoveryState: IssueDiscoveryState; stage: IssuePipelineColumn['key'] }) {
+  if (score !== null && score > 0) {
+    return (
+      <Box title="Gittensor issue-discovery earned score" as="span" sx={{ border: '1px solid', borderColor: 'success.muted', borderRadius: 2, bg: 'success.subtle', color: 'success.fg', fontFamily: 'mono', fontSize: 0, fontWeight: 700, px: 1, py: '1px', lineHeight: '16px', whiteSpace: 'nowrap' }}>
+        Discovery {fmtSignedNumber(score)}
+      </Box>
+    );
+  }
+  if (!discoveryState.enabled) return null;
+
+  if (!discoveryState.eligible) {
+    return (
+      <Box
+        title={discoveryState.reason}
+        aria-label="Issue discovery ineligible"
+        as="span"
+        sx={{
+          border: 0,
+          borderRadius: 99,
+          bg: 'transparent',
+          color: 'attention.fg',
+          width: 18,
+          height: 18,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          lineHeight: 1,
+          flexShrink: 0,
+        }}
+      >
+        <AlertIcon size={12} />
+      </Box>
+    );
+  }
+
+  const label = stage === 'opened'
+    ? 'Discovery candidate'
+    : stage === 'completed'
+      ? 'Discovery'
+      : stage === 'scored'
+        ? 'Discovery eligible'
+        : 'Discovery closed';
+  const palette = stage === 'closed'
+    ? { border: 'border.muted', bg: 'neutral.subtle', color: 'fg.muted' }
+    : { border: 'attention.muted', bg: 'attention.subtle', color: 'attention.fg' };
+
+  return (
+    <Box title="Issue-discovery repo is enabled and the issue author is issue-eligible in live Gittensor miner data." as="span" sx={{ border: '1px solid', borderColor: palette.border, borderRadius: 2, bg: palette.bg, color: palette.color, fontFamily: 'mono', fontSize: 0, fontWeight: 700, px: 1, py: '1px', lineHeight: '16px', whiteSpace: 'nowrap' }}>
+      {label}
     </Box>
   );
 }
@@ -1881,7 +2743,7 @@ function issuePipelineEmptyLabel(stage: IssuePipelineColumn['key']): string {
   return 'No closed issues';
 }
 
-function IssuePipelineCard({ issue, stage, color, pullByKey }: { issue: IssueDto; stage: IssuePipelineColumn['key']; color: string; pullByKey: Map<string, PullDto> }) {
+function IssuePipelineCard({ issue, stage, color, issueScore, linkedPrScore, discoveryState }: { issue: IssueDto; stage: IssuePipelineColumn['key']; color: string; issueScore: number | null; linkedPrScore: number | null; discoveryState: IssueDiscoveryState }) {
   const href = issueHref(issue);
   const age = issuePipelineAge(issue, stage);
   const author = issue.author_login ?? 'unknown';
@@ -1916,8 +2778,9 @@ function IssuePipelineCard({ issue, stage, color, pullByKey }: { issue: IssueDto
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minWidth: 0, flexWrap: 'wrap' }}>
           <IssueLabels issue={issue} />
           <Box sx={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, minWidth: 0, flexWrap: 'wrap', ml: 'auto' }}>
-            <IssuePipelineStatusBadge stage={stage} />
-            {stage === 'scored' && <IssueScoreValue issue={issue} pullByKey={pullByKey} color={color} />}
+            <IssuePipelineStatusBadge stage={stage} issue={issue} />
+            {stage === 'scored' && <LinkedPrScoreBadge score={linkedPrScore} color={color} />}
+            <IssueDiscoveryBadge score={issueScore} discoveryState={discoveryState} stage={stage} />
           </Box>
         </Box>
       </Box>
@@ -2417,66 +3280,35 @@ function RecentActivity({ items }: { items: RecentActivityItem[] }) {
                 >
                   {item.title}
                 </Text>
-                <Box
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1,
-                    mt: '2px',
-                    color: 'fg.muted',
-                    fontSize: 0,
-                    minWidth: 0,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+                <Box sx={{ mt: '4px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', columnGap: 2, rowGap: '4px', color: 'fg.muted', fontSize: 0, minWidth: 0 }}>
+                  <ActivityStatus item={item} />
+                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0, maxWidth: '100%' }}>
                     <Box
                       as="img"
                       src={`https://github.com/${item.repo.split('/')[0]}.png?size=40`}
                       alt=""
                       sx={{ width: 14, height: 14, borderRadius: 1, bg: 'canvas.subtle', flexShrink: 0 }}
                     />
-                    <Text sx={{ fontFamily: 'mono', color: 'accent.fg', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {item.repo}
-                    </Text>
+                    <Text sx={{ fontFamily: 'mono', color: 'accent.fg', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{item.repo}</Text>
                   </Box>
                   {item.actor && (
-                    <>
-                      <Text sx={{ color: 'fg.subtle' }}>·</Text>
-                      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, whiteSpace: 'nowrap' }}>
-                        <Text>by</Text>
-                        <Box
-                          as="img"
-                          src={`https://github.com/${item.actor}.png?size=40`}
-                          alt=""
-                          sx={{ width: 14, height: 14, borderRadius: 99, bg: 'canvas.subtle', flexShrink: 0 }}
-                        />
-                        <Text>{item.actor}</Text>
-                      </Box>
-                    </>
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0, maxWidth: '100%' }}>
+                      <Text sx={{ flexShrink: 0 }}>by</Text>
+                      <Box
+                        as="img"
+                        src={`https://github.com/${item.actor}.png?size=40`}
+                        alt=""
+                        sx={{ width: 14, height: 14, borderRadius: 99, bg: 'canvas.subtle', flexShrink: 0 }}
+                      />
+                      <Text sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{item.actor}</Text>
+                    </Box>
                   )}
-                  {item.meta && (
-                    <>
-                      <Text sx={{ color: 'fg.subtle' }}>·</Text>
-                      <Text sx={{ whiteSpace: 'nowrap', fontFamily: 'mono' }}>{item.meta}</Text>
-                    </>
-                  )}
+                  {item.meta && <Text sx={{ whiteSpace: 'nowrap', fontFamily: 'mono', flexShrink: 0 }}>{item.meta}</Text>}
                 </Box>
               </Box>
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  flexShrink: 0,
-                  mt: '3px',
-                }}
-              >
-                <ActivityStatus item={item} />
-                <Text sx={{ color: 'fg.subtle', fontSize: 0, whiteSpace: 'nowrap', minWidth: 32, textAlign: 'right' }}>
-                  {relative(item.timestamp)}
-                </Text>
-              </Box>
+              <Text sx={{ color: 'fg.subtle', fontSize: 0, whiteSpace: 'nowrap', mt: '3px', flexShrink: 0 }}>
+                {relative(item.timestamp)}
+              </Text>
             </Box>
           </Link>
         );

@@ -9,7 +9,6 @@ import {
   ChecklistIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
-  TelescopeIcon,
   BookIcon,
   PeopleIcon,
   PersonIcon,
@@ -30,18 +29,15 @@ interface NavItem {
 // bottom as a "reference" link rather than mixed in with the working pages.
 const PRIMARY: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: ChecklistIcon },
-  { href: '/opportunities', label: 'Opportunities', icon: TelescopeIcon },
-  { href: '/', label: 'Explorer', icon: RepoIcon },
-  { href: '/repositories', label: 'Repositories', icon: StackIcon },
+  { href: '/explorer', label: 'Explorer', icon: RepoIcon },
   { href: '/miners', label: 'Miners', icon: PeopleIcon },
-  { href: '/my-work', label: 'My Work', icon: PersonIcon },
-  { href: '/bounties', label: 'Bounties', icon: IssueOpenedIcon },
-];
-
-const SECONDARY: NavItem[] = [
+  { href: '/repositories', label: 'Repositories', icon: StackIcon },
   { href: '/issues', label: 'Issues', icon: IssueOpenedIcon },
   { href: '/pulls', label: 'Pull Requests', icon: GitPullRequestIcon },
   { href: '/my-prs', label: 'My PRs', icon: PersonIcon },
+];
+
+const SECONDARY: NavItem[] = [
   { href: '/docs', label: 'Docs', icon: BookIcon },
 ];
 
@@ -49,7 +45,6 @@ const SECONDARY: NavItem[] = [
 const HIDE_ROUTES = new Set(['/sign-in']);
 
 function isActive(pathname: string, href: string): boolean {
-  if (href === '/') return pathname === '/';
   return pathname === href || pathname.startsWith(href + '/');
 }
 

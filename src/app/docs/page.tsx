@@ -307,7 +307,7 @@ export default function DocsPage() {
               </P>
               <Ul>
                 <Li><strong>Toast</strong>: bottom-right, 8s auto-dismiss, click to navigate</Li>
-                <Li><strong>Click</strong>: routes to <Code>/?repo=...&tab=issues&issue=N</Code> — Explorer opens with the issue auto-loaded into the configured display (modal/side/accordion)</Li>
+                <Li><strong>Click</strong>: routes to <Code>/explorer?repo=...&tab=issues&issue=N</Code> — Explorer opens with the issue auto-loaded into the configured display (modal/side/accordion)</Li>
                 <Li><strong>Sticky badges</strong>: red pill on the corresponding repo in the left rail; clears when you click that repo</Li>
                 <Li><strong>Mark all read</strong>: button in the left rail header clears all sticky badges at once</Li>
               </Ul>
