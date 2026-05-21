@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifySessionToken, SESSION_COOKIE_NAME } from '@/lib/session-token';
+import { getUserById } from '@/lib/auth';
+
+export const runtime = 'nodejs';
 
 // Routes accessible without any session.
 const PUBLIC_PATHS = new Set(['/sign-in']);
@@ -39,9 +42,13 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Refresh status from DB — cookie value is frozen at login and may be stale
+  const user = getUserById(session.uid);
+  const liveStatus = user?.status ?? 'rejected';
+
   // Rejected users are admin-banned: clear their session and bounce to sign-in
   // with an error so they can't silently retry.
-  if (session.status === 'rejected') {
+  if (liveStatus === 'rejected') {
     if (pathname.startsWith('/api/')) {
       return NextResponse.json({ error: 'Account suspended' }, { status: 403 });
     }

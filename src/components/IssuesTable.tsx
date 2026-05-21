@@ -6,11 +6,11 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import {
   Box,
   Text,
-  TextInput,
   Label,
   Link as PrimerLink,
 } from '@primer/react';
 import Spinner from '@/components/Spinner';
+import SearchInput from '@/components/SearchInput';
 import { TableRowsSkeleton } from '@/components/Skeleton';
 import Dropdown from '@/components/Dropdown';
 import AuthorFilter from '@/components/AuthorFilter';
@@ -18,7 +18,6 @@ import AuthorActivitySidebar from '@/components/AuthorActivitySidebar';
 import AuthorCredibilityNote from '@/components/AuthorCredibilityNote';
 import RelatedPRsCell, { type LinkedPullReference } from '@/components/RelatedPRsCell';
 import {
-  SearchIcon,
   CommentIcon,
   RepoIcon,
   StarIcon,
@@ -268,12 +267,11 @@ export default function IssuesTable() {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', minWidth: 0 }}>
-          <TextInput
-            leadingVisual={SearchIcon}
+          <SearchInput
             placeholder="Filter by title, repo, #, author…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            sx={{ width: [280, 360, 380], maxWidth: '100%' }}
+            onChange={setQuery}
+            width={380}
           />
           <Dropdown
             value={stateFilter}
