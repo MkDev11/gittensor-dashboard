@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getDb, getReadDb } from '@/lib/db';
+import { PR_LOOKBACK_DAYS } from '@/lib/gittensor-policy';
 import type { Miner, MinerTopRepo, MinersResponse } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
@@ -13,8 +14,9 @@ const PRS_TTL_MS = 30_000;
 const DISCOVERY_ACTIVITY_TTL_MS = 60_000;
 // Validator's "valid merged PR" threshold.
 const VALID_TOKEN_SCORE = 5;
-// 14-day sparkline window matches the leaderboard row width budget.
-const SPARKLINE_DAYS = 35;
+// Sparkline mirrors the validator's PR scoring window so what users see
+// on the leaderboard matches what's actually being scored.
+const SPARKLINE_DAYS = PR_LOOKBACK_DAYS;
 const TOP_REPOS_PER_MINER = 5;
 const DAY_MS = 86_400_000;
 
@@ -442,7 +444,7 @@ async function refresh(): Promise<Cached> {
     (m.hotkey ? lastPrIdx.byHotkey.get(m.hotkey) : undefined) ??
     null;
 
-  const pickDaily35 = (m: Miner): number[] => {
+  const pickDailyLookback = (m: Miner): number[] => {
     const found =
       (m.githubId != null ? prAggregates.dailyById.get(String(m.githubId)) : undefined) ??
       (m.githubUsername ? prAggregates.dailyByLoginLc.get(m.githubUsername.toLowerCase()) : undefined) ??
@@ -471,7 +473,7 @@ async function refresh(): Promise<Cached> {
       totalValidMergedPrs: validMerged,
       lastOssActivityAt,
       lastDiscoveryActivityAt,
-      daily35: pickDaily35(m),
+      dailyLookback: pickDailyLookback(m),
       topRepos: pickTopRepos(m),
     };
     if (!m.githubId) return baseEnrich;

@@ -219,8 +219,9 @@ export interface Miner {
   // and is reset whenever the validator re-indexes the row — NOT a reliable
   // proxy for when the UID was actually registered on the network.
   createdAt?: string;
-  // Server-enriched: PR-count buckets for the last 35 days, oldest→newest.
-  daily35?: number[];
+  // Server-enriched: PR-count buckets for the validator's PR_LOOKBACK_DAYS
+  // window, oldest→newest. Length equals PR_LOOKBACK_DAYS.
+  dailyLookback?: number[];
   // Server-enriched: repos this miner contributes to most (top 3 by PR count).
   topRepos?: MinerTopRepo[];
   // Server-enriched: rank held at the start of the previous UTC day.

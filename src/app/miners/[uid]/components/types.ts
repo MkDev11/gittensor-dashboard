@@ -103,13 +103,13 @@ export interface DetailResp {
   fetched_at: number;
 }
 
-export type Period = '1D' | '7D' | '35D' | 'ALL';
+export type Period = '1D' | '7D' | '30D' | 'ALL';
 export type Mode = 'oss' | 'discovery';
 
 export const PERIODS: { key: Period; label: string; days: number | null }[] = [
   { key: '1D',  label: '1D',  days: 1 },
   { key: '7D',  label: '7D',  days: 7 },
-  { key: '35D', label: '35D', days: 35 },
+  { key: '30D', label: '30D', days: 30 },
   { key: 'ALL', label: 'All', days: null },
 ];
 

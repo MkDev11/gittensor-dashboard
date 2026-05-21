@@ -20,6 +20,7 @@ import {
   MarkGithubIcon,
 } from '@primer/octicons-react';
 import { formatUsd, formatRelativeTime } from '@/lib/format';
+import { PR_LOOKBACK_DAYS } from '@/lib/gittensor-policy';
 import { Card, CardHeader, MONO, LABEL, EmptyState } from '../../../components';
 
 interface PrDetail {
@@ -53,7 +54,7 @@ function num(v: unknown): number {
 
 // Mirrors prTimeDecayModel.ts from gittensor-ui.
 const DECAY = { graceHours: 12, midpoint: 10, steepness: 0.4, floor: 0.05 };
-const LOOKBACK = 35;
+const LOOKBACK = PR_LOOKBACK_DAYS;
 
 function decayAt(days: number): number {
   if (days <= DECAY.graceHours / 24) return 1;
@@ -81,7 +82,7 @@ const FILL_PATH =
 const GRACE_X = xOf(DECAY.graceHours / 24);
 
 const Y_GRID = [0, 0.25, 0.5, 0.75, 1.0];
-const X_TICKS = [0, 7, 14, 21, 28, 35];
+const X_TICKS = [0, 7, 14, 21, LOOKBACK];
 
 function TimeDecayChart({
   daysSinceMerge,

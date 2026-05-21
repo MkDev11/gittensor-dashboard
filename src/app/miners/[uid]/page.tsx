@@ -11,6 +11,7 @@ import {
 } from '@primer/octicons-react';
 import { useTrackedMiners } from '@/lib/tracked-miners';
 import { useMinerLogin } from '@/lib/use-miner';
+import { PR_LOOKBACK_DAYS } from '@/lib/gittensor-policy';
 import {
   num, splitEarnings,
   Segmented, EmptyState,
@@ -67,7 +68,7 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
   const uid = params.uid;
   const me = useMinerLogin();
   const { tracked, toggle } = useTrackedMiners();
-  const [period, setPeriod] = useState<Period>('35D');
+  const [period, setPeriod] = useState<Period>('30D');
   const [mode, setMode] = useState<Mode>('oss');
   const [copied, setCopied] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
@@ -102,8 +103,10 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
   const discoveredInP  = useMemo(() => discovered.filter((i) => withinPeriod(i.createdAt, periodDays)), [discovered, periodDays]);
   const solvedInPeriod = useMemo(() => solved.filter((i) => withinPeriod(i.closedAt ?? i.createdAt, periodDays)), [solved, periodDays]);
 
-  // Fixed 35d window so the hero reflects recent health regardless of the period selector.
-  const HERO_DAYS = 35;
+  // Hero aggregates over the validator's scoring window so summary tiles
+  // match what the miner is actually being paid for, regardless of the
+  // currently selected period filter.
+  const HERO_DAYS = PR_LOOKBACK_DAYS;
   const heroAgg = useMemo(() => {
     let merged = 0, closedPr = 0, openPr = 0, additions = 0, deletions = 0;
     for (const p of prs) {

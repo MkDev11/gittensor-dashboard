@@ -226,7 +226,7 @@ function derivePulseSummary(miners: Miner[]): PulseSummary {
     if (oss) ossEligible += 1;
     if (disc) discEligible += 1;
     if (oss && disc) bothEligible += 1;
-    const d = m.daily35 ?? [];
+    const d = m.dailyLookback ?? [];
     if (d.length >= 14) {
       for (const n of d.slice(-14, -7)) priorWeekPrs += n;
       for (const n of d.slice(-7))      weeklyPrs   += n;
@@ -389,7 +389,7 @@ function deriveBiggestMover(miners: Miner[]): SpotlightTileData {
   }
   let ascending: { miner: Miner; recent: number; prior: number; multiplier: number } | null = null;
   for (const m of miners) {
-    const d = m.daily35 ?? [];
+    const d = m.dailyLookback ?? [];
     if (d.length < 14) continue;
     const prior = d.slice(-14, -7).reduce((a, b) => a + b, 0);
     const recent = d.slice(-7).reduce((a, b) => a + b, 0);

@@ -11,6 +11,7 @@ import {
 } from '@primer/octicons-react';
 import { TableRowsSkeleton } from '@/components/Skeleton';
 import { formatUsd, formatRelativeTime } from '@/lib/format';
+import { PR_LOOKBACK_DAYS } from '@/lib/gittensor-policy';
 import {
   Miner,
   MinerAvatar,
@@ -344,7 +345,7 @@ function RepoChip({
 
 // Priority order: momentum > inactivity > niche.
 function deriveMinerStatus(miner: Miner, currentRank: number): MinerStatus {
-  const daily = miner.daily35 ?? [];
+  const daily = miner.dailyLookback ?? [];
   const recent3 = daily.slice(-3).reduce((a, b) => a + b, 0);
   const recent14 = daily.slice(-14).reduce((a, b) => a + b, 0);
   const merged = miner.totalValidMergedPrs ?? miner.totalMergedPrs ?? 0;
@@ -669,7 +670,7 @@ function LeaderRow({
   })();
 
   const status = useMemo(() => deriveMinerStatus(miner, rank), [miner, rank]);
-  const daily35 = miner.daily35 ?? [];
+  const dailyLookback = miner.dailyLookback ?? [];
   const topRepos = miner.topRepos ?? [];
 
   const rowRef = useRef<HTMLDivElement | null>(null);
@@ -780,7 +781,7 @@ function LeaderRow({
           </Box>
 
           <Box sx={{ gridArea: 'spark', display: ['none', null, 'flex'], alignItems: 'center', minWidth: 0 }}>
-            <Sparkline values={daily35} width={108} height={22} />
+            <Sparkline values={dailyLookback} width={108} height={22} />
           </Box>
 
           <Box sx={{ gridArea: 'repos', display: ['none', null, 'flex'], alignItems: 'center', flexWrap: 'wrap', gap: '4px', minWidth: 0, pl: 2 }}>
@@ -810,7 +811,7 @@ function LeaderRow({
 
           <Box sx={{ gridArea: 'activity', display: ['flex', null, 'none'], alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <Box sx={{ flexShrink: 0 }}>
-              <Sparkline values={daily35} width={60} height={18} />
+              <Sparkline values={dailyLookback} width={60} height={18} />
             </Box>
             <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', minWidth: 0 }}>
               {topRepos.length === 0 ? (
@@ -982,7 +983,7 @@ export function LeaderTable({
       >
         <SortHdr active={sortKey === 'movement'} dir={sortDir} onClick={() => onSort('movement')} align="center" title="Current rank · Change since yesterday">#</SortHdr>
         <ColHdr align="left" title="Miner identity — GitHub username and UID">Miner</ColHdr>
-        <ColHdr align="left" title="Pull request activity over the last 35 days">Trend</ColHdr>
+        <ColHdr align="left" title={`Pull request activity over the last ${PR_LOOKBACK_DAYS} days`}>Trend</ColHdr>
         <ColHdr align="left" title="Merged pull requests and solved issues with OSS and Discovery track scores">Contributions</ColHdr>
         <SortHdr active={sortKey === 'cred'} dir={sortDir} onClick={() => onSort('cred')} title="Success rate — merged PRs + solved issues as a percentage of all submitted work">Success %</SortHdr>
         <SortHdr active={sortKey === 'score'} dir={sortDir} onClick={() => onSort('score')} title="Combined OSS + Discovery score">Score</SortHdr>

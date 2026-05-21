@@ -36,7 +36,7 @@ export interface IssueAgg {
 const PERIOD_LABEL: Record<Period, string> = {
   '1D':  'Last 24h',
   '7D':  'Last 7d',
-  '35D': 'Last 35d',
+  '30D': 'Last 30d',
   ALL:   'All-time',
 };
 
