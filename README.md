@@ -13,7 +13,12 @@ Built with Next.js 15 (App Router), TypeScript, Primer React, and `better-sqlite
 - `/explorer` is the repo drill-down view for issues and pull requests.
 - `/miners`, `/repositories`, `/issues`, `/pulls`, and `/my-prs` provide focused global tables.
 
-Dashboard reward-share cards follow the Gittensor allocator at UI level: repo slice = `emission_share * 90%`; active `maintainer_cut` is removed only when registered maintainer miners exist; the remaining slice is split by `issue_discovery_share`; empty PR/issue sub-pools spill within the same repo.
+Dashboard reward-share cards follow the Gittensor allocator at UI level:
+
+- Repo slice = `emission_share * 90%`.
+- Active `maintainer_cut` is removed only when registered maintainer miners exist.
+- The remaining slice is split by `issue_discovery_share`.
+- Empty PR/issue sub-pools spill within the same repo.
 
 ## Quick start
 

@@ -63,13 +63,6 @@ async function refresh(): Promise<Snapshot> {
   let alpha = 0;
   let tao = 0;
   let usd = 0;
-  let alphaTaoSum = 0;
-  let alphaTaoN = 0;
-  let alphaUsdSum = 0;
-  let alphaUsdN = 0;
-  let taoUsdSum = 0;
-  let taoUsdN = 0;
-
   for (const miner of miners) {
     const a = num(miner.alphaPerDay);
     const t = num(miner.taoPerDay);
@@ -77,18 +70,6 @@ async function refresh(): Promise<Snapshot> {
     alpha += a;
     tao += t;
     usd += u;
-    if (a > 0 && t > 0) {
-      alphaTaoSum += t / a;
-      alphaTaoN += 1;
-    }
-    if (a > 0 && u > 0) {
-      alphaUsdSum += u / a;
-      alphaUsdN += 1;
-    }
-    if (t > 0 && u > 0) {
-      taoUsdSum += u / t;
-      taoUsdN += 1;
-    }
   }
 
   const next: Snapshot = {
@@ -108,9 +89,9 @@ async function refresh(): Promise<Snapshot> {
     },
     daily: { alpha, tao, usd },
     rates: {
-      alphaTao: alphaTaoN > 0 ? alphaTaoSum / alphaTaoN : 0,
-      alphaUsd: alphaUsdN > 0 ? alphaUsdSum / alphaUsdN : 0,
-      taoUsd: taoUsdN > 0 ? taoUsdSum / taoUsdN : 0,
+      alphaTao: alpha > 0 ? tao / alpha : 0,
+      alphaUsd: alpha > 0 ? usd / alpha : 0,
+      taoUsd: tao > 0 ? usd / tao : 0,
     },
   };
   cache = next;

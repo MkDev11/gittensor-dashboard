@@ -185,16 +185,19 @@ export async function GET(req: NextRequest) {
   const dir: SortDir = dirParam === 'asc' ? 'asc' : 'desc';
   const page = positiveInt(url.searchParams.get('page'), 1);
   const pageSize = Math.min(PAGE_SIZE_MAX, positiveInt(url.searchParams.get('pageSize'), PAGE_SIZE_DEFAULT));
-  const limit = sinceIso ? SINCE_LIMIT : pageSize;
-  const offset = sinceIso ? 0 : (page - 1) * pageSize;
+  const sinceMode = Boolean(sinceIso);
+  const limit = sinceMode ? SINCE_LIMIT : pageSize;
+  const offset = sinceMode ? 0 : (page - 1) * pageSize;
+  const responsePage = sinceMode ? 1 : page;
+  const responsePageSize = sinceMode ? limit : pageSize;
 
   const repos = await resolveRepoScope(reqRepos);
   if (repos.length === 0) {
     return NextResponse.json({
       count: 0,
       repo_count: 0,
-      page,
-      page_size: pageSize,
+      page: responsePage,
+      page_size: responsePageSize,
       total_pages: 1,
       authors: [],
       author_count: 0,
@@ -306,7 +309,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const totalPages = Math.max(1, Math.ceil(totals.count / pageSize));
+  const totalPages = sinceMode ? 1 : Math.max(1, Math.ceil(totals.count / pageSize));
   const pulls: AggPullRow[] = rows.map((r) => ({
     ...r,
     score: scoreMap?.get(pullScoreKey(r.repo_full_name, r.number)) ?? null,
@@ -318,8 +321,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     count: totals.count,
     repo_count: totals.repo_count,
-    page,
-    page_size: pageSize,
+    page: responsePage,
+    page_size: responsePageSize,
     total_pages: totalPages,
     authors: authorRows,
     author_count: authorRows.length,

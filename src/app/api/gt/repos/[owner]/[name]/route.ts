@@ -118,6 +118,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
     const a = agg.byRepo.get(fullName.toLowerCase());
     let closedIssueCount = 0;
     let completedIssueCount = 0;
+    let usedFallbackClosedTotal = false;
     try {
       backfillPrIssueLinksIfNeeded(fullName);
       const HAS_MERGED_PR =
@@ -155,11 +156,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
           { kind: 'search' },
         );
         closedIssueCount = search.data.total_count ?? 0;
+        usedFallbackClosedTotal = true;
       } catch {
         closedIssueCount = 0;
       }
     }
-    const otherClosedIssueCount = Math.max(0, closedIssueCount - completedIssueCount);
+    const otherClosedIssueCount = usedFallbackClosedTotal ? null : Math.max(0, closedIssueCount - completedIssueCount);
 
     return NextResponse.json({
       fullName,

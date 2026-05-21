@@ -48,6 +48,12 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`upstream ${url} ${response.status}`);
+  return response.json() as Promise<T>;
+}
+
 function issueDiscoveryReason(row: {
   issueCount: number;
   maintainerIssueCount: number;
@@ -68,9 +74,9 @@ function issueDiscoveryReason(row: {
 
 async function refresh(): Promise<CachedShared> {
   const [prs, miners, repos] = await Promise.all([
-    fetch(PRS_URL, { cache: 'no-store', signal: AbortSignal.timeout(15_000) }).then((r) => r.json() as Promise<UpstreamPr[]>),
-    fetch(MINERS_URL, { cache: 'no-store', signal: AbortSignal.timeout(15_000) }).then((r) => r.json() as Promise<UpstreamMiner[]>),
-    fetch(REPOS_URL, { cache: 'no-store', signal: AbortSignal.timeout(15_000) }).then((r) => r.json() as Promise<UpstreamRepo[]>),
+    fetchJson<UpstreamPr[]>(PRS_URL),
+    fetchJson<UpstreamMiner[]>(MINERS_URL),
+    fetchJson<UpstreamRepo[]>(REPOS_URL),
   ]);
   const issueDiscoveryShareByRepo = new Map<string, number>();
   for (const repo of repos) {

@@ -181,9 +181,13 @@ function buildWhere({
   return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', args };
 }
 
+function latestIssueActivitySql(): string {
+  return "MAX(COALESCE(i.closed_at, ''), COALESCE(i.updated_at, ''), COALESCE(i.created_at, ''), COALESCE(i.first_seen_at, ''))";
+}
+
 function orderBy(sort: SortKey, dir: SortDir, since: string | null, activitySince: string | null): string {
   if (since) return 'ORDER BY i.first_seen_at DESC';
-  if (activitySince) return 'ORDER BY COALESCE(i.closed_at, i.updated_at, i.created_at, i.first_seen_at) DESC';
+  if (activitySince) return `ORDER BY ${latestIssueActivitySql()} DESC`;
   const direction = dir === 'asc' ? 'ASC' : 'DESC';
   const col =
     sort === 'opened'
@@ -223,16 +227,19 @@ export async function GET(req: NextRequest) {
   const dir: SortDir = dirParam === 'asc' ? 'asc' : 'desc';
   const page = positiveInt(url.searchParams.get('page'), 1);
   const pageSize = Math.min(PAGE_SIZE_MAX, positiveInt(url.searchParams.get('pageSize'), PAGE_SIZE_DEFAULT));
+  const windowMode = Boolean(since || activitySince);
   const limit = activitySince ? ACTIVITY_LIMIT : since ? SINCE_LIMIT : pageSize;
-  const offset = since || activitySince ? 0 : (page - 1) * pageSize;
+  const offset = windowMode ? 0 : (page - 1) * pageSize;
+  const responsePage = windowMode ? 1 : page;
+  const responsePageSize = windowMode ? limit : pageSize;
 
   const repos = await resolveRepoScope(reqRepos);
   if (repos.length === 0) {
     return NextResponse.json({
       count: 0,
       repo_count: 0,
-      page,
-      page_size: pageSize,
+      page: responsePage,
+      page_size: responsePageSize,
       total_pages: 1,
       authors: [],
       author_count: 0,
@@ -340,13 +347,13 @@ export async function GET(req: NextRequest) {
         getIssueDiscoveryDisabledReposAsyncServer(rowRepoNames),
       ])
     : [null, new Set<string>()];
-  const totalPages = Math.max(1, Math.ceil(totals.count / pageSize));
+  const totalPages = windowMode ? 1 : Math.max(1, Math.ceil(totals.count / pageSize));
 
   return NextResponse.json({
     count: totals.count,
     repo_count: totals.repo_count,
-    page,
-    page_size: pageSize,
+    page: responsePage,
+    page_size: responsePageSize,
     total_pages: totalPages,
     authors: authorRows,
     author_count: authorRows.length,

@@ -1284,7 +1284,7 @@ function formatDate(iso: string): string {
 
 function TopMinersCard({ owner, name }: { owner: string; name: string }) {
   const [tab, setTab] = useState<'oss' | 'issue'>('oss');
-  const { data, isLoading } = useQuery<RepoMinersResponse>({
+  const { data, isLoading, isError, error } = useQuery<RepoMinersResponse>({
     queryKey: ['gt-repo-miners', owner, name],
     queryFn: async () => {
       const r = await fetch(`/api/gt/repos/${owner}/${name}/miners`);
@@ -1339,7 +1339,14 @@ function TopMinersCard({ owner, name }: { owner: string; name: string }) {
                 </Box>
               </Box>
             )}
-            {!isLoading && rows.length === 0 && (
+            {isError && (
+              <Box as="tr">
+                <Box as="td" colSpan={4} sx={{ p: 3, textAlign: 'center', color: 'danger.fg', fontSize: 0 }}>
+                  Failed to load miner contributors{error instanceof Error ? ': ' + error.message : ''}
+                </Box>
+              </Box>
+            )}
+            {!isLoading && !isError && rows.length === 0 && (
               <Box as="tr">
                 <Box as="td" colSpan={4} sx={{ p: 3, textAlign: 'center', color: 'fg.muted', fontSize: 0 }}>
                   {emptyMinerMessage(tab, otherCount)}

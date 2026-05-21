@@ -209,7 +209,7 @@ export default function DocsPage() {
 
             <Article id="dashboard" title="Dashboard">
               <P>
-                <Code>/dashboard</Code> is the default landing page. It is designed for information worth checking
+                <Code>/</Code> opens the dashboard. It is designed for information worth checking
                 every day: network activity, work waiting for validation, best scored work, changing repo momentum,
                 and current PR/issue queues.
               </P>

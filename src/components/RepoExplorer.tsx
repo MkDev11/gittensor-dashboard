@@ -569,9 +569,11 @@ export default function RepoExplorer() {
     const sn74Set = new Set(sn74Repos.map((r) => r.fullName));
     const userExtras: Sn74Repo[] = (userReposData?.repos ?? [])
       .filter((u) => !sn74Set.has(u.full_name))
-      .map((u) => {
-        const [owner, name] = u.full_name.split('/');
-        return { ...createRepoEntry(u.full_name, u.weight), owner, name };
+      .flatMap((u) => {
+        const parts = u.full_name.split('/');
+        if (parts.length !== 2 || !parts[0] || !parts[1]) return [];
+        const [owner, name] = parts;
+        return [{ ...createRepoEntry(u.full_name, u.weight), owner, name }];
       });
     return [...sn74Repos, ...userExtras];
   }, [sn74Repos, userReposData]);

@@ -51,17 +51,21 @@ export function resolveEligibility(input: RepoEligibilityConfig | null | undefin
   };
 }
 
+function boundedShare(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
 function repoScoringPool(repo: RepoEntry): number {
-  const maintainerCut = Math.min(1, Math.max(0, repo.maintainerCut));
+  const maintainerCut = boundedShare(repo.maintainerCut);
   return repo.emissionShare * OSS_SHARE * (1 - maintainerCut);
 }
 
 export function prPool(repo: RepoEntry): number {
-  return repoScoringPool(repo) * Math.max(0, 1 - repo.issueDiscoveryShare);
+  return repoScoringPool(repo) * (1 - boundedShare(repo.issueDiscoveryShare));
 }
 
 export function issuePool(repo: RepoEntry): number {
-  return repoScoringPool(repo) * repo.issueDiscoveryShare;
+  return repoScoringPool(repo) * boundedShare(repo.issueDiscoveryShare);
 }
 
 export function bestLabelMultiplier(repo: RepoEntry): { label: string | null; multiplier: number } {
@@ -94,7 +98,7 @@ export function opportunityScore(
   const bestLabel = bestLabelMultiplier(repo).multiplier;
   const competition = 1 + Math.log1p(stats?.contributorCount ?? 0);
   const recentActivity = 1 + Math.min(0.5, (stats?.prsThisWeek ?? 0) * 0.03);
-  const issueBalance = 1 + repo.issueDiscoveryShare * 0.25;
+  const issueBalance = 1 + boundedShare(repo.issueDiscoveryShare) * 0.25;
   const labelLift = Math.max(0.25, bestLabel);
   return (repoScoringPool(repo) * labelLift * issueBalance * recentActivity) / competition;
 }

@@ -196,12 +196,16 @@ function baseRepoEntry(fullName: string, weight: number): RepoEntry {
   };
 }
 
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
 function buildRepoEntry(fullName: string, ent: MasterRepoEntry): RepoEntry {
   const weight = entryWeight(ent);
   const eligibility = normalizeEligibility(ent.eligibility);
   return {
     ...baseRepoEntry(fullName, weight),
-    issueDiscoveryShare: num(ent.issue_discovery_share, DEFAULT_ISSUE_DISCOVERY_SHARE),
+    issueDiscoveryShare: clamp01(num(ent.issue_discovery_share, DEFAULT_ISSUE_DISCOVERY_SHARE)),
     maintainerCut: num(ent.maintainer_cut, 0),
     fixedBaseScore: nullableNum(ent.fixed_base_score),
     labelMultipliers: normalizeLabelMultipliers(ent.label_multipliers),

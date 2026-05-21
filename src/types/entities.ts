@@ -117,7 +117,7 @@ export interface GtRepoSummary {
   issueDiscoveryShare?: number;
   closedIssueCount: number;
   completedIssueCount?: number;
-  otherClosedIssueCount?: number;
+  otherClosedIssueCount?: number | null;
   github: GtRepoGithubMeta | null;
 }
 
@@ -236,7 +236,7 @@ export interface RepoMiner {
   avatarUrl: string;
   issueCount?: number;
   completedIssueCount?: number;
-  otherClosedIssueCount?: number;
+  otherClosedIssueCount?: number | null;
   solvedIssueCount?: number;
   candidateIssueCount?: number;
   reason?: string | null;

@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic';
 
 const MIRROR_BASE_URL = 'https://mirror.gittensor.io';
 const TTL_MS = 5 * 60 * 1000;
+const MAX_REPOS = 100;
 
 interface MirrorMaintainer {
   github_id?: string | number;
@@ -90,6 +91,10 @@ export async function GET(request: NextRequest) {
 
   if (repos.length === 0) {
     return NextResponse.json({ fetched_at: Date.now(), source: 'live', count: 0, repos: [] });
+  }
+
+  if (repos.length > MAX_REPOS) {
+    return NextResponse.json({ error: `Too many repos requested (max ${MAX_REPOS})` }, { status: 400 });
   }
 
   const key = repos.join(',');
