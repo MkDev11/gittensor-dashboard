@@ -12,7 +12,6 @@ import {
   StackIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
-  PersonIcon,
   GearIcon,
   BellIcon,
   EyeIcon,
@@ -31,7 +30,6 @@ const SECTIONS: Section[] = [
   { id: 'repositories', title: 'Repositories', icon: <StackIcon size={16} /> },
   { id: 'issues', title: 'Issues', icon: <IssueOpenedIcon size={16} /> },
   { id: 'pulls', title: 'Pull Requests', icon: <GitPullRequestIcon size={16} /> },
-  { id: 'my-prs', title: 'My PRs', icon: <PersonIcon size={16} /> },
   { id: 'manage', title: 'Manage Repositories', icon: <RepoIcon size={16} /> },
   { id: 'notifications', title: 'Notifications', icon: <BellIcon size={16} /> },
   { id: 'settings', title: 'Settings', icon: <GearIcon size={16} /> },
@@ -77,7 +75,6 @@ export default function DocsPage() {
       window.removeEventListener('scroll', computeActive);
       window.removeEventListener('resize', computeActive);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -194,7 +191,7 @@ export default function DocsPage() {
               </P>
               <P>
                 <Code>/</Code> opens the <strong>Dashboard</strong>. <Code>/explorer</Code> is the repo drill-down view.
-                Global pages for miners, repositories, issues, pull requests, and your PRs are available from the
+                Global pages for miners, repositories, issues, and pull requests are available from the
                 sidebar or mobile bottom navigation.
               </P>
               <H3>Tech stack</H3>
@@ -338,19 +335,6 @@ reward share = PR share x effective repo PR reward pool`}</Pre>
                 <Li><strong>Score</strong>: Gittensor-backed PR score column; open PRs show potential and collateral values, merged PRs show the final score</Li>
                 <Li><strong>Linked issues</strong>: issue chips mirror Explorer and open the issue detail view directly</Li>
                 <Li><strong>Sorting</strong>: server-backed sort controls keep large PR sets responsive</Li>
-              </Ul>
-            </Article>
-
-            <Article id="my-prs" title="My PRs">
-              <P>
-                <Code>/my-prs</Code> — every PR <strong>you</strong> have authored on GitHub (uses the GitHub search
-                API: <Code>is:pr author:&lt;username&gt;</Code>), enriched with whether each repo is in the SN74
-                whitelist and the repo's weight.
-              </P>
-              <Ul>
-                <Li>Default view: <strong>SN74 whitelist</strong> only (the PRs that earn TAO)</Li>
-                <Li>Stat cards at top: total / in whitelist / open / merged / draft / closed</Li>
-                <Li>Whitelisted PRs are highlighted yellow with the repo's weight as a chip</Li>
               </Ul>
             </Article>
 

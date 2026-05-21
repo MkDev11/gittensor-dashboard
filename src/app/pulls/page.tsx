@@ -2,8 +2,9 @@
 
 export const dynamic = 'force-dynamic';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { PageLayout, Heading, Text, Box, Label, Link as PrimerLink } from '@primer/react';
 import {
@@ -73,16 +74,26 @@ function pullIssueMapKey(pr: Pick<Pull, 'repo_full_name' | 'number'>): string {
   return `${pr.repo_full_name}#${pr.number}`;
 }
 
-export default function AllPullsPage() {
+export default function PullsPage() {
+  return (
+    <Suspense fallback={null}>
+      <AllPullsPage />
+    </Suspense>
+  );
+}
+
+function AllPullsPage() {
+  const searchParams = useSearchParams();
   const { repos: sn74Repos, weights: repoWeights, isSuccess: sn74ReposReady } = useSn74Repos();
   const { tracked, toggle: toggleTrackedRepo } = useTrackedRepos();
   const { settings, update } = useSettings();
   const me = useMinerLogin();
   const pageSize = settings.pageSize > 0 ? settings.pageSize : 25;
+  const mineOnlyFromUrl = searchParams.get('mine') === '1' || searchParams.get('mine') === 'true';
 
   const [query, setQuery] = useState('');
   const [stateFilter, setStateFilter] = useState<StateFilter>('all');
-  const [mineOnly, setMineOnly] = useState(false);
+  const [mineOnly, setMineOnly] = useState(mineOnlyFromUrl);
   const [trackedOnly, setTrackedOnly] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>('updated');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
@@ -92,6 +103,10 @@ export default function AllPullsPage() {
   const [openIssue, setOpenIssue] = useState<Issue | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [authorTarget, setAuthorTarget] = useState<AuthorTarget | null>(null);
+
+  useEffect(() => {
+    setMineOnly(mineOnlyFromUrl);
+  }, [mineOnlyFromUrl]);
 
   const { data: userReposData, isSuccess: userReposReady } = useQuery<UserReposResp>({
     queryKey: ['user-repos'],

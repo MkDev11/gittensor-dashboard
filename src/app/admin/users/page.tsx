@@ -54,8 +54,8 @@ export default function AdminUsersPage() {
   };
 
   const onUserMutation = () => {
-    qc.invalidateQueries({ queryKey: ['admin-users'] });
-    qc.invalidateQueries({ queryKey: ['watcher-pending-users'] });
+    void qc.invalidateQueries({ queryKey: ['admin-users'] });
+    void qc.invalidateQueries({ queryKey: ['watcher-pending-users'] });
   };
 
   const approve = useMutation({

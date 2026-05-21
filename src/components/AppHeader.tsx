@@ -12,7 +12,6 @@ import {
   GlobeIcon,
   BookIcon,
   PeopleIcon,
-  PersonIcon,
   KebabHorizontalIcon,
 } from '@primer/octicons-react';
 import type { Icon } from '@primer/octicons-react';
@@ -33,12 +32,11 @@ const navItems: NavItem[] = [
   { href: '/repositories', label: 'Repositories', icon: StackIcon },
   { href: '/issues', label: 'Issues', icon: IssueOpenedIcon },
   { href: '/pulls', label: 'Pull Requests', icon: GitPullRequestIcon },
-  { href: '/my-prs', label: 'My PRs', icon: PersonIcon },
   { href: '/docs', label: 'Docs', icon: BookIcon },
 ];
 
 const mobilePrimaryHrefs = ['/dashboard', '/explorer', '/miners', '/repositories'];
-const mobileOverflowHrefs = ['/issues', '/pulls', '/my-prs', '/docs'];
+const mobileOverflowHrefs = ['/issues', '/pulls', '/docs'];
 const mobilePrimaryHrefSet = new Set(mobilePrimaryHrefs);
 const mobilePrimaryItems = mobilePrimaryHrefs
   .map((href) => navItems.find((item) => item.href === href))
