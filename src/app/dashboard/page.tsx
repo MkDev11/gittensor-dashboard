@@ -205,7 +205,7 @@ const ACTIVITY_SERIES: Array<{ key: ActivityKey; label: string; color: string }>
 
 interface RecentActivityItem {
   id: string;
-  kind: 'pr' | 'issue' | 'bounty';
+  kind: 'pr' | 'issue';
   tone: 'accent' | 'success' | 'attention' | 'danger' | 'done';
   badge: string;
   title: string;
@@ -373,6 +373,15 @@ function issueBoost(issue: IssueDto, repo: RepoEntry): number {
     if (labels.has(label.toLowerCase())) best = Math.max(best, multiplier);
   }
   return best;
+}
+
+function issueRewardMeta(repo: RepoEntry | undefined, parts: ReturnType<typeof rewardParts> | null, multiplier: number): string | undefined {
+  if (!repo || repo.inactiveAt || repo.emissionShare <= 0 || !parts) return undefined;
+  const context: string[] = [];
+  if (parts.pr > 0) context.push(fmtPct(parts.pr) + ' PR pool');
+  if (parts.issue > 0) context.push(fmtPct(parts.issue) + ' issue pool');
+  if (multiplier !== 1) context.push(multiplier.toFixed(2) + 'x label');
+  return context.length > 0 ? context.join(' · ') : undefined;
 }
 
 function repoLookbackDays(repo: RepoEntry | undefined | null): number {
@@ -1073,27 +1082,6 @@ export default function DashboardPage() {
       const isOpen = lower(issue.state) === 'open';
       const multiplier = repo ? issueBoost(issue, repo) : 1;
       const parts = repo ? rewardParts(repo, repoHasRegisteredMaintainers.has(issue.repo_full_name.toLowerCase())) : null;
-      const isBounty = Boolean(isOpen && repo && !repo.inactiveAt && repo.emissionShare > 0 && ((parts?.issue ?? 0) > 0 || multiplier > 1));
-
-      if (isBounty && repo && parts) {
-        const discovery = parts.issue > parts.pr;
-        const rewardPool = discovery ? parts.issue : parts.pr;
-        addItem({
-          id: 'bounty:' + issue.repo_full_name + '#' + issue.number,
-          kind: 'bounty',
-          tone: 'success',
-          badge: discovery ? 'Discovery' : 'Solve',
-          title: '#' + issue.number + ' ' + issue.title,
-          detail: issue.repo_full_name + ' · ' + multiplier.toFixed(2) + 'x label',
-          href: issueHref(issue),
-          timestamp: parseTime(issue.updated_at ?? issue.created_at),
-          repo: issue.repo_full_name,
-          actor: issue.author_login ?? undefined,
-          meta: fmtPct(rewardPool) + (discovery ? ' issue pool' : ' PR pool'),
-        });
-        continue;
-      }
-
       const completed = lower(issue.state_reason) === 'completed';
       const closed = lower(issue.state) !== 'open';
       addItem({
@@ -1107,13 +1095,14 @@ export default function DashboardPage() {
         timestamp: closed ? parseTime(issue.closed_at ?? issue.updated_at) : parseTime(issue.created_at ?? issue.updated_at),
         repo: issue.repo_full_name,
         actor: issue.author_login ?? undefined,
+        meta: isOpen ? issueRewardMeta(repo, parts, multiplier) : undefined,
       });
     }
 
     const sorted = items.sort((a, b) => activityTimestamp(b) - activityTimestamp(a));
     const selected: RecentActivityItem[] = [];
     const seen = new Set<string>();
-    for (const kind of ['pr', 'issue', 'bounty'] as const) {
+    for (const kind of ['pr', 'issue'] as const) {
       const item = sorted.find((candidate) => candidate.kind === kind);
       if (item && !seen.has(item.id)) {
         selected.push(item);
@@ -3409,8 +3398,6 @@ function activityTone(tone: RecentActivityItem['tone']): { bg: string; border: s
 function ActivityKindIcon({ kind, color }: { kind: RecentActivityItem['kind']; color: string }) {
   if (kind === 'pr') return <Box sx={{ color, display: 'inline-flex' }}><GitPullRequestIcon size={14} /></Box>;
   if (kind === 'issue') return <Box sx={{ color, display: 'inline-flex' }}><IssueOpenedIcon size={14} /></Box>;
-  // bounty / default: small filled dot
-  return <Box sx={{ width: 8, height: 8, borderRadius: 99, bg: color, mt: '3px' }} />;
 }
 
 function ActivityStatus({ item }: { item: RecentActivityItem }) {

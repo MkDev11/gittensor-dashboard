@@ -9,7 +9,7 @@ Built with Next.js 15 (App Router), TypeScript, Primer React, and `better-sqlite
 ## Main views
 
 - `/` redirects to `/dashboard`, the daily SN74 overview.
-- `/dashboard` shows network activity, scored PRs, issue discovery, reward-ranked Best Work, and PR/issue pipelines.
+- `/dashboard` shows network activity, scored PRs, issue discovery, reward-ranked Top Contributions, and PR/issue pipelines.
 - `/explorer` is the repo drill-down view for issues and pull requests.
 - `/miners`, `/repositories`, `/issues`, `/pulls`, and `/my-prs` provide focused global tables.
 

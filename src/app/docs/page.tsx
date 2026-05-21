@@ -227,9 +227,9 @@ export default function DocsPage() {
                 <Li><strong>OSS Score</strong>: sum, average, and top official PR scores in the selected range.</Li>
                 <Li><strong>Active Contributors</strong>: unique GitHub actors plus current open PR/issue queue size.</Li>
               </Ul>
-              <H3>Best Work</H3>
+              <H3>Top Contributions</H3>
               <P>
-                Best Work is ranked by modeled <strong>reward share</strong>, not raw PR score. The dashboard mirrors the
+                Top Contributions are ranked by modeled <strong>reward share</strong>, not raw PR score. The dashboard mirrors the
                 Gittensor allocator at a UI level:
               </P>
               <Pre>{`PR share = PR score / repo total scored PRs
