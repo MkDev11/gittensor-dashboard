@@ -2,7 +2,7 @@
 
 import React, { useCallback, useMemo, useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   TextInput,
@@ -172,6 +172,16 @@ const EMPTY_REPO: Sn74Repo = {
   labelMultipliers: null,
   inactiveAt: null,
 };
+
+function keepPreviousDataForRepo<T>(owner: string, name: string) {
+  return (
+    previousData: T | undefined,
+    previousQuery?: { queryKey: readonly unknown[] },
+  ): T | undefined => {
+    const key = previousQuery?.queryKey;
+    return key?.[1] === owner && key?.[2] === name ? previousData : undefined;
+  };
+}
 
 function RepoPolicyPanel({ repo }: { repo: Sn74Repo }) {
   if (!repo.fullName) return null;
@@ -785,7 +795,7 @@ export default function RepoExplorer() {
     },
     refetchInterval: 15000,
     staleTime: 10000,
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousDataForRepo<IssuesResponse>(selected.owner, selected.name),
     refetchOnWindowFocus: false,
     enabled: queriesReady && shouldLoadIssues,
   });
@@ -1081,7 +1091,7 @@ export default function RepoExplorer() {
     },
     refetchInterval: 15000,
     staleTime: 10000,
-    placeholderData: keepPreviousData,
+    placeholderData: keepPreviousDataForRepo<PullsResponse>(selected.owner, selected.name),
     refetchOnWindowFocus: false,
     enabled: queriesReady && shouldLoadPulls,
   });
@@ -2717,8 +2727,8 @@ const ExplorerIssueRow = React.memo(function ExplorerIssueRow({
       <Box as="td" sx={tableCellSx}>
         <IssueStatusBadge issue={issue} mergedPRCount={mergedPRCount} />
       </Box>
-      <Box as="td" sx={{ ...tableCellSx, maxWidth: 360 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
+      <Box as="td" sx={{ ...tableCellSx, maxWidth: 360, overflow: 'hidden' }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, width: '100%' }}>
           <PrimerLink
             href={issue.html_url ?? '#'}
             target="_blank"
@@ -2729,6 +2739,8 @@ const ExplorerIssueRow = React.memo(function ExplorerIssueRow({
             sx={{
               fontWeight: 500,
               color: 'var(--fg-default)',
+              minWidth: 0,
+              flex: '1 1 auto',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -2745,7 +2757,19 @@ const ExplorerIssueRow = React.memo(function ExplorerIssueRow({
               {issue.comments}
             </Box>
           )}
-          <IssueLabels labels={issue.labels} />
+          {issue.labels.length > 0 && (
+            <Box
+              sx={{
+                display: 'inline-flex',
+                minWidth: 0,
+                maxWidth: 'min(45%, 320px)',
+                overflow: 'hidden',
+                flex: '0 1 320px',
+              }}
+            >
+              <IssueLabels labels={issue.labels} maxVisible={3} maxLabelWidth={110} />
+            </Box>
+          )}
         </Box>
       </Box>
       <Box as="td" sx={{ ...tableCellSx, fontSize: 0 }}>

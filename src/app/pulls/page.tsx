@@ -358,14 +358,14 @@ export default function AllPullsPage() {
               '&::-webkit-scrollbar': { display: 'none' },
             }}
           >
-            <Box as="table" sx={{ width: '100%', minWidth: 1200, borderCollapse: 'collapse', fontSize: 1 }}>
+            <Box as="table" sx={{ width: '100%', minWidth: 1200, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 1 }}>
               <Box as="thead" sx={{ bg: 'var(--bg-subtle)', borderBottom: '1px solid', borderColor: 'var(--border-default)' }}>
                 <Box as="tr">
                   <Box as="th" sx={{ ...headerCellSx, width: 44, textAlign: 'center' }} aria-label="Tracked repository" />
-                  <HeaderCell label="State" />
+                  <HeaderCell label="State" width={92} />
                   <HeaderCell label="Pull Request" />
-                  <HeaderCell label="Repository" onClick={() => toggleSort('repo')} active={sortKey === 'repo'} dir={sortDir} />
-                  <HeaderCell label="Weight" onClick={() => toggleSort('weight')} active={sortKey === 'weight'} dir={sortDir} align="right" />
+                  <HeaderCell label="Repository" onClick={() => toggleSort('repo')} active={sortKey === 'repo'} dir={sortDir} width={230} />
+                  <HeaderCell label="Weight" onClick={() => toggleSort('weight')} active={sortKey === 'weight'} dir={sortDir} align="right" width={84} />
                   <Box as="th" sx={{ ...headerCellSx, py: '4px', width: 220, maxWidth: 220 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0, maxWidth: '100%', overflow: 'hidden' }}>
                       <Box sx={{ color: authorFilter !== 'all' && !mineOnly ? 'var(--accent-fg)' : 'inherit', flexShrink: 0 }}>Author</Box>
@@ -382,11 +382,11 @@ export default function AllPullsPage() {
                       />
                     </Box>
                   </Box>
-                  <HeaderCell label="Score" />
-                  <HeaderCell label="Opened" onClick={() => toggleSort('opened')} active={sortKey === 'opened'} dir={sortDir} />
-                  <HeaderCell label="Updated" onClick={() => toggleSort('updated')} active={sortKey === 'updated'} dir={sortDir} />
-                  <HeaderCell label="Closed" onClick={() => toggleSort('closed')} active={sortKey === 'closed'} dir={sortDir} />
-                  <Box as="th" sx={{ ...headerCellSx, textAlign: 'center' }}>Issues</Box>
+                  <HeaderCell label="Score" width={110} />
+                  <HeaderCell label="Opened" onClick={() => toggleSort('opened')} active={sortKey === 'opened'} dir={sortDir} width={88} />
+                  <HeaderCell label="Updated" onClick={() => toggleSort('updated')} active={sortKey === 'updated'} dir={sortDir} width={92} />
+                  <HeaderCell label="Closed" onClick={() => toggleSort('closed')} active={sortKey === 'closed'} dir={sortDir} width={92} />
+                  <Box as="th" sx={{ ...headerCellSx, width: 64, textAlign: 'center' }}>Issues</Box>
                 </Box>
               </Box>
               <Box as="tbody">
@@ -667,12 +667,14 @@ function HeaderCell({
   active,
   dir,
   align = 'left',
+  width,
 }: {
   label: string;
   onClick?: () => void;
   active?: boolean;
   dir?: SortDir;
   align?: 'left' | 'right';
+  width?: number;
 }) {
   return (
     <Box
@@ -681,6 +683,7 @@ function HeaderCell({
       sx={{
         ...headerCellSx,
         textAlign: align,
+        width,
         cursor: onClick ? 'pointer' : 'default',
         userSelect: 'none',
         '&:hover': onClick ? { color: 'var(--fg-default)' } : undefined,
@@ -866,6 +869,7 @@ function PullTableRow({
               maxWidth: '100%',
               minWidth: 0,
               overflow: 'hidden',
+              justifyContent: 'flex-start',
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -880,7 +884,7 @@ function PullTableRow({
                 fontWeight: 500,
                 color: mine ? 'var(--attention-emphasis)' : 'var(--fg-default)',
                 minWidth: 0,
-                flex: '1 1 auto',
+                flex: '0 1 auto',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
