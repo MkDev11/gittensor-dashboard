@@ -14,6 +14,7 @@ interface UpstreamRepoConfig {
   inactiveAt?: string | null;
   inactive_at?: string | null;
   eligibility_mode?: boolean;
+  eligibilityMode?: boolean;
 }
 
 interface UpstreamRepo {
@@ -30,6 +31,7 @@ interface UpstreamRepo {
   inactiveAt?: string | null;
   inactive_at?: string | null;
   eligibility_mode?: boolean;
+  eligibilityMode?: boolean;
 }
 
 interface UpstreamPr {
@@ -106,7 +108,12 @@ function repoWeight(repo: UpstreamRepo): number {
 
 function repoInactiveAt(repo: UpstreamRepo): string | null {
   const inactiveAt = repo.config?.inactive_at ?? repo.config?.inactiveAt ?? repo.inactive_at ?? repo.inactiveAt ?? null;
-  if (repo.config?.eligibility_mode === false || repo.eligibility_mode === false) return inactiveAt ?? 'ineligible';
+  const ineligible =
+    repo.config?.eligibility_mode === false ||
+    repo.config?.eligibilityMode === false ||
+    repo.eligibility_mode === false ||
+    repo.eligibilityMode === false;
+  if (ineligible) return inactiveAt ?? 'ineligible';
   return inactiveAt;
 }
 
