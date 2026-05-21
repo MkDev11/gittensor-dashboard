@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Box, Text } from '@primer/react';
 import {
   TriangleDownIcon, TriangleUpIcon, CheckIcon, XIcon, StarIcon, StarFillIcon,
-  GitPullRequestIcon, IssueOpenedIcon, ArrowDownIcon, ArrowUpIcon,
+  GitPullRequestIcon, IssueOpenedIcon,
 } from '@primer/octicons-react';
 import { TableRowsSkeleton } from '@/components/Skeleton';
 import { formatUsd, formatRelativeTime } from '@/lib/format';
@@ -19,24 +19,25 @@ import {
   SearchBox,
   RowSizeSelector,
   PageNav,
+  SortControl,
   MONO,
   LABEL,
   ghKey,
   ghName,
   num,
   viewOf,
+  MinerStatusKind,
+  MinerStatus,
+  STATUS_REGISTRY,
+  STATUS_TONE,
+  StatusBadge,
 } from './components';
-
-/* =========================================================================
- * Public types
- * ========================================================================= */
 
 export type EligibilityFilter = 'all' | 'eligible' | 'ineligible';
 export type SortKey = 'score' | 'cred' | 'usd' | 'repos' | 'active' | 'movement' | 'volume';
 export type SortDir = 'asc' | 'desc';
 
-// contrib merges PRs/Issues counts with OSS/Disc scores in one cell.
-// Repos moves to end as the 1fr slack absorber — chips spread on wide screens.
+// Repos is the 1fr slack absorber — chips spread on wide screens.
 const COLS = '44px minmax(170px, 240px) 124px minmax(88px, 104px) 60px 72px 84px minmax(180px, 1fr) 92px 28px';
 
 function MinerIdentity({
@@ -105,7 +106,6 @@ function TrackButton({ isTracked, onClick }: { isTracked: boolean; onClick: () =
   );
 }
 
-// Last 3 days use success-fg to signal current shipping activity.
 function Sparkline({
   values,
   width = 72,
@@ -217,10 +217,6 @@ function MovementCell({
   );
 }
 
-/* ─── Track cell ── two rows, one per track, dot+label+score ─── */
-
-// icon (color key) · count (muted, supporting) · divider · score (primary, most prominent)
-// No text labels — icons are self-explanatory; tooltips provide full detail on hover.
 function ContribCell({
   merged, solved, ossScore, ossEligible, discScore, discEligible,
 }: {
@@ -346,34 +342,7 @@ function RepoChip({
 }
 
 
-type MinerStatusKind = 'hot' | 'climbing' | 'dormant' | 'specialist' | 'dual' | 'none';
-
-interface MinerStatus {
-  kind: MinerStatusKind;
-  icon: string;
-  label: string;
-  /** Long-form explanation used for the badge tooltip. */
-  hint: string;
-}
-
-const STATUS_REGISTRY: Record<Exclude<MinerStatusKind, 'none'>, Omit<MinerStatus, 'kind'>> = {
-  hot:        { icon: '🔥', label: 'Hot',        hint: '≥3 PRs in the last 3 days' },
-  climbing:   { icon: '📈', label: 'Climbing',   hint: 'Up ≥3 ranks vs yesterday' },
-  dormant:    { icon: '💤', label: 'Dormant',    hint: 'No PR activity in the last 14 days' },
-  specialist: { icon: '🎯', label: 'Specialist', hint: '≤2 unique repos with ≥5 merged PRs' },
-  dual:       { icon: '⚖️', label: 'Dual',       hint: 'Eligible in both OSS and Discovery' },
-};
-
-const STATUS_TONE: Record<MinerStatusKind, { fg: string; bg: string }> = {
-  hot:        { fg: 'var(--danger-fg)',     bg: 'var(--danger-subtle)' },
-  climbing:   { fg: 'var(--accent-fg)',     bg: 'var(--accent-subtle)' },
-  dormant:    { fg: 'var(--fg-muted)',      bg: 'var(--canvas-inset)' },
-  specialist: { fg: 'var(--attention-fg)',  bg: 'var(--attention-subtle)' },
-  dual:       { fg: 'var(--done-fg)',       bg: 'var(--done-subtle)' },
-  none:       { fg: 'var(--fg-muted)',      bg: 'transparent' },
-};
-
-// Priority: momentum > inactivity > niche.
+// Priority order: momentum > inactivity > niche.
 function deriveMinerStatus(miner: Miner, currentRank: number): MinerStatus {
   const daily = miner.daily35 ?? [];
   const recent3 = daily.slice(-3).reduce((a, b) => a + b, 0);
@@ -393,34 +362,6 @@ function deriveMinerStatus(miner: Miner, currentRank: number): MinerStatus {
     return { kind: 'dual', ...STATUS_REGISTRY.dual };
   }
   return { kind: 'none', icon: '', label: '', hint: '' };
-}
-
-function StatusBadge({ status }: { status: MinerStatus }) {
-  if (status.kind === 'none') return null;
-  const tone = STATUS_TONE[status.kind];
-  return (
-    <Box
-      title={status.hint}
-      sx={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '4px',
-        px: '6px',
-        py: '1px',
-        borderRadius: 999,
-        fontSize: '10px',
-        fontWeight: 700,
-        letterSpacing: '0.2px',
-        lineHeight: 1,
-        whiteSpace: 'nowrap',
-        flexShrink: 0,
-      }}
-      style={{ color: tone.fg, backgroundColor: tone.bg }}
-    >
-      <Text as="span" aria-hidden sx={{ fontSize: '10px', lineHeight: 1 }}>{status.icon}</Text>
-      <Text as="span">{status.label}</Text>
-    </Box>
-  );
 }
 
 /* =========================================================================
@@ -534,63 +475,13 @@ export function Toolbar({
         }}
       >
         {pills}
-        {/* Sort: label + key select + direction arrow */}
-        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-          <Text sx={{ ...LABEL, color: 'fg.muted', textTransform: 'none', fontWeight: 600, letterSpacing: 0, whiteSpace: 'nowrap' }}>
-            Sort:
-          </Text>
-          <Box
-            as="select"
-            value={sortKey}
-            onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onSortKey(e.target.value as SortKey)}
-            sx={{
-              bg: 'canvas.default',
-              color: 'fg.default',
-              border: '1px solid',
-              borderColor: 'border.default',
-              borderRadius: 1,
-              px: 2,
-              py: '3px',
-              fontSize: 0,
-              fontFamily: 'inherit',
-              fontWeight: 600,
-              cursor: 'pointer',
-              minWidth: 110,
-              '&:hover': { borderColor: 'border.muted' },
-              '&:focus': { outline: 'none' },
-              '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '1px' },
-            }}
-          >
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.key} value={o.key}>{o.label}</option>
-            ))}
-          </Box>
-          <Box
-            as="button"
-            onClick={onToggleSortDir}
-            aria-label={sortDir === 'desc' ? 'Sort descending' : 'Sort ascending'}
-            title={sortDir === 'desc' ? 'Descending' : 'Ascending'}
-            sx={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 26,
-              height: 26,
-              bg: 'canvas.default',
-              color: 'fg.default',
-              border: '1px solid',
-              borderColor: 'border.default',
-              borderRadius: 1,
-              cursor: 'pointer',
-              flexShrink: 0,
-              '&:hover': { bg: 'canvas.inset', borderColor: 'border.muted' },
-              '&:focus': { outline: 'none' },
-              '&:focus-visible': { outline: '1px solid var(--fg-default)', outlineOffset: '1px' },
-            }}
-          >
-            {sortDir === 'desc' ? <ArrowDownIcon size={14} /> : <ArrowUpIcon size={14} />}
-          </Box>
-        </Box>
+        <SortControl<SortKey>
+          value={sortKey}
+          dir={sortDir}
+          onChange={onSortKey}
+          onToggleDir={onToggleSortDir}
+          options={SORT_OPTIONS}
+        />
         <Text sx={{ ...MONO, fontSize: 0, color: 'fg.muted', whiteSpace: 'nowrap', ml: 'auto' }}>
           {resultText}
         </Text>
@@ -603,35 +494,13 @@ export function Toolbar({
       <Box sx={{ display: ['flex', null, 'none'], flexDirection: 'column', gap: 2 }}>
         {pills}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-            <Text sx={{ ...LABEL, color: 'fg.muted', textTransform: 'none', fontWeight: 600, letterSpacing: 0 }}>Sort:</Text>
-            <Box
-              as="select"
-              value={sortKey}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onSortKey(e.target.value as SortKey)}
-              sx={{
-                bg: 'canvas.default', color: 'fg.default', border: '1px solid',
-                borderColor: 'border.default', borderRadius: 1, px: 2, py: '3px',
-                fontSize: 0, fontFamily: 'inherit', fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.key} value={o.key}>{o.label}</option>
-              ))}
-            </Box>
-            <Box
-              as="button"
-              onClick={onToggleSortDir}
-              aria-label={sortDir === 'desc' ? 'Sort descending' : 'Sort ascending'}
-              sx={{
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                width: 26, height: 26, bg: 'canvas.default', color: 'fg.default',
-                border: '1px solid', borderColor: 'border.default', borderRadius: 1, cursor: 'pointer',
-              }}
-            >
-              {sortDir === 'desc' ? <ArrowDownIcon size={14} /> : <ArrowUpIcon size={14} />}
-            </Box>
-          </Box>
+          <SortControl<SortKey>
+            value={sortKey}
+            dir={sortDir}
+            onChange={onSortKey}
+            onToggleDir={onToggleSortDir}
+            options={SORT_OPTIONS}
+          />
           <RowSizeSelector value={pageSize} onChange={onPageSize} />
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -694,7 +563,7 @@ function HoverPeek({ uid, anchor }: { uid: number | string; anchor: PeekAnchor }
 
   if (typeof document === 'undefined') return null;
 
-  // Place below the row; flip above if it would clip the viewport.
+  // Flip above the row if it would clip the bottom of the viewport.
   const popWidth = 360;
   const popHeightEstimate = 140;
   const viewportH = typeof window !== 'undefined' ? window.innerHeight : 0;
@@ -803,7 +672,6 @@ function LeaderRow({
   const daily35 = miner.daily35 ?? [];
   const topRepos = miner.topRepos ?? [];
 
-  // 350ms delay prevents flicker on transient hovers; rect captured for portal positioning.
   const rowRef = useRef<HTMLDivElement | null>(null);
   const [peekRect, setPeekRect] = useState<PeekAnchor | null>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -940,7 +808,6 @@ function LeaderRow({
             discEligible={!!miner.isIssueEligible}
           />
 
-          {/* Mobile-only: sparkline + repos side by side */}
           <Box sx={{ gridArea: 'activity', display: ['flex', null, 'none'], alignItems: 'center', gap: '8px', minWidth: 0 }}>
             <Box sx={{ flexShrink: 0 }}>
               <Sparkline values={daily35} width={60} height={18} />

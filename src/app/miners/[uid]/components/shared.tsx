@@ -5,8 +5,6 @@ import { Box, Text } from '@primer/react';
 import { MONO, LABEL } from '../../components';
 import { SUMMARY_TONE_FG, SummaryTone } from './types';
 
-/* ─────────────────────────── List loading placeholder ─────────────────────────── */
-
 export function ListLoading({ label }: { label: string }) {
   return (
     <Box
@@ -26,11 +24,6 @@ export function ListLoading({ label }: { label: string }) {
   );
 }
 
-/* ─────────────────────────── Hero tile ─────────────────────────── */
-
-// One cell in the activity / code-impact hero strip. Shared between
-// ActivitySummary and CodeImpactCard because both want the same visual
-// rhythm. Borders are right-only with `last` disabling the trailing edge.
 export function HeroTile({
   label, value, sub, tone = 'neutral', last = false,
 }: {
@@ -79,12 +72,6 @@ export function HeroTile({
   );
 }
 
-/* ─────────────────────────── Count badge ─────────────────────────── */
-
-// Inline icon + count + label, used in the status strip beneath Activity /
-// CodeImpact cards. Renamed from "StatusBadge" (the inline one inside the
-// detail page) to avoid colliding with components/StatusBadge.tsx which
-// covers the leaderboard's emoji-style miner status pills.
 export function CountBadge({
   icon, value, label, tone = 'neutral',
 }: {
@@ -108,10 +95,6 @@ export function CountBadge({
   );
 }
 
-/* ─────────────────────────── Search + pagination hook ─────────────────────────── */
-
-// Used by the per-repo P&L, PR list, and issue list. Encapsulates the
-// "string filter + zero-indexed page" pattern those three share.
 export function useSearchPage<T>(
   items: T[],
   filter: (item: T, q: string) => boolean,
@@ -122,10 +105,9 @@ export function useSearchPage<T>(
   const setSearch = useCallback((s: string) => { setSearchRaw(s); setPage(0); }, []);
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     return q ? items.filter((i) => filter(i, q)) : items;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, search]);
+  // filter is a stable render-time closure; items + search are the real deps
+  }, [items, search]); // eslint-disable-line react-hooks/exhaustive-deps
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, pageCount - 1);
   const paged = useMemo(

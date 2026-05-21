@@ -15,4 +15,6 @@ export * from './Pill';
 export * from './Segmented';
 export * from './SearchBox';
 export * from './Pagination';
+export * from './SortControl';
 export * from './EmptyState';
+export * from './StatusBadge';

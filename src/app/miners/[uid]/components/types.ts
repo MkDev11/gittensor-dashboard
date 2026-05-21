@@ -1,6 +1,4 @@
-// Mirrors the shape of /api/gt/miners/[uid]'s response. Kept feature-local
-// because the detail page is the sole consumer; if these grow more shared
-// they can be promoted to src/types/entities.ts.
+// Feature-local — promote to src/types/entities.ts if consumed beyond the detail page.
 
 export interface MinerProfile {
   uid: number;
@@ -61,6 +59,7 @@ export interface PrDetail {
   timeDecayMultiplier: number | null;
   earnedScore: number | null;
   tokenScore: number;
+  linkedIssues: string | null; // comma-joined "#N, #M" of linked issues; null when none
 }
 
 export type IssueBucket = 'solved' | 'completed' | 'open' | 'closed';
@@ -104,8 +103,6 @@ export interface DetailResp {
   fetched_at: number;
 }
 
-/* ─────────────────────────── Period / mode dimensions ─────────────────────────── */
-
 export type Period = '1D' | '7D' | '35D' | 'ALL';
 export type Mode = 'oss' | 'discovery';
 
@@ -116,10 +113,6 @@ export const PERIODS: { key: Period; label: string; days: number | null }[] = [
   { key: 'ALL', label: 'All', days: null },
 ];
 
-/* ─────────────────────────── Per-repo aggregate bucket ─────────────────────────── */
-
-// One row in the per-repository P&L. Holds the raw PR / issue references so
-// downstream components can drill in if needed.
 export interface RepoBucket {
   repo: string;
   prs: PrDetail[];
@@ -149,10 +142,6 @@ export function makeRepoBucket(repo: string): RepoBucket {
   };
 }
 
-/* ─────────────────────────── Tone palette ─────────────────────────── */
-
-// Local palette used by HeroTile / CountBadge / NumCell. Mirrors the names
-// in ../components/types.ts so callers can re-use semantic intent.
 export type SummaryTone = 'neutral' | 'success' | 'danger' | 'done' | 'accent';
 
 export const SUMMARY_TONE_FG: Record<SummaryTone, string> = {
@@ -162,8 +151,6 @@ export const SUMMARY_TONE_FG: Record<SummaryTone, string> = {
   done:    'var(--done-fg)',
   accent:  'var(--accent-fg)',
 };
-
-/* ─────────────────────────── Period predicate ─────────────────────────── */
 
 export function withinPeriod(iso: string | null | undefined, days: number | null): boolean {
   if (days === null) return true;

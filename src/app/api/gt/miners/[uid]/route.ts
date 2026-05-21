@@ -265,6 +265,9 @@ export interface MinerPrDetail {
   earnedScore: number | null;
   // Validator's token score — used to determine if a PR counts as "valid" for eligibility (threshold: >= 5).
   tokenScore: number;
+  // Comma-joined "#N, #M" of issues this PR closed (via pr_issue_links).
+  // Null when no linked issues are recorded in the local DB.
+  linkedIssues: string | null;
 }
 
 /* Two flavours of "issue" the page surfaces per miner:
@@ -322,6 +325,31 @@ export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }>
       ? fetchPerMiner(ghIdKey)
       : Promise.resolve({ repoEvals: [] });
 
+    // Build a (repo, pr_number) → "#N, #M" map of linked issues so each PR
+    // can show what it closes. Scoped to this miner's PRs by author_login,
+    // so the result set is bounded and indexable.
+    const prLinkedIssues = new Map<string, string>();
+    if (ghUserKey) {
+      const db = getReadDb();
+      type LinkRow = { repo_full_name: string; pr_number: number; issue_numbers: string | null };
+      const rows = db
+        .prepare(
+          `SELECT l.repo_full_name, l.pr_number,
+                  GROUP_CONCAT(DISTINCT l.issue_number) AS issue_numbers
+           FROM pr_issue_links l
+           JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
+           WHERE LOWER(p.author_login) = LOWER(?)
+           GROUP BY l.repo_full_name, l.pr_number`,
+        )
+        .all(ghUserKey) as LinkRow[];
+      for (const r of rows) {
+        if (!r.issue_numbers) continue;
+        const key = `${r.repo_full_name.toLowerCase()}#${r.pr_number}`;
+        const formatted = r.issue_numbers.split(',').map((n) => `#${n.trim()}`).join(', ');
+        prLinkedIssues.set(key, formatted);
+      }
+    }
+
     const prs: MinerPrDetail[] = shared.prs
       .filter((p) => {
         if (ghIdKey && p.githubId && String(p.githubId) === ghIdKey) return true;
@@ -347,6 +375,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }>
         timeDecayMultiplier: p.timeDecayMultiplier != null ? num(p.timeDecayMultiplier) : null,
         earnedScore: p.earnedScore != null ? num(p.earnedScore) : null,
         tokenScore: num(p.tokenScore),
+        linkedIssues: prLinkedIssues.get(`${p.repository.toLowerCase()}#${p.pullRequestNumber}`) ?? null,
       }))
       .sort((a, b) => (Date.parse(b.prCreatedAt) || 0) - (Date.parse(a.prCreatedAt) || 0));
 
@@ -372,6 +401,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }>
         closed_at: string | null;
         comments: number;
         merged_pr_count: number;
+        merged_pr_numbers: string | null;
       };
 
       const discovered = db
@@ -380,7 +410,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }>
                   i.html_url, i.created_at, i.closed_at, i.comments,
                   (SELECT COUNT(*) FROM pr_issue_links l
                     JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
-                    WHERE l.repo_full_name = i.repo_full_name AND l.issue_number = i.number AND p.merged = 1) AS merged_pr_count
+                    WHERE l.repo_full_name = i.repo_full_name AND l.issue_number = i.number AND p.merged = 1) AS merged_pr_count,
+                  (SELECT GROUP_CONCAT(DISTINCT p.number) FROM pr_issue_links l
+                    JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
+                    WHERE l.repo_full_name = i.repo_full_name AND l.issue_number = i.number AND p.merged = 1) AS merged_pr_numbers
            FROM issues i
            WHERE LOWER(i.author_login) = LOWER(?)
            ORDER BY COALESCE(i.created_at, '') DESC
@@ -395,6 +428,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }>
         else if (reason === 'COMPLETED' && r.merged_pr_count > 0) bucket = 'solved';
         else if (reason === 'COMPLETED') bucket = 'completed';
         else bucket = 'closed';
+        const closedByPrs = r.merged_pr_numbers
+          ? r.merged_pr_numbers.split(',').map((n) => `#${n.trim()}`).join(', ')
+          : null;
         return {
           repo: r.repo_full_name,
           number: r.number,
@@ -406,7 +442,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }>
           closedAt: r.closed_at,
           comments: r.comments,
           bucket,
-          closedByPrs: null,
+          closedByPrs,
         };
       });
 

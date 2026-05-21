@@ -19,8 +19,6 @@ import {
   ListLoading,
   ProfileHero,
   PositionSummary,
-  ActivitySummary,
-  CodeImpactCard,
   RepoBreakdown,
   PrList,
   IssueList,
@@ -82,7 +80,6 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
       return r.json();
     },
     staleTime: 25_000,
-    // Keep previous data visible during navigation; the list page hover-prefetches.
     placeholderData: (prev) => prev,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
@@ -106,6 +103,43 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
   const discoveredInP  = useMemo(() => discovered.filter((i) => withinPeriod(i.createdAt, periodDays)), [discovered, periodDays]);
   const solvedInPeriod = useMemo(() => solved.filter((i) => withinPeriod(i.closedAt ?? i.createdAt, periodDays)), [solved, periodDays]);
 
+  // Fixed 35d window so the hero reflects recent health regardless of the period selector.
+  const HERO_DAYS = 35;
+  const heroAgg = useMemo(() => {
+    let merged = 0, closedPr = 0, openPr = 0, additions = 0, deletions = 0;
+    for (const p of prs) {
+      if (!withinPeriod(p.prCreatedAt, HERO_DAYS)) continue;
+      if      (p.prState === 'MERGED') merged += 1;
+      else if (p.prState === 'CLOSED') closedPr += 1;
+      else                              openPr   += 1;
+      additions += p.additions;
+      deletions += p.deletions;
+    }
+    let solvedBucket = 0, completedBucket = 0, closedIss = 0, openIss = 0;
+    for (const i of discovered) {
+      if (!withinPeriod(i.createdAt, HERO_DAYS)) continue;
+      if      (i.bucket === 'solved')    solvedBucket    += 1;
+      else if (i.bucket === 'completed') completedBucket += 1;
+      else if (i.bucket === 'open')      openIss         += 1;
+      else                                closedIss       += 1;
+    }
+    // SOLVED for display = "GitHub-completed" (solved + completed). Matches
+    // what the user sees in the P&L table's SOLVED column.
+    const solvedDisplay = solvedBucket + completedBucket;
+    const totalPrs    = merged + closedPr + openPr;
+    const totalIssues = solvedDisplay + closedIss + openIss;
+    const ossDenom    = merged + closedPr;
+    const discDenom   = solvedDisplay + closedIss;
+    const ossCred  = ossDenom  > 0 ? merged        / ossDenom  : 0;
+    const discCred = discDenom > 0 ? solvedDisplay / discDenom : 0;
+    return {
+      merged, closedPr, additions, deletions,
+      solved: solvedDisplay, closedIss, openIss,
+      totalPrs, totalIssues,
+      ossCred, discCred,
+    };
+  }, [prs, discovered]);
+
   const prsFiltered = useMemo(
     () => selectedRepo ? prsInPeriod.filter((p) => p.repository.toLowerCase() === selectedRepo.toLowerCase()) : prsInPeriod,
     [prsInPeriod, selectedRepo],
@@ -115,44 +149,6 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
     [discoveredInP, selectedRepo],
   );
 
-  // Repo-filtered so the Activity card responds to the repo selection.
-  const prAgg = useMemo(() => {
-    let merged = 0, open = 0, closed = 0;
-    let realScoreSum = 0, additions = 0, deletions = 0, predictedUsd = 0;
-    const repos = new Set<string>();
-    for (const p of prsFiltered) {
-      if      (p.prState === 'MERGED') merged += 1;
-      else if (p.prState === 'OPEN')   open   += 1;
-      else                              closed += 1;
-      realScoreSum += p.realScore;
-      additions    += p.additions;
-      deletions    += p.deletions;
-      predictedUsd += p.predictedUsdPerDay;
-      repos.add(p.repository);
-    }
-    return { total: prsFiltered.length, merged, open, closed, realScoreSum, additions, deletions, predictedUsd, uniqueRepos: repos.size };
-  }, [prsFiltered]);
-
-  const issueAgg = useMemo(() => {
-    let solv = 0, comp = 0, op = 0, cl = 0;
-    const repos = new Set<string>();
-    for (const i of discoveredFiltered) {
-      if      (i.bucket === 'solved')    solv += 1;
-      else if (i.bucket === 'completed') comp += 1;
-      else if (i.bucket === 'open')      op   += 1;
-      else                                cl   += 1;
-      repos.add(i.repo);
-    }
-    const solvedFiltered = selectedRepo
-      ? solvedInPeriod.filter((i) => i.repo.toLowerCase() === selectedRepo.toLowerCase())
-      : solvedInPeriod;
-    return {
-      total: discoveredFiltered.length,
-      solved: solv, completed: comp, open: op, closed: cl,
-      solvedExternal: solvedFiltered.length,
-      uniqueRepos: repos.size,
-    };
-  }, [discoveredFiltered, solvedInPeriod, selectedRepo]);
 
   // Canonicalise repo casing: prefer mixed-case over all-lowercase across sources.
   const repoBreakdown = useMemo(() => {
@@ -195,7 +191,16 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
       else                                r.closedIssue    += 1;
     }
     for (const i of solvedInPeriod) get(i.repo).solvedByPr.push(i);
-    return Array.from(map.values()).sort((a, b) => {
+    // Filter by mode so the table only shows repos relevant to the current
+    // track. Without this filter, a repo with PR activity but no issues
+    // appears in Discovery mode as "0 / 0 / 0 / 0" — confusing because the
+    // sparkline shows activity but no counts (the activity is PR activity
+    // that doesn't belong on the Discovery view).
+    const all = Array.from(map.values());
+    const filtered = mode === 'oss'
+      ? all.filter((r) => r.prs.length > 0)
+      : all.filter((r) => r.discovered.length > 0 || r.solvedByPr.length > 0);
+    return filtered.sort((a, b) => {
       const aw = mode === 'oss' ? a.prs.length : a.discovered.length + a.solvedByPr.length;
       const bw = mode === 'oss' ? b.prs.length : b.discovered.length + b.solvedByPr.length;
       if (aw !== bw) return bw - aw;
@@ -219,6 +224,19 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
     ossEligible,
     issueEligible,
   );
+
+  // Per-issue earning scales — same math RepoBreakdown uses internally, but
+  // lifted here so IssueList can show $/d per row without duplicating the calc.
+  const issueDiscoveryScore = num(miner?.issueDiscoveryScore);
+  const totalSolvedEligible = useMemo(
+    () => repoBreakdown.reduce(
+      (s, r) => s + (repoEvalMap.get(r.repo.toLowerCase())?.isIssueEligible ? r.solvedIssue : 0),
+      0,
+    ),
+    [repoBreakdown, repoEvalMap],
+  );
+  const discEarnScale  = totalSolvedEligible > 0 ? discEarningPerDay  / totalSolvedEligible : 0;
+  const discScoreScale = totalSolvedEligible > 0 ? issueDiscoveryScore / totalSolvedEligible : 0;
 
   const copyHotkey = async () => {
     if (!miner?.hotkey) return;
@@ -245,36 +263,56 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
       <PageLayout.Header>
         <BackLink />
 
-        <ProfileHero
-          ghName={ghNameStr}
-          ghAvatar={ghAvatarUrl}
-          miner={miner}
-          uid={uid}
-          isMe={isMe}
-          isTracked={isTracked}
-          toggle={() => miner && toggle(String(miner.uid))}
-          copied={copied}
-          onCopyHotkey={copyHotkey}
-        />
+        <Box
+          sx={{
+            mt: 2,
+            border: '1px solid',
+            borderColor: 'border.default',
+            borderRadius: 2,
+            bg: 'canvas.subtle',
+            overflow: 'hidden',
+          }}
+        >
+          <ProfileHero
+            ghName={ghNameStr}
+            ghAvatar={ghAvatarUrl}
+            miner={miner}
+            uid={uid}
+            isMe={isMe}
+            isTracked={isTracked}
+            toggle={() => miner && toggle(String(miner.uid))}
+            copied={copied}
+            onCopyHotkey={copyHotkey}
+            prs={prs}
+          />
 
-        <PositionSummary
-          loading={!miner}
-          usdPerDay={usdPerDay}
-          ossEarningPerDay={ossEarningPerDay}
-          discEarningPerDay={discEarningPerDay}
-          ossEligible={ossEligible}
-          issueEligible={issueEligible}
-          ossEligibleCount={ossEligibleCount}
-          discEligibleCount={discEligibleCount}
-          totalScore={num(miner?.totalScore)}
-          issueScore={num(miner?.issueDiscoveryScore)}
-          baseScore={num(miner?.baseTotalScore)}
-          lifetimeUsd={num(miner?.lifetimeUsd)}
-          lifetimeTao={num(miner?.lifetimeTao)}
-          lifetimeAlpha={num(miner?.lifetimeAlpha)}
-          cred={num(miner?.credibility)}
-          issueCred={num(miner?.issueCredibility)}
-        />
+          <PositionSummary
+            loading={!miner}
+            usdPerDay={usdPerDay}
+            ossEarningPerDay={ossEarningPerDay}
+            discEarningPerDay={discEarningPerDay}
+            ossEligible={ossEligible}
+            issueEligible={issueEligible}
+            ossEligibleCount={ossEligibleCount}
+            discEligibleCount={discEligibleCount}
+            totalScore={num(miner?.totalScore)}
+            issueScore={num(miner?.issueDiscoveryScore)}
+            baseScore={num(miner?.baseTotalScore)}
+            lifetimeUsd={num(miner?.lifetimeUsd)}
+            lifetimeTao={num(miner?.lifetimeTao)}
+            lifetimeAlpha={num(miner?.lifetimeAlpha)}
+                    cred={heroAgg.ossCred}
+            issueCred={heroAgg.discCred}
+            totalMergedPrs={heroAgg.merged}
+            totalPrs={heroAgg.totalPrs}
+            totalAdditions={heroAgg.additions}
+            totalDeletions={heroAgg.deletions}
+            totalSolvedIssues={heroAgg.solved}
+            totalClosedIssues={heroAgg.closedIss}
+            totalOpenIssues={heroAgg.openIss}
+            heroWindowDays={HERO_DAYS}
+          />
+        </Box>
       </PageLayout.Header>
 
       <PageLayout.Content>
@@ -311,39 +349,18 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
             key={mode}
             repos={repoBreakdown}
             selectedRepo={selectedRepo}
-            onSelectRepo={(r) => setSelectedRepo((prev) => (prev === r ? null : r))}
+            onSelectRepo={(r) => {
+              if (r === null) { setSelectedRepo(null); return; }
+              setSelectedRepo((prev) => (prev === r ? null : r));
+            }}
             mode={mode}
             ossEarningPerDay={ossEarningPerDay}
             discEarningPerDay={discEarningPerDay}
             issueDiscoveryScore={num(miner?.issueDiscoveryScore)}
             repoEvalMap={repoEvalMap}
+            periodDays={periodDays}
+            periodLabel={PERIODS.find((p) => p.key === period)?.label ?? period}
           />
-        </Box>
-
-        <Box
-          sx={{
-            mb: 3,
-            display: 'grid',
-            gridTemplateColumns: mode === 'oss'
-              ? ['1fr', null, null, '1fr 1fr']
-              : '1fr',
-            gap: 3,
-            alignItems: 'stretch',
-          }}
-        >
-          <ActivitySummary
-            mode={mode}
-            prAgg={prAgg}
-            issueAgg={issueAgg}
-            ossEligible={ossEligible}
-            issueEligible={issueEligible}
-            issueScore={num(miner?.issueDiscoveryScore)}
-            miner={miner}
-            period={period}
-          />
-          {mode === 'oss' && (
-            <CodeImpactCard prAgg={prAgg} miner={miner} />
-          )}
         </Box>
 
         {mode === 'oss' && (
@@ -369,6 +386,9 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
                 sub={selectedRepo ?? 'authored by this miner'}
                 kind="discovered"
                 icon={<IssueOpenedIcon size={13} />}
+                discScoreScale={discScoreScale}
+                discEarnScale={discEarnScale}
+                repoEvalMap={repoEvalMap}
               />
             )}
           </Box>
