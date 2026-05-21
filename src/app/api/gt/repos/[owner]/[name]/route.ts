@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { withRotation } from '@/lib/github';
 import { getReadDb } from '@/lib/db';
 import { backfillPrIssueLinksIfNeeded } from '@/lib/refresh';
+import { repoInactiveAt, repoWeight } from '@/lib/gt-repo-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,21 +55,6 @@ let inFlight: Promise<CachedAggregates> | null = null;
 function num(v: unknown): number {
   const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0;
   return Number.isFinite(n) ? n : 0;
-}
-
-function repoWeight(repo: UpstreamRepo): number {
-  return num(repo.config?.emission_share ?? repo.config?.emissionShare ?? repo.config?.weight ?? repo.emission_share ?? repo.emissionShare ?? repo.weight);
-}
-
-function repoInactiveAt(repo: UpstreamRepo): string | null {
-  const inactiveAt = repo.config?.inactive_at ?? repo.config?.inactiveAt ?? repo.inactive_at ?? repo.inactiveAt ?? null;
-  const ineligible =
-    repo.config?.eligibility_mode === false ||
-    repo.config?.eligibilityMode === false ||
-    repo.eligibility_mode === false ||
-    repo.eligibilityMode === false;
-  if (ineligible) return inactiveAt ?? 'ineligible';
-  return inactiveAt;
 }
 
 function repoIssueDiscoveryShare(repo: UpstreamRepo): number {
