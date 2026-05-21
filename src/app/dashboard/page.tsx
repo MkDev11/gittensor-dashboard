@@ -1942,7 +1942,7 @@ function BestWorkShowcase({
               </Box>
             </Box>
             {runnersUp.length > 0 && (
-              <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'repeat(2, minmax(0, 1fr))'], gap: 2, mt: 2 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: 2, mt: 2 }}>
                 {runnersUp.map((row) => <BestWorkMiniPr key={row.pr.id} row={row} />)}
               </Box>
             )}
@@ -2159,7 +2159,7 @@ function MetricChip({ children, tone = 'muted', title }: { children: React.React
 
 function InlineProgress({ pct, segments, color = 'accent.emphasis' }: { pct: number; color?: string; segments?: Array<{ key: string; pct: number; color: string; tooltip: string }> }) {
   return (
-    <Box sx={{ position: 'relative', height: 6, borderRadius: 999, bg: 'canvas.inset', overflow: 'visible', minWidth: 86 }}>
+    <Box sx={{ position: 'relative', height: 6, borderRadius: 999, bg: 'canvas.inset', overflow: 'visible', minWidth: 44 }}>
       {segments && segments.length > 0 ? (
         <Box sx={{ position: 'absolute', inset: 0, width: `${Math.max(4, Math.min(100, pct * 100))}%`, display: 'flex', overflow: 'visible', borderRadius: 999 }}>
           {segments.map((segment) => (
@@ -2210,7 +2210,7 @@ function BestWorkRankList({ icon, title, empty, rows }: { icon: React.ReactNode;
         ) : rows.map((row, index) => (
           <Link key={row.key} href={row.href} target={row.href.startsWith('http') ? '_blank' : undefined} rel={row.href.startsWith('http') ? 'noreferrer' : undefined} style={{ color: 'inherit', textDecoration: 'none' }}>
             <Box sx={{ minWidth: 0, py: 1, borderRadius: 2, '&:hover': { bg: 'canvas.subtle' } }}>
-              <Box sx={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 0.85fr) minmax(112px, 1fr) auto', gap: 2, alignItems: 'center', minWidth: 0 }}>
+              <Box sx={{ display: 'grid', gridTemplateColumns: 'auto minmax(0, 1.6fr) minmax(48px, 0.7fr) auto', gap: 2, alignItems: 'center', minWidth: 0 }}>
                 <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
                   <Box sx={{ width: 18, height: 18, borderRadius: 99, border: '1px solid', borderColor: 'accent.muted', bg: 'accent.subtle', color: 'accent.fg', display: 'grid', placeItems: 'center', fontSize: 0, fontFamily: 'mono', fontWeight: 800 }}>{index + 1}</Box>
                   <Box as="img" src={row.avatarUrl} alt="" sx={{ width: 18, height: 18, borderRadius: row.avatarShape === 'user' ? 99 : 2, bg: 'canvas.inset', flexShrink: 0 }} />
