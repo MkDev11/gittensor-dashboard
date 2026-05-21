@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { repoInactiveAt, repoWeight } from '@/lib/gt-repo-config';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,7 @@ interface UpstreamRepoConfig {
   inactiveAt?: string | null;
   inactive_at?: string | null;
   eligibility_mode?: boolean;
+  eligibilityMode?: boolean;
 }
 
 interface UpstreamRepo {
@@ -30,6 +32,7 @@ interface UpstreamRepo {
   inactiveAt?: string | null;
   inactive_at?: string | null;
   eligibility_mode?: boolean;
+  eligibilityMode?: boolean;
 }
 
 interface UpstreamPr {
@@ -98,16 +101,6 @@ function nullableNum(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : Number.NaN;
   return Number.isFinite(n) ? n : null;
-}
-
-function repoWeight(repo: UpstreamRepo): number {
-  return num(repo.config?.emission_share ?? repo.config?.emissionShare ?? repo.config?.weight ?? repo.emission_share ?? repo.emissionShare ?? repo.weight);
-}
-
-function repoInactiveAt(repo: UpstreamRepo): string | null {
-  const inactiveAt = repo.config?.inactive_at ?? repo.config?.inactiveAt ?? repo.inactive_at ?? repo.inactiveAt ?? null;
-  if (repo.config?.eligibility_mode === false || repo.eligibility_mode === false) return inactiveAt ?? 'ineligible';
-  return inactiveAt;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
