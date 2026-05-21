@@ -129,6 +129,22 @@ export interface GtReposResponse {
   scoreEarnedThisWeek: number;
   /** Sum of score across PRs merged 7–14d ago (for WoW delta). */
   scoreEarnedPriorWeek: number;
+  /** Active repos that have any collateral staked. */
+  stakedRepoCount: number;
+  /** Sum of top-5 active-repo weights divided by total active weight. 0..1. */
+  top5WeightConcentration: number;
+  /** Network-wide daily merged-PR counts, oldest-first, length 14. */
+  prsMergedSeries14d: number[];
+  /** Network-wide daily sum of score across merged PRs, oldest-first, length 14. */
+  scoreEarnedSeries14d: number[];
+  /** Authors whose earliest-ever merged PR is in the last 7d. */
+  newContributors7d: number;
+  /** Authors with merged PRs older than 14d, none in the 7–14d window, one in the last 7d. */
+  returningContributors7d: number;
+  /** Median (mergedAt - prCreatedAt) in hours, across PRs merged in the last 7d. */
+  medianMergeLatencyHours7d: number;
+  /** Same metric, 7–14d window, for WoW delta. */
+  medianMergeLatencyHoursPriorWeek: number;
   repos: GtRepo[];
   recentPrs: GtPrSummary[];
   prs?: GtPrSummary[];

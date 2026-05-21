@@ -72,6 +72,20 @@ interface Cached {
   uniqueContributorsPriorWeek: number;
   scoreEarnedThisWeek: number;
   scoreEarnedPriorWeek: number;
+  stakedRepoCount: number;
+  top5WeightConcentration: number;
+  prsMergedSeries14d: number[];
+  scoreEarnedSeries14d: number[];
+  newContributors7d: number;
+  returningContributors7d: number;
+  medianMergeLatencyHours7d: number;
+  medianMergeLatencyHoursPriorWeek: number;
+}
+
+function median(sorted: number[]): number {
+  if (sorted.length === 0) return 0;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }
 
 let cache: Cached | null = null;
@@ -251,6 +265,11 @@ async function refresh(): Promise<Cached> {
   let scoreEarnedPriorWeek = 0;
   const contributors7d = new Set<string>();
   const contributorsPriorWeek = new Set<string>();
+  // Earliest-ever merged timestamp per author. Drives new vs returning
+  // contributor classification at the end of the loop.
+  const firstMergeByAuthor = new Map<string, number>();
+  const latency7d: number[] = [];
+  const latencyPriorWeek: number[] = [];
 
   // 14-day daily merged-PR series, indexed by repo (lowercased). Buckets are
   // UTC days. seriesStart is the start of (today - 13) UTC, so seriesStart +
@@ -266,6 +285,8 @@ async function refresh(): Promise<Cached> {
     }
     return s;
   };
+  const prsMergedSeries14d = new Array<number>(SERIES_DAYS).fill(0);
+  const scoreEarnedSeries14d = new Array<number>(SERIES_DAYS).fill(0);
 
   for (const p of prsRaw) {
     const a = ensure(p.repository);
@@ -278,6 +299,10 @@ async function refresh(): Promise<Cached> {
       if (author) a.contributors.add(author);
       const mt = Date.parse(p.mergedAt);
       const prScore = num(p.score);
+      if (author) {
+        const earliest = firstMergeByAuthor.get(author);
+        if (earliest === undefined || mt < earliest) firstMergeByAuthor.set(author, mt);
+      }
       if (mt >= weekAgo) {
         prsMergedThisWeek += 1;
         scoreEarnedThisWeek += prScore;
@@ -289,7 +314,19 @@ async function refresh(): Promise<Cached> {
       }
       if (mt >= seriesStart && mt < todayStart + DAY_MS) {
         const idx = Math.floor((mt - seriesStart) / DAY_MS);
-        if (idx >= 0 && idx < SERIES_DAYS) ensureSeries(p.repository.toLowerCase())[idx] += 1;
+        if (idx >= 0 && idx < SERIES_DAYS) {
+          ensureSeries(p.repository.toLowerCase())[idx] += 1;
+          prsMergedSeries14d[idx] += 1;
+          scoreEarnedSeries14d[idx] += prScore;
+        }
+      }
+      // Merge latency in hours, recorded against the same window as the
+      // PRs-merged buckets so deltas line up.
+      const ct = p.prCreatedAt ? Date.parse(p.prCreatedAt) : NaN;
+      if (Number.isFinite(ct) && ct <= mt) {
+        const hours = (mt - ct) / (60 * 60 * 1000);
+        if (mt >= weekAgo) latency7d.push(hours);
+        else if (mt >= twoWeeksAgo) latencyPriorWeek.push(hours);
       }
     }
     const t = p.prCreatedAt ? Date.parse(p.prCreatedAt) : 0;
@@ -377,6 +414,37 @@ async function refresh(): Promise<Cached> {
     0,
   );
 
+  const stakedRepoCount = repos.reduce(
+    (s, r) => (r.isActive && r.collateralStaked > 0 ? s + 1 : s),
+    0,
+  );
+
+  // Top-5 weight concentration among active repos.
+  const top5WeightSum = repos
+    .filter((r) => r.isActive && Number.isFinite(r.weight))
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 5)
+    .reduce((s, r) => s + r.weight, 0);
+  const top5WeightConcentration = totalEmissionWeight > 0 ? top5WeightSum / totalEmissionWeight : 0;
+
+  // New vs returning, classified by each contributor's earliest-ever merge.
+  let newContributors7d = 0;
+  let returningContributors7d = 0;
+  for (const author of contributors7d) {
+    const earliest = firstMergeByAuthor.get(author);
+    if (earliest === undefined) continue;
+    if (earliest >= weekAgo) {
+      newContributors7d += 1;
+    } else if (earliest < twoWeeksAgo && !contributorsPriorWeek.has(author)) {
+      returningContributors7d += 1;
+    }
+  }
+
+  const sortedLat7 = [...latency7d].sort((a, b) => a - b);
+  const sortedLatPrior = [...latencyPriorWeek].sort((a, b) => a - b);
+  const medianMergeLatencyHours7d = median(sortedLat7);
+  const medianMergeLatencyHoursPriorWeek = median(sortedLatPrior);
+
   const next: Cached = {
     fetched_at: now,
     repos,
@@ -389,6 +457,14 @@ async function refresh(): Promise<Cached> {
     uniqueContributorsPriorWeek: contributorsPriorWeek.size,
     scoreEarnedThisWeek,
     scoreEarnedPriorWeek,
+    stakedRepoCount,
+    top5WeightConcentration,
+    prsMergedSeries14d,
+    scoreEarnedSeries14d,
+    newContributors7d,
+    returningContributors7d,
+    medianMergeLatencyHours7d,
+    medianMergeLatencyHoursPriorWeek,
   };
   cache = next;
   return next;
@@ -409,6 +485,14 @@ function payload(c: Cached, source: 'live' | 'cache' | 'stale'): GtReposResponse
     uniqueContributorsPriorWeek: c.uniqueContributorsPriorWeek,
     scoreEarnedThisWeek: c.scoreEarnedThisWeek,
     scoreEarnedPriorWeek: c.scoreEarnedPriorWeek,
+    stakedRepoCount: c.stakedRepoCount,
+    top5WeightConcentration: c.top5WeightConcentration,
+    prsMergedSeries14d: c.prsMergedSeries14d,
+    scoreEarnedSeries14d: c.scoreEarnedSeries14d,
+    newContributors7d: c.newContributors7d,
+    returningContributors7d: c.returningContributors7d,
+    medianMergeLatencyHours7d: c.medianMergeLatencyHours7d,
+    medianMergeLatencyHoursPriorWeek: c.medianMergeLatencyHoursPriorWeek,
     repos: c.repos,
     recentPrs: c.recentPrs,
     prs: c.prs,

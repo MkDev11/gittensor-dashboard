@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { PageLayout, Heading, Text, Box, TextInput, Label } from '@primer/react';
+import { PageLayout, Text, Box, TextInput, Label } from '@primer/react';
 import {
   SearchIcon,
   StarIcon,
@@ -19,7 +19,7 @@ import {
   ArrowUpIcon,
   GitPullRequestIcon,
 } from '@primer/octicons-react';
-import { TableRowsSkeleton, SkeletonBar } from '@/components/Skeleton';
+import { SkeletonBar } from '@/components/Skeleton';
 import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import { formatRelativeTime, formatCount, formatPercent, formatUsd, formatTao } from '@/lib/format';
 import type { GtRepo, GtReposResponse, RepoMinersResponse, GtRepoPrsResponse } from '@/types/entities';
@@ -43,6 +43,7 @@ interface PricesResponse {
   alpha_tao: number;
   alpha_usd: number;
   tao_per_day: number;
+  tao_usd_change_24h: number | null;
   fetched_at: number;
 }
 
@@ -105,15 +106,6 @@ export default function RepositoriesPage() {
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
-
-  const onSortChange = (k: SortKey) => {
-    if (k === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setSortKey(k);
-      setSortDir('desc');
-    }
-    setPage(1);
-  };
 
   const filtered = useMemo(() => {
     if (!data?.repos) return [] as GtRepo[];
@@ -185,12 +177,6 @@ export default function RepositoriesPage() {
 
   return (
     <PageLayout containerWidth="full" padding="normal">
-      <PageLayout.Header>
-        <Heading sx={{ fontSize: 4, mb: 1 }}>Repositories</Heading>
-        <Text sx={{ color: 'fg.muted' }}>
-          SN74 tracked repositories — weight, scoring, and contributor activity.
-        </Text>
-      </PageLayout.Header>
       <PageLayout.Content>
         <NetworkKpiStrip data={data} prices={prices} />
 
@@ -199,7 +185,7 @@ export default function RepositoriesPage() {
             display: 'flex',
             flexDirection: ['column', null, null, 'row'],
             alignItems: 'flex-start',
-            gap: 3,
+            gap: 2,
           }}
         >
           {/* Main column */}
@@ -212,17 +198,76 @@ export default function RepositoriesPage() {
             borderRadius: 2,
             bg: 'canvas.subtle',
             p: 2,
-            mb: 3,
+            mb: 2,
           }}
         >
-          <Box sx={{ display: 'flex', flexDirection: ['column', null, 'row'], alignItems: ['stretch', null, 'center'], gap: 3, flexWrap: 'wrap' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, maxWidth: '100%', overflowX: 'auto', pb: ['2px', null, 0] }}>
+          <Box
+            sx={{
+              display: 'flex',
+              // Single-row toolbar from sm (≥544px) up. Below that, search drops to its
+              // own row but tabs + row-count stay inline so the toolbar isn't a tall column.
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 2,
+              flexWrap: 'wrap',
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, maxWidth: '100%', overflowX: 'auto' }}>
               <StatusTab active={status === 'all'} onClick={() => { setStatus('all'); setPage(1); }} label="All" count={data?.count} />
               <StatusTab active={status === 'active'} onClick={() => { setStatus('active'); setPage(1); }} label="Active" count={data?.activeCount} />
               <StatusTab active={status === 'inactive'} onClick={() => { setStatus('inactive'); setPage(1); }} label="Inactive" count={data?.inactiveCount} />
             </Box>
 
             <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: 'fg.muted', fontSize: 1 }}>
+              <Text sx={{ color: 'fg.muted' }}>Sort:</Text>
+              <Box
+                as="select"
+                value={sortKey}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { setSortKey(e.target.value as SortKey); setPage(1); }}
+                sx={{
+                  bg: 'canvas.default',
+                  color: 'fg.default',
+                  border: '1px solid',
+                  borderColor: 'border.default',
+                  borderRadius: 1,
+                  px: 1,
+                  py: '2px',
+                  fontSize: 1,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </Box>
+              <Box
+                as="button"
+                onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+                aria-label={sortDir === 'desc' ? 'Sort descending' : 'Sort ascending'}
+                title={sortDir === 'desc' ? 'Descending' : 'Ascending'}
+                sx={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 24,
+                  height: 24,
+                  bg: 'canvas.default',
+                  color: 'fg.default',
+                  border: '1px solid',
+                  borderColor: 'border.default',
+                  borderRadius: 1,
+                  cursor: 'pointer',
+                  '&:hover': { borderColor: 'border.muted' },
+                }}
+              >
+                {sortDir === 'desc' ? <ArrowDownIcon size={14} /> : <ArrowUpIcon size={14} />}
+              </Box>
+            </Box>
+
+            {/* Pushes Rows + Search to the right edge on wide viewports.
+                On narrow viewports they wrap below tabs/sort naturally. */}
+            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, color: 'fg.muted', fontSize: 1, ml: ['0', 'auto'] }}>
               <Text sx={{ color: 'fg.muted' }}>Rows:</Text>
               <Box
                 as="select"
@@ -249,7 +294,7 @@ export default function RepositoriesPage() {
               </Box>
             </Box>
 
-            <Box sx={{ flex: 1, minWidth: [0, null, 240], width: ['100%', null, 'auto'] }}>
+            <Box sx={{ minWidth: 200, width: ['100%', 240] }}>
               <TextInput
                 leadingVisual={SearchIcon}
                 placeholder="Search or enter owner/name…"
@@ -257,67 +302,6 @@ export default function RepositoriesPage() {
                 onChange={(e) => { setQuery(e.target.value); setPage(1); }}
                 sx={{ width: '100%' }}
               />
-            </Box>
-
-          </Box>
-
-          {/* When the table's headers scroll off-screen on narrow viewports, expose the same sort here. */}
-          <Box
-            sx={{
-              display: ['flex', null, null, 'none'],
-              flexDirection: ['column', null, 'row'],
-              alignItems: ['stretch', null, 'center'],
-              justifyContent: 'flex-end',
-              gap: 2,
-              mt: 3,
-              color: 'fg.muted',
-              fontSize: 1,
-            }}
-          >
-            <Text sx={{ color: 'fg.muted' }}>Sort:</Text>
-            <Box
-              as="select"
-              value={sortKey}
-              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { setSortKey(e.target.value as SortKey); setPage(1); }}
-              sx={{
-                bg: 'canvas.default',
-                color: 'fg.default',
-                border: '1px solid',
-                borderColor: 'border.default',
-                borderRadius: 1,
-                px: 2,
-                py: '4px',
-                fontSize: 1,
-                fontFamily: 'inherit',
-                cursor: 'pointer',
-                minWidth: [0, null, 140],
-              }}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.key} value={o.key}>{o.label}</option>
-              ))}
-            </Box>
-            <Box
-              as="button"
-              onClick={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
-              aria-label={sortDir === 'desc' ? 'Sort descending' : 'Sort ascending'}
-              title={sortDir === 'desc' ? 'Descending' : 'Ascending'}
-              sx={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: ['100%', null, 28],
-                height: 28,
-                bg: 'canvas.default',
-                color: 'fg.default',
-                border: '1px solid',
-                borderColor: 'border.default',
-                borderRadius: 1,
-                cursor: 'pointer',
-                '&:hover': { borderColor: 'border.muted' },
-              }}
-            >
-              {sortDir === 'desc' ? <ArrowDownIcon size={14} /> : <ArrowUpIcon size={14} />}
             </Box>
           </Box>
         </Box>
@@ -328,39 +312,87 @@ export default function RepositoriesPage() {
           </Box>
         )}
         {isLoading && !data && (
-          <TableRowsSkeleton
-            rows={12}
-            cols={[
-              { width: 24 },
-              { flex: 1 },
-              { width: 80 },
-              { width: 90 },
-              { width: 90 },
-              { width: 90 },
-              { width: 60 },
-              { width: 80 },
-              { width: 80 },
-              { width: 120 },
-              { width: 36 },
-            ]}
-          />
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Box
+                key={i}
+                sx={{
+                  border: '1px solid',
+                  borderColor: 'border.muted',
+                  borderRadius: 2,
+                  bg: 'canvas.subtle',
+                  overflow: 'hidden',
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 3, py: '12px' }}>
+                  <SkeletonBar width={14} />
+                  <SkeletonBar width={28} />
+                  <Box sx={{ width: 22, height: 22, borderRadius: '50%', bg: 'canvas.inset' }} />
+                  <SkeletonBar width={180} />
+                </Box>
+                <Box
+                  sx={{
+                    display: 'grid',
+                    gridTemplateColumns: ['repeat(2, 1fr)', 'repeat(3, 1fr)', 'repeat(6, 1fr)'],
+                    gap: '1px',
+                    bg: 'border.muted',
+                    borderTop: '1px solid',
+                    borderColor: 'border.muted',
+                  }}
+                >
+                  {Array.from({ length: 6 }).map((_, j) => (
+                    <Box key={j} sx={{ bg: 'canvas.subtle', px: 3, py: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <SkeletonBar width={60} />
+                      <SkeletonBar width={80} />
+                    </Box>
+                  ))}
+                </Box>
+              </Box>
+            ))}
+          </Box>
         )}
 
         {data && (
-          <RepoTable
-            rows={pageItems}
-            startRank={pageStart + 1}
-            sortKey={sortKey}
-            sortDir={sortDir}
-            onSort={onSortChange}
-            tracked={tracked}
-            onToggleTrack={toggle}
-            prices={prices}
-            expandedRepo={expandedRepo}
-            onToggleExpand={(fullName) =>
-              setExpandedRepo((cur) => (cur === fullName ? null : fullName))
-            }
-          />
+          <>
+            {/* Below lg: card view (vertical stack, no horizontal scroll). */}
+            <Box sx={{ display: ['block', null, null, 'none'] }}>
+              <RepoCardList
+                rows={pageItems}
+                startRank={pageStart + 1}
+                tracked={tracked}
+                onToggleTrack={toggle}
+                prices={prices}
+                expandedRepo={expandedRepo}
+                onToggleExpand={(fullName) =>
+                  setExpandedRepo((cur) => (cur === fullName ? null : fullName))
+                }
+              />
+            </Box>
+            {/* lg+: dense table view with sortable column headers. */}
+            <Box sx={{ display: ['none', null, null, 'block'] }}>
+              <RepoTable
+                rows={pageItems}
+                startRank={pageStart + 1}
+                sortKey={sortKey}
+                sortDir={sortDir}
+                onSort={(k) => {
+                  if (k === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+                  else {
+                    setSortKey(k);
+                    setSortDir('desc');
+                  }
+                  setPage(1);
+                }}
+                tracked={tracked}
+                onToggleTrack={toggle}
+                prices={prices}
+                expandedRepo={expandedRepo}
+                onToggleExpand={(fullName) =>
+                  setExpandedRepo((cur) => (cur === fullName ? null : fullName))
+                }
+              />
+            </Box>
+          </>
         )}
 
         {data && (
@@ -403,7 +435,7 @@ export default function RepositoriesPage() {
               top: 16,
               display: 'flex',
               flexDirection: 'column',
-              gap: 3,
+              gap: 2,
             }}
           >
             <OpportunityCard
@@ -434,7 +466,7 @@ export default function RepositoriesPage() {
                   <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default' }}>
                     {formatCount(r.openIssueCount)}
                   </Text>
-                  <Text sx={{ display: 'block', fontSize: 0, color: 'fg.muted' }}>w {r.weight.toFixed(2)}</Text>
+                  <Text sx={{ display: 'block', fontSize: 0, color: 'fg.muted' }}>open</Text>
                 </Box>
               )}
             />
@@ -586,6 +618,19 @@ function SidebarRepoRow({ repo, right }: { repo: GtRepo; right: React.ReactNode 
   );
 }
 
+function formatYearlyUsd(daily: number): string {
+  const yearly = daily * 365;
+  if (yearly >= 1_000_000) return `$${(yearly / 1_000_000).toFixed(1)}M/yr`;
+  if (yearly >= 1_000) return `$${Math.round(yearly / 1_000)}k/yr`;
+  return `$${Math.round(yearly)}/yr`;
+}
+
+function formatLatencyHours(h: number): string {
+  if (!Number.isFinite(h) || h <= 0) return '—';
+  if (h < 24) return `${Math.round(h)}h`;
+  return `${(h / 24).toFixed(1)}d`;
+}
+
 function NetworkKpiStrip({
   data,
   prices,
@@ -595,156 +640,267 @@ function NetworkKpiStrip({
 }) {
   const activeCount = data?.activeCount ?? 0;
   const totalCount = data?.count ?? 0;
+  const stakedCount = data?.stakedRepoCount ?? 0;
   const weight = data?.totalEmissionWeight ?? 0;
+  const top5Share = data?.top5WeightConcentration ?? 0;
+  const taoUsd = prices?.tao_usd ?? 0;
+  const change24h = prices?.tao_usd_change_24h ?? null;
+  const { tao: taoPerDay, usd: usdPerDay } = emissionForWeight(weight, prices);
+
   const merged7d = data?.prsMergedThisWeek ?? 0;
   const mergedPrev = data?.prsMergedLastWeek ?? 0;
-  const delta = merged7d - mergedPrev;
+  const mergedDelta = merged7d - mergedPrev;
+  const mergedSeries = data?.prsMergedSeries14d ?? [];
+
   const contributors7d = data?.uniqueContributors7d ?? 0;
   const contributorsPrev = data?.uniqueContributorsPriorWeek ?? 0;
   const contributorsDelta = contributors7d - contributorsPrev;
+  const newC = data?.newContributors7d ?? 0;
+  const retC = data?.returningContributors7d ?? 0;
+
   const score7d = data?.scoreEarnedThisWeek ?? 0;
   const scorePrev = data?.scoreEarnedPriorWeek ?? 0;
-  const scoreDelta = score7d - scorePrev;
+  const scoreDelta = Math.round(score7d - scorePrev);
+  const scoreUsd = taoUsd > 0 ? score7d * taoUsd : null;
 
-  const { tao: taoPerDay, usd: usdPerDay } = emissionForWeight(weight, prices);
+  const lat7d = data?.medianMergeLatencyHours7d ?? 0;
+  const latPrev = data?.medianMergeLatencyHoursPriorWeek ?? 0;
+  // Round to whole hours for the delta so a sub-hour difference does not
+  // render a misleading arrow.
+  const latDeltaHours = Math.round(lat7d - latPrev);
 
-  return (
-    <Box
-      sx={{
-        display: 'grid',
-        // 6 tiles: stack at xs, 2 wide at sm, 3 wide (2×3) at md/lg,
-        // all 6 on one row at xl (≥1280px → covers the spec's ≥1400px wide-viewport target).
-        gridTemplateColumns: [
-          '1fr',
-          'repeat(2, minmax(0, 1fr))',
-          'repeat(3, minmax(0, 1fr))',
-          null,
-          'repeat(6, minmax(0, 1fr))',
-        ],
-        gap: 3,
-        mb: 3,
-      }}
-    >
-      <KpiTile label="ACTIVE REPOS">
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
-          <Box
-            sx={{
-              width: 8,
-              height: 8,
-              borderRadius: '50%',
-              bg: activeCount > 0 ? 'success.emphasis' : 'fg.subtle',
-              alignSelf: 'center',
-              flexShrink: 0,
-            }}
-          />
-          <KpiValue>{activeCount}</KpiValue>
-          <Text sx={{ color: 'fg.muted', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontSize: 1 }}>
-            / {totalCount}
-          </Text>
-        </Box>
-      </KpiTile>
-
-      <KpiTile label="WEIGHT ALLOCATED">
-        <KpiValue>{formatPercent(weight, { scale: 100 })}</KpiValue>
-      </KpiTile>
-
-      <KpiTile label="EMISSION / DAY">
-        {taoPerDay == null ? (
-          <Box>
-            <KpiValue>{formatPercent(weight, { scale: 100 })}</KpiValue>
-            <Text sx={{ display: 'block', fontSize: 0, color: 'fg.muted' }}>weight share</Text>
-          </Box>
-        ) : (
-          <Box>
-            <KpiValue>{formatTao(taoPerDay)}</KpiValue>
-            <Text sx={{ display: 'block', fontSize: 0, color: 'fg.muted' }}>
-              {usdPerDay != null ? `${formatUsd(usdPerDay)}/day` : 'TAO/day'}
-            </Text>
-          </Box>
-        )}
-      </KpiTile>
-
-      <KpiTile label="PRS MERGED 7D">
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
-          <KpiValue>{formatCount(merged7d, { fallback: '0' })}</KpiValue>
-          {(merged7d > 0 || mergedPrev > 0) && <WowDelta delta={delta} />}
-        </Box>
-      </KpiTile>
-
-      <KpiTile label="CONTRIBUTORS 7D">
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
-          <KpiValue>{formatCount(contributors7d, { fallback: '0' })}</KpiValue>
-          {contributorsDelta !== 0 && <WowDelta delta={contributorsDelta} />}
-        </Box>
-      </KpiTile>
-
-      <KpiTile label="SCORE EARNED 7D">
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 2 }}>
-          <KpiValue>{formatCount(Math.round(score7d), { fallback: '0' })}</KpiValue>
-          {Math.round(scoreDelta) !== 0 && <WowDelta delta={Math.round(scoreDelta)} />}
-        </Box>
-      </KpiTile>
-    </Box>
-  );
-}
-
-function KpiValue({ children }: { children: React.ReactNode }) {
-  return (
-    <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 4, color: 'fg.default' }}>
-      {children}
-    </Text>
-  );
-}
-
-function KpiTile({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <Box
       sx={{
         border: '1px solid',
         borderColor: 'border.default',
         borderRadius: 2,
-        bg: 'canvas.subtle',
-        p: 3,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 1,
-        minWidth: 0,
+        mb: 2,
         overflow: 'hidden',
       }}
     >
-      <Text
+      {/* Single uniform grid — 2 cols xs, 4 cols sm/md/lg, 8 cols xl.
+          No hero, no two-tier hierarchy: every metric carries the same
+          weight, eliminating the dead space the giant headline number
+          created on wide screens. */}
+      <Box
         sx={{
-          fontSize: '11px',
-          fontWeight: 600,
-          letterSpacing: '0.5px',
-          color: 'fg.muted',
-          textTransform: 'uppercase',
+          display: 'grid',
+          gridTemplateColumns: ['repeat(2, 1fr)', 'repeat(4, 1fr)', null, null, 'repeat(8, 1fr)'],
+          gap: '1px',
+          bg: 'border.muted',
         }}
       >
-        {label}
-      </Text>
-      {children}
+        <SupportCell
+          label="Emission · Daily"
+          hint="Daily TAO emission flowing to tracked repos at the current network weight, with USD equivalent."
+          value={taoPerDay != null ? formatTao(taoPerDay) : formatPercent(weight, { scale: 100 })}
+          sub={
+            usdPerDay != null
+              ? `${formatUsd(usdPerDay)}/d · ${formatYearlyUsd(usdPerDay)}`
+              : 'weight share'
+          }
+        />
+        <SupportCell
+          label="τ Price"
+          hint="TAO/USD spot price from CoinGecko, with 24h change."
+          value={taoUsd > 0 ? formatUsd(taoUsd, { style: 'price' }) : '—'}
+          sub={
+            change24h == null ? (
+              taoUsd > 0 ? 'TAO/USD' : 'price unavailable'
+            ) : (
+              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                <DeltaIndicator
+                  value={Number(change24h.toFixed(2))}
+                  direction="up-is-good"
+                  format={(abs) => `${abs.toFixed(2)}%`}
+                />
+                <Text as="span" sx={{ fontSize: 0, color: 'fg.subtle' }}>24h</Text>
+              </Box>
+            )
+          }
+        />
+        <SupportCell
+          label="Active Repos"
+          hint="Repos with non-zero SN74 emission weight (vs. total tracked); ‘staked’ = repos with collateral committed."
+          value={
+            <>
+              {activeCount}
+              {activeCount !== totalCount && (
+                <Text as="span" sx={{ color: 'fg.muted', fontSize: 1, fontWeight: 500, ml: '2px' }}>
+                  /{totalCount}
+                </Text>
+              )}
+            </>
+          }
+          sub={stakedCount > 0 ? `${formatCount(stakedCount)} staked` : 'none staked'}
+        />
+        <SupportCell
+          label="Weight Allocated"
+          hint="Sum of active-repo weights — the share of SN74 emission flowing to tracked repos."
+          value={formatPercent(weight, { scale: 100 })}
+          sub={top5Share > 0 ? `Top 5 hold ${Math.round(top5Share * 100)}%` : 'No active weight'}
+        />
+        <SupportCell
+          label="Merged 7d"
+          hint="PRs merged into tracked repos in the last 7 days. Δ is week-over-week; the bar trend shows the last 14 days, oldest left to newest right."
+          value={
+            <Box sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 1 }}>
+              {formatCount(merged7d, { fallback: '0' })}
+              {(merged7d > 0 || mergedPrev > 0) && (
+                <DeltaIndicator value={mergedDelta} direction="up-is-good" />
+              )}
+            </Box>
+          }
+          sub={
+            <Box sx={{ height: 14, display: 'flex', alignItems: 'center', mt: '2px' }}>
+              <Sparkline series={mergedSeries} fluid height={14} label="merged PR" />
+            </Box>
+          }
+        />
+        <SupportCell
+          label="Contributors 7d"
+          hint="Distinct PR authors merged in the last 7 days. ‘new’ = first-ever merge in this window; ‘ret’ = had merges before 14d ago."
+          value={
+            <Box sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 1 }}>
+              {formatCount(contributors7d, { fallback: '0' })}
+              {contributorsDelta !== 0 && (
+                <DeltaIndicator value={contributorsDelta} direction="up-is-good" />
+              )}
+            </Box>
+          }
+          sub={
+            contributors7d === 0
+              ? 'no merged-PR authors'
+              : `${formatCount(newC)} new · ${formatCount(retC)} ret`
+          }
+        />
+        <SupportCell
+          label="Score 7d"
+          hint="Sum of PR scores for PRs merged in the last 7 days, with USD equivalent at current TAO price."
+          value={
+            <Box sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 1 }}>
+              {`${formatCount(Math.round(score7d), { fallback: '0' })}τ`}
+              {scoreDelta !== 0 && <DeltaIndicator value={scoreDelta} direction="up-is-good" />}
+            </Box>
+          }
+          sub={scoreUsd != null ? `≈ ${formatUsd(scoreUsd)}` : '—'}
+        />
+        <SupportCell
+          label="Merge Latency"
+          hint="Median hours between PR open and merge across PRs merged in the last 7d. Lower is faster review velocity."
+          value={
+            <Box sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 1 }}>
+              {formatLatencyHours(lat7d)}
+              {latDeltaHours !== 0 && (
+                <DeltaIndicator
+                  value={latDeltaHours}
+                  direction="down-is-good"
+                  format={(abs) => `${abs}h`}
+                />
+              )}
+            </Box>
+          }
+          sub="median · last 7d"
+        />
+      </Box>
     </Box>
   );
 }
 
-function WowDelta({ delta }: { delta: number }) {
-  if (delta === 0) {
+function SupportCell({
+  label,
+  hint,
+  value,
+  sub,
+}: {
+  label: string;
+  hint?: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+}) {
+  return (
+    <Box
+      title={hint}
+      sx={{
+        bg: 'canvas.subtle',
+        px: 3,
+        py: '12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        minWidth: 0,
+        cursor: hint ? 'help' : 'default',
+      }}
+    >
+      <Text
+        sx={{
+          fontSize: '10px',
+          fontWeight: 600,
+          letterSpacing: '0.6px',
+          color: 'fg.subtle',
+          textTransform: 'uppercase',
+          lineHeight: 1,
+        }}
+      >
+        {label}
+      </Text>
+      <Text
+        sx={{
+          fontFamily: 'mono',
+          fontVariantNumeric: 'tabular-nums',
+          fontWeight: 700,
+          fontSize: 2,
+          color: 'fg.default',
+          lineHeight: 1.1,
+        }}
+      >
+        {value}
+      </Text>
+      {sub != null && (
+        <Text
+          sx={{
+            fontSize: 0,
+            color: 'fg.muted',
+            fontFamily: 'mono',
+            fontVariantNumeric: 'tabular-nums',
+            lineHeight: 1.2,
+          }}
+        >
+          {sub}
+        </Text>
+      )}
+    </Box>
+  );
+}
+
+function DeltaIndicator({
+  value,
+  direction = 'up-is-good',
+  format,
+}: {
+  value: number;
+  direction?: 'up-is-good' | 'down-is-good';
+  format?: (abs: number) => string;
+}) {
+  if (value === 0) {
     return (
       <Text sx={{ color: 'fg.muted', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontSize: 0, fontWeight: 600 }}>
         ±0
       </Text>
     );
   }
-  const positive = delta > 0;
-  const Icon = positive ? ArrowUpIcon : ArrowDownIcon;
+  const up = value > 0;
+  const isGood = direction === 'up-is-good' ? up : !up;
+  const Icon = up ? ArrowUpIcon : ArrowDownIcon;
+  const abs = Math.abs(value);
   return (
     <Box
       sx={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: '2px',
-        color: positive ? 'success.fg' : 'danger.fg',
+        color: isGood ? 'success.fg' : 'danger.fg',
         fontFamily: 'mono',
         fontVariantNumeric: 'tabular-nums',
         fontSize: 0,
@@ -752,7 +908,7 @@ function WowDelta({ delta }: { delta: number }) {
       }}
     >
       <Icon size={12} />
-      {Math.abs(delta)}
+      {format ? format(abs) : abs}
     </Box>
   );
 }
@@ -847,6 +1003,393 @@ function PageBtn({
   );
 }
 
+function RepoCardList({
+  rows,
+  startRank,
+  tracked,
+  onToggleTrack,
+  prices,
+  expandedRepo,
+  onToggleExpand,
+}: {
+  rows: GtRepo[];
+  startRank: number;
+  tracked: Set<string>;
+  onToggleTrack: (fullName: string) => void;
+  prices: PricesResponse | undefined;
+  expandedRepo: string | null;
+  onToggleExpand: (fullName: string) => void;
+}) {
+  if (rows.length === 0) {
+    return (
+      <Box
+        sx={{
+          border: '1px solid',
+          borderColor: 'border.default',
+          borderRadius: 2,
+          bg: 'canvas.subtle',
+          p: 4,
+          textAlign: 'center',
+          color: 'fg.muted',
+        }}
+      >
+        No repositories match.
+      </Box>
+    );
+  }
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {rows.map((r, i) => (
+        <RepoCard
+          key={r.fullName}
+          repo={r}
+          rank={startRank + i}
+          isTracked={repoIsTracked(tracked, r.fullName)}
+          isExpanded={expandedRepo === r.fullName}
+          prices={prices}
+          onToggleTrack={onToggleTrack}
+          onToggleExpand={onToggleExpand}
+        />
+      ))}
+    </Box>
+  );
+}
+
+function RepoCard({
+  repo: r,
+  rank,
+  isTracked,
+  isExpanded,
+  prices,
+  onToggleTrack,
+  onToggleExpand,
+}: {
+  repo: GtRepo;
+  rank: number;
+  isTracked: boolean;
+  isExpanded: boolean;
+  prices: PricesResponse | undefined;
+  onToggleTrack: (fullName: string) => void;
+  onToggleExpand: (fullName: string) => void;
+}) {
+  const { tao: taoPerDay, usd: usdPerDay } = emissionForWeight(r.weight, prices);
+  const lastMergeMs = r.lastPrAt ? Date.parse(r.lastPrAt) : 0;
+  const lastMergeStale = lastMergeMs > 0 && Date.now() - lastMergeMs > STALE_PR_MS;
+  const detailId = `repo-detail-${r.owner}-${r.name}`;
+  return (
+    <Box
+      sx={{
+        border: '1px solid',
+        borderColor: isExpanded ? 'border.default' : 'border.muted',
+        borderRadius: 2,
+        bg: 'canvas.subtle',
+        overflow: 'hidden',
+        opacity: r.isActive ? 1 : 0.7,
+        transition: 'border-color 120ms ease',
+        '&:hover': { borderColor: 'border.default' },
+      }}
+    >
+      {/* Header — clickable to expand. Star button + repo link stop
+          propagation so they remain independent actions. */}
+      <Box
+        tabIndex={0}
+        role="button"
+        aria-expanded={isExpanded}
+        aria-controls={detailId}
+        onClick={() => onToggleExpand(r.fullName)}
+        onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            onToggleExpand(r.fullName);
+          } else if (e.key === 'Escape' && isExpanded) {
+            e.preventDefault();
+            onToggleExpand(r.fullName);
+          }
+        }}
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          px: 3,
+          py: '12px',
+          cursor: 'pointer',
+          outline: 'none',
+          '&:focus-visible': { boxShadow: 'inset 0 0 0 2px var(--accent-emphasis)' },
+          '&:hover': { bg: 'canvas.default' },
+          bg: isExpanded ? 'canvas.default' : undefined,
+        }}
+      >
+        <Box
+          aria-hidden
+          sx={{
+            color: 'fg.muted',
+            display: 'inline-flex',
+            transition: 'transform 120ms ease',
+            transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+            flexShrink: 0,
+          }}
+        >
+          <ChevronDownIcon size={14} />
+        </Box>
+        <Text
+          sx={{
+            fontFamily: 'mono',
+            fontVariantNumeric: 'tabular-nums',
+            fontWeight: rank <= 3 ? 700 : 500,
+            fontSize: 1,
+            color: rank <= 3 ? 'attention.fg' : 'fg.muted',
+            minWidth: 28,
+            textAlign: 'right',
+            flexShrink: 0,
+          }}
+        >
+          #{rank}
+        </Text>
+        <Link
+          href={`/repos/${r.owner}/${r.name}`}
+          prefetch={false}
+          onClick={(e) => e.stopPropagation()}
+          style={{ textDecoration: 'none', minWidth: 0, flex: 1 }}
+        >
+          <Box
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 2,
+              color: 'fg.default',
+              minWidth: 0,
+              maxWidth: '100%',
+              '&:hover': { color: 'accent.fg' },
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={avatarUrl(r.owner)}
+              alt={r.owner}
+              loading="lazy"
+              style={{ width: 22, height: 22, borderRadius: '50%', border: '1px solid var(--border-muted)', flexShrink: 0 }}
+            />
+            <Text sx={{ fontWeight: 600, fontSize: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {r.fullName}
+            </Text>
+            {r.stars != null && r.stars > 0 && (
+              <Text sx={{ color: 'fg.muted', fontSize: 0, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                ★ {formatCount(r.stars)}
+              </Text>
+            )}
+            {!r.isActive && (
+              <Label variant="secondary" sx={{ fontSize: '10px', flexShrink: 0 }}>
+                INACTIVE
+              </Label>
+            )}
+          </Box>
+        </Link>
+        <Box
+          as="button"
+          onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+            e.stopPropagation();
+            onToggleTrack(r.fullName);
+          }}
+          aria-label={isTracked ? 'Untrack' : 'Track'}
+          title={isTracked ? 'Untrack repository' : 'Track repository'}
+          sx={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 28,
+            height: 28,
+            bg: 'transparent',
+            border: '1px solid',
+            borderColor: 'transparent',
+            borderRadius: 1,
+            color: isTracked ? 'attention.fg' : 'fg.muted',
+            cursor: 'pointer',
+            flexShrink: 0,
+            '&:hover': { bg: 'canvas.inset', borderColor: 'border.muted', color: 'attention.fg' },
+          }}
+        >
+          {isTracked ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
+        </Box>
+      </Box>
+
+      {/* Metrics grid — same divider-via-gap trick as the KPI strip. Six cells
+          collapse to a single column on the smallest viewports. */}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: ['repeat(2, 1fr)', 'repeat(3, 1fr)', 'repeat(6, 1fr)'],
+          gap: '1px',
+          bg: 'border.muted',
+          borderTop: '1px solid',
+          borderColor: 'border.muted',
+        }}
+      >
+        <RepoCell
+          label="Weight"
+          hint="SN74 emission weight (0–1) — the share of network emission allocated to this repo."
+        >
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 2, color: 'fg.default', lineHeight: 1.1 }}>
+              {r.weight.toFixed(2)}
+            </Text>
+            <Box sx={{ width: '100%', height: 3, bg: 'canvas.inset', borderRadius: 999, overflow: 'hidden' }}>
+              <Box sx={{ height: '100%', bg: 'accent.emphasis' }} style={{ width: `${Math.min(100, Math.max(0, r.weight * 100))}%` }} />
+            </Box>
+          </Box>
+        </RepoCell>
+        <RepoCell
+          label="Emission · Daily"
+          hint="Daily TAO emission for this repo at current weight, with USD equivalent."
+        >
+          {taoPerDay == null ? (
+            <Text sx={{ color: 'fg.muted', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontSize: 2 }}>—</Text>
+          ) : (
+            <>
+              <Text sx={{ display: 'block', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default', fontSize: 2, lineHeight: 1.1 }}>
+                {formatTao(taoPerDay)}
+              </Text>
+              {usdPerDay != null && (
+                <Text sx={{ display: 'block', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontSize: 0, color: 'fg.muted', mt: '4px' }}>
+                  {formatUsd(usdPerDay)}/d
+                </Text>
+              )}
+            </>
+          )}
+        </RepoCell>
+        <RepoCell
+          label="Activity · 14d"
+          hint="Daily merged-PR count over the past 14 days, oldest left to newest right."
+        >
+          <Sparkline series={r.mergedPrSeries14d} fluid height={22} />
+        </RepoCell>
+        <RepoCell
+          label="Capacity"
+          hint="Open-PR pressure: avg open PRs per known contributor vs. the per-author excessive-PR penalty threshold. Red ≥ 100% — penalty applies."
+        >
+          <CapacityGauge
+            open={r.openPrCount}
+            threshold={r.excessivePrPenaltyThreshold}
+            contributors={r.contributorCount}
+          />
+        </RepoCell>
+        <RepoCell
+          label="Open Work"
+          hint="Open issues on this repo — work waiting for an owner."
+        >
+          <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, fontSize: 2, color: r.openIssueCount > 0 ? 'fg.default' : 'fg.muted', lineHeight: 1.1 }}>
+            {formatCount(r.openIssueCount)}
+          </Text>
+          {r.openIssueCount > 0 && (
+            <Text sx={{ fontSize: 0, color: 'fg.muted', mt: '4px' }}>open issues</Text>
+          )}
+        </RepoCell>
+        <RepoCell
+          label="Issue Discovery"
+          hint="Fraction of this repo's emission reserved for miners who report valid issues."
+        >
+          <DiscoveryCell repo={r} />
+        </RepoCell>
+      </Box>
+
+      {/* Footer — last merge + policy chips. Two stats on a single row that
+          wraps gracefully when chips overflow. */}
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          rowGap: '8px',
+          columnGap: 3,
+          px: 3,
+          py: 2,
+          borderTop: '1px solid',
+          borderColor: 'border.muted',
+          bg: 'canvas.subtle',
+        }}
+      >
+        <Box
+          title="Time since the most recent merged PR. Older than 14 days is marked stale."
+          sx={{ display: 'inline-flex', alignItems: 'baseline', gap: 2, cursor: 'help', flexShrink: 0 }}
+        >
+          <Text sx={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.6px', color: 'fg.subtle', textTransform: 'uppercase' }}>
+            Last merge
+          </Text>
+          {!r.lastPrAt ? (
+            <Text sx={{ color: 'fg.muted', fontSize: 1 }}>never</Text>
+          ) : (
+            <Text sx={{ color: lastMergeStale ? 'danger.fg' : 'fg.default', fontSize: 1, fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+              {formatRelativeTime(r.lastPrAt)}
+            </Text>
+          )}
+        </Box>
+        <Box
+          sx={{ display: 'inline-flex', alignItems: 'center', gap: 2, minWidth: 0, flex: 1 }}
+        >
+          <Text
+            title="SN74 scoring policy flags — e.g. fixed base score, trusted label pipeline, configured per-label multipliers."
+            sx={{ fontSize: '10px', fontWeight: 600, letterSpacing: '0.6px', color: 'fg.subtle', textTransform: 'uppercase', flexShrink: 0, cursor: 'help' }}
+          >
+            Policy
+          </Text>
+          <Box sx={{ minWidth: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            <PolicyChips repo={r} />
+          </Box>
+        </Box>
+      </Box>
+
+      {isExpanded && (
+        <Box id={detailId} sx={{ borderTop: '1px solid', borderColor: 'border.muted', bg: 'canvas.inset' }}>
+          <ExpandedRowDetail repo={r} />
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function RepoCell({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Box
+      title={hint}
+      sx={{
+        bg: 'canvas.subtle',
+        px: 3,
+        py: '12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '6px',
+        minWidth: 0,
+        cursor: hint ? 'help' : 'default',
+      }}
+    >
+      <Text
+        sx={{
+          fontSize: '10px',
+          fontWeight: 600,
+          letterSpacing: '0.6px',
+          color: 'fg.subtle',
+          textTransform: 'uppercase',
+          lineHeight: 1,
+        }}
+      >
+        {label}
+      </Text>
+      <Box sx={{ minWidth: 0 }}>{children}</Box>
+    </Box>
+  );
+}
+
+// ─── Desktop table view ─────────────────────────────────────────────────────
+// Same data as `RepoCard`, dense row layout. Shown at lg+ where the horizontal
+// real estate is sufficient for the column-based comparison.
+
 function RepoTable({
   rows,
   startRank,
@@ -881,20 +1424,91 @@ function RepoTable({
         overflowY: 'hidden',
       }}
     >
-      <Box as="table" sx={{ width: '100%', minWidth: 1220, borderCollapse: 'collapse', fontSize: 1 }}>
+      <Box as="table" sx={{ width: '100%', minWidth: 1100, borderCollapse: 'collapse', fontSize: 1 }}>
         <Box as="thead" sx={{ bg: 'canvas.subtle', borderBottom: '1px solid', borderColor: 'border.default' }}>
           <Box as="tr">
-            <Th width={56}>RANK</Th>
-            <Th sortKey="fullName" current={sortKey} dir={sortDir} onSort={onSort}>REPOSITORY</Th>
-            <Th align="right" sortKey="weight" current={sortKey} dir={sortDir} onSort={onSort}>WEIGHT</Th>
-            <Th align="right" sortKey="emission" current={sortKey} dir={sortDir} onSort={onSort}>EMISSION/DAY</Th>
-            <Th align="left">ACTIVITY (14D)</Th>
-            <Th align="left" sortKey="capacity" current={sortKey} dir={sortDir} onSort={onSort}>CAPACITY</Th>
-            <Th align="right" sortKey="openIssues" current={sortKey} dir={sortDir} onSort={onSort}>OPEN WORK</Th>
-            <Th align="right" sortKey="discovery" current={sortKey} dir={sortDir} onSort={onSort}>ISSUE DISCOVERY</Th>
-            <Th align="right" sortKey="lastMerge" current={sortKey} dir={sortDir} onSort={onSort}>LAST MERGE</Th>
-            <Th align="left">POLICY</Th>
-            <Th align="center" width={36}>★</Th>
+            <Th width={56} hint="Position in the current sort order.">#</Th>
+            <Th
+              sortKey="fullName"
+              current={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+              hint="Repository owner/name. Click to sort alphabetically."
+            >
+              Repository
+            </Th>
+            <Th
+              align="right"
+              sortKey="weight"
+              current={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+              hint="SN74 emission weight (0–1) — the share of network emission allocated to this repo."
+            >
+              Weight
+            </Th>
+            <Th
+              align="right"
+              sortKey="emission"
+              current={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+              hint="Daily TAO emission for this repo at current weight, with USD equivalent."
+            >
+              Emission/d
+            </Th>
+            <Th align="left" hint="Daily merged-PR count over the past 14 days, oldest left to newest right.">
+              Activity 14d
+            </Th>
+            <Th
+              align="left"
+              sortKey="capacity"
+              current={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+              hint="Open-PR pressure: avg open PRs per known contributor vs. the per-author excessive-PR penalty threshold. Red ≥ 100% — penalty applies."
+            >
+              Capacity
+            </Th>
+            <Th
+              align="right"
+              sortKey="openIssues"
+              current={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+              hint="Open issues on this repo — work waiting for an owner."
+            >
+              Open Work
+            </Th>
+            <Th
+              align="right"
+              sortKey="discovery"
+              current={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+              hint="Fraction of this repo's emission reserved for miners who report valid issues."
+            >
+              Issue Disc.
+            </Th>
+            <Th
+              align="right"
+              sortKey="lastMerge"
+              current={sortKey}
+              dir={sortDir}
+              onSort={onSort}
+              hint="Time since the most recent merged PR. Older than 14 days is marked stale."
+            >
+              Last Merge
+            </Th>
+            <Th
+              align="left"
+              hint="SN74 scoring policy flags — e.g. fixed base score, trusted label pipeline, configured per-label multipliers."
+            >
+              Policy
+            </Th>
+            <Th align="center" width={36} hint="Track this repository to surface it in your personal dashboard.">
+              ★
+            </Th>
           </Box>
         </Box>
         <Box as="tbody">
@@ -908,196 +1522,196 @@ function RepoTable({
             const detailId = `repo-detail-${r.owner}-${r.name}`;
             return (
               <React.Fragment key={r.fullName}>
-              <Box
-                as="tr"
-                tabIndex={0}
-                role="button"
-                aria-expanded={isExpanded}
-                aria-controls={detailId}
-                onClick={() => onToggleExpand(r.fullName)}
-                onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onToggleExpand(r.fullName);
-                  } else if (e.key === 'Escape' && isExpanded) {
-                    e.preventDefault();
-                    onToggleExpand(r.fullName);
-                  }
-                }}
-                sx={{
-                  borderBottom: '1px solid',
-                  borderColor: 'border.muted',
-                  '&:hover': { bg: 'canvas.default' },
-                  '&:last-child': { borderBottom: isExpanded ? undefined : 'none' },
-                  opacity: r.isActive ? 1 : 0.55,
-                  cursor: 'pointer',
-                  bg: isExpanded ? 'canvas.default' : undefined,
-                  outline: 'none',
-                  '&:focus-visible': { boxShadow: 'inset 0 0 0 2px var(--accent-emphasis)' },
-                }}
-              >
-                <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
-                  <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-                    <Box
-                      sx={{
-                        color: 'fg.muted',
-                        display: 'inline-flex',
-                        transition: 'transform 120ms ease',
-                        transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
-                      }}
-                      aria-hidden
-                    >
-                      <ChevronDownIcon size={12} />
-                    </Box>
-                    <Text
-                      sx={{
-                        display: 'inline-block',
-                        minWidth: 22,
-                        textAlign: 'right',
-                        fontFamily: 'mono',
-                        fontVariantNumeric: 'tabular-nums',
-                        fontWeight: rank <= 3 ? 700 : 500,
-                        fontSize: 1,
-                        color: rank <= 3 ? 'attention.fg' : 'fg.muted',
-                      }}
-                    >
-                      {rank}
-                    </Text>
-                  </Box>
-                </Box>
-                <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
-                  <Link
-                    href={`/repos/${r.owner}/${r.name}`}
-                    prefetch={false}
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ textDecoration: 'none' }}
-                  >
-                    <Box
-                      sx={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 2,
-                        color: 'fg.default',
-                        '&:hover': { color: 'accent.fg' },
-                      }}
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={avatarUrl(r.owner)}
-                        alt={r.owner}
-                        loading="lazy"
-                        style={{ width: 20, height: 20, borderRadius: '50%', border: '1px solid var(--border-muted)' }}
-                      />
-                      <Text sx={{ fontWeight: 600 }}>{r.fullName}</Text>
-                      {r.stars != null && r.stars > 0 && (
-                        <Text sx={{ color: 'fg.muted', fontSize: 0, fontVariantNumeric: 'tabular-nums' }}>
-                          ★ {formatCount(r.stars)}
-                        </Text>
-                      )}
-                      {!r.isActive && (
-                        <Label variant="secondary" sx={{ fontSize: '10px' }}>
-                          INACTIVE
-                        </Label>
-                      )}
-                    </Box>
-                  </Link>
-                </Box>
-                <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle', minWidth: 90 }}>
-                  <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'stretch', minWidth: 70, gap: '4px' }}>
-                    <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default' }}>
-                      {r.weight.toFixed(2)}
-                    </Text>
-                    <Box sx={{ width: '100%', height: 3, bg: 'canvas.inset', borderRadius: 999, overflow: 'hidden' }}>
-                      <Box sx={{ height: '100%', bg: 'accent.emphasis' }} style={{ width: `${Math.min(100, Math.max(0, r.weight * 100))}%` }} />
-                    </Box>
-                  </Box>
-                </Box>
-                <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
-                  {taoPerDay == null ? (
-                    <Text sx={{ color: 'fg.muted', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums' }}>—</Text>
-                  ) : (
-                    <Box>
-                      <Text sx={{ display: 'block', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default' }}>
-                        {formatTao(taoPerDay)}
-                      </Text>
-                      <Text sx={{ display: 'block', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontSize: 0, color: 'fg.muted' }}>
-                        {usdPerDay != null ? formatUsd(usdPerDay) : ''}
-                      </Text>
-                    </Box>
-                  )}
-                </Box>
-                <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
-                  <Sparkline series={r.mergedPrSeries14d} />
-                </Box>
-                <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
-                  <CapacityGauge
-                    open={r.openPrCount}
-                    threshold={r.excessivePrPenaltyThreshold}
-                    contributors={r.contributorCount}
-                  />
-                </Box>
-                <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
-                  <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', color: r.openIssueCount > 0 ? 'fg.default' : 'fg.muted' }}>
-                    {formatCount(r.openIssueCount)}
-                  </Text>
-                </Box>
-                <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
-                  <DiscoveryCell repo={r} />
-                </Box>
-                <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
-                  {!r.lastPrAt ? (
-                    <Text sx={{ color: 'fg.muted', fontSize: 0 }}>Never</Text>
-                  ) : (
-                    <Text sx={{ color: lastMergeStale ? 'danger.fg' : 'fg.default', fontSize: 0, fontVariantNumeric: 'tabular-nums' }}>
-                      {formatRelativeTime(r.lastPrAt)}
-                    </Text>
-                  )}
-                </Box>
-                <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
-                  <PolicyChips repo={r} />
-                </Box>
-                <Box as="td" sx={{ p: 2, textAlign: 'center', verticalAlign: 'middle' }}>
-                  <Box
-                    as="button"
-                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
-                      e.stopPropagation();
-                      onToggleTrack(r.fullName);
-                    }}
-                    aria-label={isTracked ? 'Untrack' : 'Track'}
-                    sx={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      width: 24,
-                      height: 24,
-                      bg: 'transparent',
-                      border: 'none',
-                      borderRadius: 1,
-                      color: isTracked ? 'attention.fg' : 'fg.muted',
-                      cursor: 'pointer',
-                      '&:hover': { bg: 'canvas.inset', color: 'attention.fg' },
-                    }}
-                  >
-                    {isTracked ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
-                  </Box>
-                </Box>
-              </Box>
-              {isExpanded && (
                 <Box
                   as="tr"
-                  id={detailId}
+                  tabIndex={0}
+                  role="button"
+                  aria-expanded={isExpanded}
+                  aria-controls={detailId}
+                  onClick={() => onToggleExpand(r.fullName)}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onToggleExpand(r.fullName);
+                    } else if (e.key === 'Escape' && isExpanded) {
+                      e.preventDefault();
+                      onToggleExpand(r.fullName);
+                    }
+                  }}
                   sx={{
                     borderBottom: '1px solid',
                     borderColor: 'border.muted',
-                    bg: 'canvas.inset',
-                    '&:last-child': { borderBottom: 'none' },
+                    '&:hover': { bg: 'canvas.subtle' },
+                    '&:last-child': { borderBottom: isExpanded ? undefined : 'none' },
+                    opacity: r.isActive ? 1 : 0.55,
+                    cursor: 'pointer',
+                    bg: isExpanded ? 'canvas.subtle' : undefined,
+                    outline: 'none',
+                    '&:focus-visible': { boxShadow: 'inset 0 0 0 2px var(--accent-emphasis)' },
                   }}
                 >
-                  <Box as="td" colSpan={11} sx={{ p: 0 }}>
-                    <ExpandedRowDetail repo={r} />
+                  <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
+                    <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                      <Box
+                        sx={{
+                          color: 'fg.muted',
+                          display: 'inline-flex',
+                          transition: 'transform 120ms ease',
+                          transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)',
+                        }}
+                        aria-hidden
+                      >
+                        <ChevronDownIcon size={12} />
+                      </Box>
+                      <Text
+                        sx={{
+                          display: 'inline-block',
+                          minWidth: 22,
+                          textAlign: 'right',
+                          fontFamily: 'mono',
+                          fontVariantNumeric: 'tabular-nums',
+                          fontWeight: rank <= 3 ? 700 : 500,
+                          fontSize: 1,
+                          color: rank <= 3 ? 'attention.fg' : 'fg.muted',
+                        }}
+                      >
+                        {rank}
+                      </Text>
+                    </Box>
+                  </Box>
+                  <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
+                    <Link
+                      href={`/repos/${r.owner}/${r.name}`}
+                      prefetch={false}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ textDecoration: 'none' }}
+                    >
+                      <Box
+                        sx={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 2,
+                          color: 'fg.default',
+                          '&:hover': { color: 'accent.fg' },
+                        }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={avatarUrl(r.owner)}
+                          alt={r.owner}
+                          loading="lazy"
+                          style={{ width: 20, height: 20, borderRadius: '50%', border: '1px solid var(--border-muted)' }}
+                        />
+                        <Text sx={{ fontWeight: 600 }}>{r.fullName}</Text>
+                        {r.stars != null && r.stars > 0 && (
+                          <Text sx={{ color: 'fg.muted', fontSize: 0, fontVariantNumeric: 'tabular-nums' }}>
+                            ★ {formatCount(r.stars)}
+                          </Text>
+                        )}
+                        {!r.isActive && (
+                          <Label variant="secondary" sx={{ fontSize: '10px' }}>
+                            INACTIVE
+                          </Label>
+                        )}
+                      </Box>
+                    </Link>
+                  </Box>
+                  <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle', minWidth: 90 }}>
+                    <Box sx={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'stretch', minWidth: 70, gap: '4px' }}>
+                      <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default' }}>
+                        {r.weight.toFixed(2)}
+                      </Text>
+                      <Box sx={{ width: '100%', height: 3, bg: 'canvas.inset', borderRadius: 999, overflow: 'hidden' }}>
+                        <Box sx={{ height: '100%', bg: 'accent.emphasis' }} style={{ width: `${Math.min(100, Math.max(0, r.weight * 100))}%` }} />
+                      </Box>
+                    </Box>
+                  </Box>
+                  <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
+                    {taoPerDay == null ? (
+                      <Text sx={{ color: 'fg.muted', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums' }}>—</Text>
+                    ) : (
+                      <Box>
+                        <Text sx={{ display: 'block', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default' }}>
+                          {formatTao(taoPerDay)}
+                        </Text>
+                        <Text sx={{ display: 'block', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontSize: 0, color: 'fg.muted' }}>
+                          {usdPerDay != null ? formatUsd(usdPerDay) : ''}
+                        </Text>
+                      </Box>
+                    )}
+                  </Box>
+                  <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
+                    <Sparkline series={r.mergedPrSeries14d} />
+                  </Box>
+                  <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
+                    <CapacityGauge
+                      open={r.openPrCount}
+                      threshold={r.excessivePrPenaltyThreshold}
+                      contributors={r.contributorCount}
+                    />
+                  </Box>
+                  <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
+                    <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', color: r.openIssueCount > 0 ? 'fg.default' : 'fg.muted' }}>
+                      {formatCount(r.openIssueCount)}
+                    </Text>
+                  </Box>
+                  <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
+                    <DiscoveryCell repo={r} />
+                  </Box>
+                  <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
+                    {!r.lastPrAt ? (
+                      <Text sx={{ color: 'fg.muted', fontSize: 0 }}>Never</Text>
+                    ) : (
+                      <Text sx={{ color: lastMergeStale ? 'danger.fg' : 'fg.default', fontSize: 0, fontVariantNumeric: 'tabular-nums' }}>
+                        {formatRelativeTime(r.lastPrAt)}
+                      </Text>
+                    )}
+                  </Box>
+                  <Box as="td" sx={{ p: 2, verticalAlign: 'middle' }}>
+                    <PolicyChips repo={r} />
+                  </Box>
+                  <Box as="td" sx={{ p: 2, textAlign: 'center', verticalAlign: 'middle' }}>
+                    <Box
+                      as="button"
+                      onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+                        e.stopPropagation();
+                        onToggleTrack(r.fullName);
+                      }}
+                      aria-label={isTracked ? 'Untrack' : 'Track'}
+                      sx={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 24,
+                        height: 24,
+                        bg: 'transparent',
+                        border: 'none',
+                        borderRadius: 1,
+                        color: isTracked ? 'attention.fg' : 'fg.muted',
+                        cursor: 'pointer',
+                        '&:hover': { bg: 'canvas.inset', color: 'attention.fg' },
+                      }}
+                    >
+                      {isTracked ? <StarFillIcon size={14} /> : <StarIcon size={14} />}
+                    </Box>
                   </Box>
                 </Box>
-              )}
+                {isExpanded && (
+                  <Box
+                    as="tr"
+                    id={detailId}
+                    sx={{
+                      borderBottom: '1px solid',
+                      borderColor: 'border.muted',
+                      bg: 'canvas.inset',
+                      '&:last-child': { borderBottom: 'none' },
+                    }}
+                  >
+                    <Box as="td" colSpan={11} sx={{ p: 0 }}>
+                      <ExpandedRowDetail repo={r} />
+                    </Box>
+                  </Box>
+                )}
               </React.Fragment>
             );
           })}
@@ -1114,23 +1728,107 @@ function RepoTable({
   );
 }
 
-function Sparkline({ series }: { series: number[] }) {
-  const w = 80;
-  const h = 24;
+function Th({
+  children,
+  align = 'left',
+  width,
+  sortKey,
+  current,
+  dir,
+  onSort,
+  hint,
+}: {
+  children?: React.ReactNode;
+  align?: 'left' | 'right' | 'center';
+  width?: number;
+  sortKey?: SortKey;
+  current?: SortKey;
+  dir?: 'asc' | 'desc';
+  onSort?: (k: SortKey) => void;
+  hint?: string;
+}) {
+  const isSortable = !!sortKey && !!onSort;
+  const active = isSortable && current === sortKey;
+  const cursor = isSortable ? 'pointer' : hint ? 'help' : 'default';
+  return (
+    <Box
+      as="th"
+      onClick={isSortable && sortKey ? () => onSort!(sortKey) : undefined}
+      title={hint}
+      sx={{
+        p: 2,
+        textAlign: align,
+        width,
+        fontWeight: 600,
+        fontSize: '11px',
+        color: active ? 'fg.default' : 'fg.muted',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+        whiteSpace: 'nowrap',
+        cursor,
+        userSelect: 'none',
+        '&:hover': isSortable || hint ? { color: 'fg.default' } : undefined,
+      }}
+    >
+      <Box
+        sx={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 1,
+          justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
+        }}
+      >
+        {active && (dir === 'desc' ? <TriangleDownIcon size={12} /> : <TriangleUpIcon size={12} />)}
+        {children}
+      </Box>
+    </Box>
+  );
+}
+
+function Sparkline({
+  series,
+  width = 80,
+  height = 24,
+  fluid = false,
+  label = 'merged PR',
+}: {
+  series: number[];
+  width?: number;
+  height?: number;
+  fluid?: boolean;
+  label?: string;
+}) {
+  const w = width;
+  const h = height;
   const max = Math.max(1, ...series);
   const barW = w / Math.max(series.length, 1);
   const gap = 1;
   const total = series.reduce((s, n) => s + n, 0);
   if (total === 0) {
     return (
-      <Box sx={{ color: 'fg.muted', fontSize: 0 }} title="No merged PRs in the last 14 days">
+      <Box sx={{ color: 'fg.muted', fontSize: 0 }} title={`No ${label}s in the last 14 days`}>
         —
       </Box>
     );
   }
+  const formatted = total.toLocaleString(undefined, { maximumFractionDigits: 2 });
   return (
-    <Box title={`${total} merged PR${total === 1 ? '' : 's'} in the last 14 days`} sx={{ display: 'inline-block', lineHeight: 0 }}>
-      <svg width={w} height={h} role="img" aria-label={`Activity sparkline, ${total} merged in 14 days`}>
+    <Box
+      title={`${formatted} ${label}${total === 1 ? '' : 's'} in the last 14 days`}
+      sx={{
+        display: fluid ? 'block' : 'inline-block',
+        width: fluid ? '100%' : undefined,
+        lineHeight: 0,
+      }}
+    >
+      <svg
+        width={fluid ? '100%' : w}
+        height={h}
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio={fluid ? 'none' : 'xMidYMid meet'}
+        role="img"
+        aria-label={`${label} sparkline, ${formatted} over 14 days`}
+      >
         {series.map((v, i) => {
           const bh = v === 0 ? 1 : (v / max) * (h - 2);
           return (
@@ -1563,55 +2261,3 @@ function DetailListSkeleton({ rows }: { rows: number }) {
   );
 }
 
-function Th({
-  children,
-  align = 'left',
-  width,
-  sortKey,
-  current,
-  dir,
-  onSort,
-}: {
-  children?: React.ReactNode;
-  align?: 'left' | 'right' | 'center';
-  width?: number;
-  sortKey?: SortKey;
-  current?: SortKey;
-  dir?: 'asc' | 'desc';
-  onSort?: (k: SortKey) => void;
-}) {
-  const isSortable = !!sortKey && !!onSort;
-  const active = isSortable && current === sortKey;
-  return (
-    <Box
-      as="th"
-      onClick={isSortable && sortKey ? () => onSort!(sortKey) : undefined}
-      sx={{
-        p: 2,
-        textAlign: align,
-        width,
-        fontWeight: 600,
-        fontSize: '11px',
-        color: active ? 'fg.default' : 'fg.muted',
-        textTransform: 'uppercase',
-        letterSpacing: '0.5px',
-        whiteSpace: 'nowrap',
-        cursor: isSortable ? 'pointer' : 'default',
-        userSelect: 'none',
-        '&:hover': isSortable ? { color: 'fg.default' } : undefined,
-      }}
-    >
-      <Box
-        sx={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 1,
-          justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
-        }}
-      >
-        {active && (dir === 'desc' ? <TriangleDownIcon size={12} /> : <TriangleUpIcon size={12} />)}
-        {children}
-      </Box>
-    </Box>
-  );
-}
