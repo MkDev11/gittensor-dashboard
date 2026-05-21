@@ -200,6 +200,25 @@ export function listUsers(): UserRow[] {
   return db.prepare('SELECT * FROM users ORDER BY created_at DESC').all() as UserRow[];
 }
 
+// ---------------------------------------------------------------------------
+// Role management (admin <-> regular user)
+// ---------------------------------------------------------------------------
+
+export class RoleError extends Error {
+  constructor(
+    public code: 'not_found' | 'self_demote' | 'last_admin',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'RoleError';
+  }
+}
+
+export function countAdmins(): number {
+  const db = getDb();
+  return (db.prepare('SELECT COUNT(*) c FROM users WHERE is_admin = 1').get() as { c: number }).c;
+}
+
 export function approveUser(id: number, approvedById: number): UserRow | null {
   const db = getDb();
   const now = new Date().toISOString();
@@ -210,6 +229,11 @@ export function approveUser(id: number, approvedById: number): UserRow | null {
 }
 
 export function rejectUser(id: number, approvedById: number): UserRow | null {
+  const target = getUserById(id);
+  if (!target) return null;
+  if (id === approvedById) throw new RoleError('self_demote', 'You cannot reject yourself');
+  if (target.is_admin && countAdmins() <= 1)
+    throw new RoleError('last_admin', 'Cannot reject the last admin');
   const db = getDb();
   const now = new Date().toISOString();
   db.prepare(
@@ -233,25 +257,6 @@ export function recentPendingUsers(limit = 20): UserRow[] {
   return db
     .prepare("SELECT * FROM users WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?")
     .all(limit) as UserRow[];
-}
-
-// ---------------------------------------------------------------------------
-// Role management (admin <-> regular user)
-// ---------------------------------------------------------------------------
-
-export class RoleError extends Error {
-  constructor(
-    public code: 'not_found' | 'self_demote' | 'last_admin',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'RoleError';
-  }
-}
-
-export function countAdmins(): number {
-  const db = getDb();
-  return (db.prepare('SELECT COUNT(*) c FROM users WHERE is_admin = 1').get() as { c: number }).c;
 }
 
 /**
