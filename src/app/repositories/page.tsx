@@ -232,7 +232,7 @@ export default function RepositoriesPage() {
                 value={query}
                 onChange={(e) => { setQuery(e.target.value); setPage(1); }}
                 sx={{ width: '100%' }}
-                />
+              />
             </Box>
 
             <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
