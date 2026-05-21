@@ -8,6 +8,8 @@ import { SUMMARY_TONE_FG, SummaryTone } from './types';
 export function ListLoading({ label }: { label: string }) {
   return (
     <Box
+      role="status"
+      aria-live="polite"
       sx={{
         p: 4,
         border: '1px solid',

@@ -26,7 +26,7 @@ export function Segmented<K extends string>({
 }) {
   return (
     <Box
-      role="tablist"
+      role="group"
       aria-label={ariaLabel}
       sx={{
         display: 'inline-flex',
@@ -44,8 +44,8 @@ export function Segmented<K extends string>({
           <Box
             as="button"
             key={opt.key}
-            role="tab"
-            aria-selected={active}
+            type="button"
+            aria-pressed={active}
             onClick={() => onChange(opt.key)}
             sx={{
               display: 'inline-flex',

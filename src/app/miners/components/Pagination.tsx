@@ -25,9 +25,11 @@ export function Pagination({
 }) {
   if (total === 0) return null;
   const p1 = zeroIndexed ? page + 1 : page;
+  // pageSize === Infinity ("All") would yield (0 * Infinity) = NaN in the range math.
+  const finitePageSize = pageSize !== undefined && Number.isFinite(pageSize);
   const showRange = pageSize !== undefined;
-  const start = showRange ? (p1 - 1) * (pageSize ?? 0) + 1 : 0;
-  const end = showRange ? Math.min(p1 * (pageSize ?? 0), filtered) : 0;
+  const start = finitePageSize ? (p1 - 1) * (pageSize as number) + 1 : 1;
+  const end = finitePageSize ? Math.min(p1 * (pageSize as number), filtered) : filtered;
 
   return (
     <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
@@ -207,10 +209,11 @@ export function PageNav({
   if (filteredCount === 0) {
     return <Text sx={{ ...MONO, fontSize: 0, color: 'fg.muted' }}>0 of 0</Text>;
   }
-  const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
+  const finitePageSize = Number.isFinite(pageSize);
+  const totalPages = finitePageSize ? Math.max(1, Math.ceil(filteredCount / pageSize)) : 1;
   const safe = Math.min(Math.max(1, page), totalPages);
-  const start = (safe - 1) * pageSize + 1;
-  const end = Math.min(safe * pageSize, filteredCount);
+  const start = finitePageSize ? (safe - 1) * pageSize + 1 : 1;
+  const end = finitePageSize ? Math.min(safe * pageSize, filteredCount) : filteredCount;
   return (
     <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: 'fg.muted' }}>
       <Text sx={{ ...MONO, fontSize: 0 }}>

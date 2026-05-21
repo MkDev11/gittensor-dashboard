@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { Box, Text, Label } from '@primer/react';
 import {
   IssueOpenedIcon, IssueClosedIcon, SkipIcon,
@@ -529,14 +529,19 @@ function IssueModal({
   const issueScore = earningEligible ? discScoreScale : 0;
   const issueUsdPerDay = earningEligible ? discEarnScale : 0;
   const linkedPrs = parseLinkedPrs(iss.closedByPrs, iss.repo);
+  const titleId = useId();
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeBtnRef.current?.focus();
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handler);
     document.body.style.overflow = 'hidden';
     return () => {
       window.removeEventListener('keydown', handler);
       document.body.style.overflow = '';
+      previouslyFocused?.focus?.();
     };
   }, [onClose]);
 
@@ -545,6 +550,9 @@ function IssueModal({
       sx={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: ['flex-end', null, 'center'], justifyContent: 'center', p: [0, null, 3] }}
       style={{ backgroundColor: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(6px)' }}
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
     >
       <Box
         sx={{
@@ -574,7 +582,7 @@ function IssueModal({
             <StateIcon size={16} />
           </Box>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Text sx={{ display: 'block', fontSize: 2, fontWeight: 700, color: 'fg.default', lineHeight: 1.3, letterSpacing: '-0.01em' }}>
+            <Text id={titleId} sx={{ display: 'block', fontSize: 2, fontWeight: 700, color: 'fg.default', lineHeight: 1.3, letterSpacing: '-0.01em' }}>
               {iss.title}
             </Text>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: '6px', mt: '4px', flexWrap: 'wrap' }}>
@@ -591,6 +599,7 @@ function IssueModal({
           </Box>
           <Box
             as="button"
+            ref={closeBtnRef}
             onClick={onClose}
             aria-label="Close"
             sx={{

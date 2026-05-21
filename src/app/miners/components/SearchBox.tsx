@@ -9,11 +9,13 @@ export function SearchBox({
   onChange,
   placeholder = 'Search…',
   size = 'sm',
+  ariaLabel,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   size?: 'sm' | 'md';
+  ariaLabel?: string;
 }) {
   const isMd = size === 'md';
   return (
@@ -41,6 +43,7 @@ export function SearchBox({
         type="text"
         value={value}
         placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
         sx={{
           flex: 1,

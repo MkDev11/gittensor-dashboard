@@ -18,6 +18,8 @@ export interface PositionSummaryProps {
   issueEligible: boolean;
   ossEligibleCount: number;
   discEligibleCount: number;
+  /** Dual-eligible repos counted once, not summed across tracks. */
+  uniqueEligibleCount: number;
   totalScore: number;
   issueScore: number;
   baseScore: number;
@@ -42,7 +44,7 @@ export interface PositionSummaryProps {
 export function PositionSummary({
   loading, usdPerDay, ossEarningPerDay, discEarningPerDay,
   ossEligible: _ossEligible, issueEligible: _issueEligible,
-  ossEligibleCount, discEligibleCount,
+  ossEligibleCount, discEligibleCount, uniqueEligibleCount,
   totalScore, issueScore, baseScore,
   lifetimeUsd, lifetimeTao, lifetimeAlpha,
   cred, issueCred,
@@ -246,7 +248,7 @@ export function PositionSummary({
 
       <Tile last>
         <TileHeader icon={<RepoIcon size={11} />} label="Eligible repos" />
-        <BigNumber value={loading ? '—' : `${ossEligibleCount + discEligibleCount}`} />
+        <BigNumber value={loading ? '—' : `${uniqueEligibleCount}`} />
         <Subs>
           <SubStat label="OSS"  value={loading ? '—' : ossEligibleCount.toLocaleString()} accent="oss" />
           <SubStat label="DISC" value={loading ? '—' : discEligibleCount.toLocaleString()} accent="disc" />

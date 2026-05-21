@@ -80,7 +80,6 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
       return r.json();
     },
     staleTime: 25_000,
-    placeholderData: (prev) => prev,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
   });
@@ -210,6 +209,13 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
 
   const ossEligibleCount  = useMemo(() => repoBreakdown.filter(r => repoEvalMap.get(r.repo.toLowerCase())?.isEligible      === true).length, [repoBreakdown, repoEvalMap]);
   const discEligibleCount = useMemo(() => repoBreakdown.filter(r => repoEvalMap.get(r.repo.toLowerCase())?.isIssueEligible === true).length, [repoBreakdown, repoEvalMap]);
+  const uniqueEligibleCount = useMemo(
+    () => repoBreakdown.filter(r => {
+      const e = repoEvalMap.get(r.repo.toLowerCase());
+      return e?.isEligible === true || e?.isIssueEligible === true;
+    }).length,
+    [repoBreakdown, repoEvalMap],
+  );
 
   const ghNameStr = miner?.githubUsername || `uid-${uid}`;
   const ghAvatarUrl = `https://github.com/${ghNameStr}.png?size=160`;
@@ -295,6 +301,7 @@ export default function MinerDetailPage(ctx: { params: Promise<{ uid: string }> 
             issueEligible={issueEligible}
             ossEligibleCount={ossEligibleCount}
             discEligibleCount={discEligibleCount}
+            uniqueEligibleCount={uniqueEligibleCount}
             totalScore={num(miner?.totalScore)}
             issueScore={num(miner?.issueDiscoveryScore)}
             baseScore={num(miner?.baseTotalScore)}

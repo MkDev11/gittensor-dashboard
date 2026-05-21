@@ -304,6 +304,10 @@ export interface MinerDetailResp {
 
 export async function GET(_req: Request, ctx: { params: Promise<{ uid: string }> }) {
   const { uid: uidParam } = await ctx.params;
+  // parseInt('12abc', 10) === 12, so reject non-pure-integer params explicitly.
+  if (!/^\d+$/.test(uidParam)) {
+    return NextResponse.json({ error: 'Invalid uid' }, { status: 400 });
+  }
   const uid = Number.parseInt(uidParam, 10);
   if (!Number.isFinite(uid)) {
     return NextResponse.json({ error: 'Invalid uid' }, { status: 400 });

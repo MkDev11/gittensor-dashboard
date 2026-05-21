@@ -532,24 +532,31 @@ function RepoRow({
 
   return (
     <Box
-      as="button"
+      role="button"
+      tabIndex={0}
+      aria-pressed={isSelected}
       onClick={onSelect}
+      onKeyDown={(e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
       sx={{
         width: '100%',
         display: 'block',
         p: 0,
-        border: 'none',
         borderBottom: '1px solid',
         borderColor: 'border.muted',
         '&:last-of-type': { borderBottom: 'none' },
         color: 'fg.default',
         textAlign: 'left',
-        fontFamily: 'inherit',
         cursor: 'pointer',
         bg: isSelected ? 'canvas.inset' : 'transparent',
         boxShadow: isSelected ? 'inset 2px 0 0 var(--accent-fg)' : 'none',
         transition: 'background-color 100ms',
         '&:hover': { bg: 'canvas.default' },
+        '&:focus-visible': { outline: '2px solid var(--accent-fg)', outlineOffset: '-2px' },
       }}
     >
       <Box sx={{ display: ['flex', null, 'none'], flexDirection: 'column', gap: '8px', px: 2, py: '10px' }}>

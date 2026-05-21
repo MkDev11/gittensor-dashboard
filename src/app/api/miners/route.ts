@@ -58,7 +58,7 @@ let cache: Cached | null = null;
 let inFlight: Promise<Cached> | null = null;
 
 const perMinerCache = new Map<string, PerMinerCacheEntry>();
-const perMinerInFlight = new Map<string, Promise<RepoCounts>>();
+const perMinerInFlight = new Map<string, Promise<RepoCounts | null>>();
 
 let prsCache: { fetched_at: number; prs: UpstreamPr[] } | null = null;
 let prsInFlight: Promise<UpstreamPr[]> | null = null;
@@ -79,8 +79,10 @@ async function fetchPrs(): Promise<UpstreamPr[]> {
       const prs = (await r.json()) as UpstreamPr[];
       prsCache = { fetched_at: Date.now(), prs };
       return prs;
-    } catch {
-      return prsCache?.prs ?? [];
+    } catch (err) {
+      // Cold-start with no cache: propagate so refresh() doesn't zero out activity metrics.
+      if (!prsCache) throw err;
+      return prsCache.prs;
     } finally {
       prsInFlight = null;
     }
@@ -366,7 +368,8 @@ async function fetchDiscoveryActivity(): Promise<Map<string, string>> {
 }
 
 // Eligibility from validator's per-repo flags (canonical); can't re-derive without per-PR token scores.
-async function fetchPerMinerCounts(githubId: string): Promise<RepoCounts> {
+// Returns null on cold-start failure so the caller keeps prior eligibility instead of flipping to false.
+async function fetchPerMinerCounts(githubId: string): Promise<RepoCounts | null> {
   const now = Date.now();
   const hit = perMinerCache.get(githubId);
   if (hit && now - hit.fetched_at < PER_MINER_TTL_MS) return hit.counts;
@@ -374,7 +377,7 @@ async function fetchPerMinerCounts(githubId: string): Promise<RepoCounts> {
   const inflight = perMinerInFlight.get(githubId);
   if (inflight) return inflight;
 
-  const p = (async (): Promise<RepoCounts> => {
+  const p = (async (): Promise<RepoCounts | null> => {
     try {
       const r = await fetch(`${MINERS_URL}/${githubId}`, {
         cache: 'no-store',
@@ -392,7 +395,7 @@ async function fetchPerMinerCounts(githubId: string): Promise<RepoCounts> {
       perMinerCache.set(githubId, { fetched_at: Date.now(), counts });
       return counts;
     } catch {
-      return hit?.counts ?? { oss: 0, disc: 0 };
+      return hit?.counts ?? null;
     } finally {
       perMinerInFlight.delete(githubId);
     }
@@ -400,6 +403,23 @@ async function fetchPerMinerCounts(githubId: string): Promise<RepoCounts> {
   perMinerInFlight.set(githubId, p);
   return p;
 }
+
+// Bounds concurrency for cold-cache fan-out (~120 per-miner fetches) to avoid upstream rate-limit/timeout.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+const PER_MINER_CONCURRENCY = 8;
 
 async function refresh(): Promise<Cached> {
   const [minersR, prs, discoveryActivity] = await Promise.all([
@@ -436,36 +456,35 @@ async function refresh(): Promise<Cached> {
     (m.hotkey ? prAggregates.reposByHotkey.get(m.hotkey) : undefined) ??
     [];
 
-  const enriched = await Promise.all(
-    upstreamMiners.map(async (m) => {
-      const validMerged =
-        (m.githubId != null ? validIdx.byGhId.get(String(m.githubId)) : undefined) ??
-        (m.githubUsername ? validIdx.byLoginLc.get(m.githubUsername.toLowerCase()) : undefined) ??
-        (m.hotkey ? validIdx.byHotkey.get(m.hotkey) : undefined) ??
-        0;
-      const lastOssActivityAt = pickPrActivity(m);
-      const lastDiscoveryActivityAt = m.githubUsername
-        ? (discoveryActivity.get(m.githubUsername.toLowerCase()) ?? null)
-        : null;
-      const baseEnrich = {
-        ...m,
-        totalValidMergedPrs: validMerged,
-        lastOssActivityAt,
-        lastDiscoveryActivityAt,
-        daily35: pickDaily35(m),
-        topRepos: pickTopRepos(m),
-      };
-      if (!m.githubId) return baseEnrich;
-      const counts = await fetchPerMinerCounts(String(m.githubId));
-      return {
-        ...baseEnrich,
-        eligibleRepoCount: counts.oss,
-        issueEligibleRepoCount: counts.disc,
-        isEligible: counts.oss > 0,
-        isIssueEligible: counts.disc > 0,
-      };
-    }),
-  );
+  const enriched = await mapWithConcurrency(upstreamMiners, PER_MINER_CONCURRENCY, async (m) => {
+    const validMerged =
+      (m.githubId != null ? validIdx.byGhId.get(String(m.githubId)) : undefined) ??
+      (m.githubUsername ? validIdx.byLoginLc.get(m.githubUsername.toLowerCase()) : undefined) ??
+      (m.hotkey ? validIdx.byHotkey.get(m.hotkey) : undefined) ??
+      0;
+    const lastOssActivityAt = pickPrActivity(m);
+    const lastDiscoveryActivityAt = m.githubUsername
+      ? (discoveryActivity.get(m.githubUsername.toLowerCase()) ?? null)
+      : null;
+    const baseEnrich = {
+      ...m,
+      totalValidMergedPrs: validMerged,
+      lastOssActivityAt,
+      lastDiscoveryActivityAt,
+      daily35: pickDaily35(m),
+      topRepos: pickTopRepos(m),
+    };
+    if (!m.githubId) return baseEnrich;
+    const counts = await fetchPerMinerCounts(String(m.githubId));
+    if (counts == null) return baseEnrich;
+    return {
+      ...baseEnrich,
+      eligibleRepoCount: counts.oss,
+      issueEligibleRepoCount: counts.disc,
+      isEligible: counts.oss > 0,
+      isIssueEligible: counts.disc > 0,
+    };
+  });
 
   // Must run after eligibility enrichment so movement reflects the score clients see.
   const previousRanks = rollRankSnapshots(enriched, now);
