@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getReadDb } from '@/lib/db';
-import type { Miner, MinersResponse } from '@/types/entities';
+import { getDb, getReadDb } from '@/lib/db';
+import type { Miner, MinerTopRepo, MinersResponse } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +13,10 @@ const PRS_TTL_MS = 30_000;
 const DISCOVERY_ACTIVITY_TTL_MS = 60_000;
 // Validator's "valid merged PR" threshold.
 const VALID_TOKEN_SCORE = 5;
+// 14-day sparkline window matches the leaderboard row width budget.
+const SPARKLINE_DAYS = 35;
+const TOP_REPOS_PER_MINER = 3;
+const DAY_MS = 86_400_000;
 
 interface UpstreamRepository {
   repositoryFullName?: string;
@@ -84,8 +88,7 @@ async function fetchPrs(): Promise<UpstreamPr[]> {
   return prsInFlight;
 }
 
-// Identifier→count for merged PRs with tokenScore >= VALID_TOKEN_SCORE.
-// Indexed by every identifier since historical PRs sometimes omit one.
+// Counts valid merged PRs per identifier; indexes all three since older PRs may omit some.
 function indexValidMergedPrs(prs: UpstreamPr[]): {
   byGhId: Map<string, number>;
   byLoginLc: Map<string, number>;
@@ -112,7 +115,6 @@ function indexValidMergedPrs(prs: UpstreamPr[]): {
   return { byGhId, byLoginLc, byHotkey };
 }
 
-// Identifier→latest `mergedAt ?? prCreatedAt` per miner.
 function indexLastPrActivity(prs: UpstreamPr[]): {
   byGhId: Map<string, string>;
   byLoginLc: Map<string, string>;
@@ -135,7 +137,197 @@ function indexLastPrActivity(prs: UpstreamPr[]): {
   return { byGhId, byLoginLc, byHotkey };
 }
 
-// login → latest issue activity, from the local DB (poller-populated).
+interface PrAggregateIndex {
+  dailyById: Map<string, number[]>;
+  dailyByLoginLc: Map<string, number[]>;
+  dailyByHotkey: Map<string, number[]>;
+  reposById: Map<string, MinerTopRepo[]>;
+  reposByLoginLc: Map<string, MinerTopRepo[]>;
+  reposByHotkey: Map<string, MinerTopRepo[]>;
+}
+
+// Single pass: sparkline counts + top repos. Window = last SPARKLINE_DAYS UTC days, index 0 = oldest.
+function indexPrAggregates(prs: UpstreamPr[], now: Date): PrAggregateIndex {
+  const dayStartMs = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+  );
+  const oldestMs = dayStartMs - (SPARKLINE_DAYS - 1) * DAY_MS;
+
+  const dailyById = new Map<string, number[]>();
+  const dailyByLoginLc = new Map<string, number[]>();
+  const dailyByHotkey = new Map<string, number[]>();
+  const repoCountsById = new Map<string, Map<string, number>>();
+  const repoCountsByLoginLc = new Map<string, Map<string, number>>();
+  const repoCountsByHotkey = new Map<string, Map<string, number>>();
+
+  const bumpDaily = (map: Map<string, number[]>, key: string, bucket: number) => {
+    let arr = map.get(key);
+    if (!arr) {
+      arr = new Array(SPARKLINE_DAYS).fill(0);
+      map.set(key, arr);
+    }
+    arr[bucket] += 1;
+  };
+  const bumpRepo = (
+    map: Map<string, Map<string, number>>,
+    key: string,
+    repo: string,
+  ) => {
+    let m = map.get(key);
+    if (!m) {
+      m = new Map<string, number>();
+      map.set(key, m);
+    }
+    m.set(repo, (m.get(repo) ?? 0) + 1);
+  };
+
+  for (const pr of prs) {
+    const ts = pr.mergedAt || pr.prCreatedAt;
+    if (!ts) continue;
+    const tsMs = Date.parse(ts);
+    if (!Number.isFinite(tsMs)) continue;
+    const bucket = Math.floor((tsMs - oldestMs) / DAY_MS);
+    const inWindow = bucket >= 0 && bucket < SPARKLINE_DAYS;
+    const repo = pr.repository ?? '';
+    const ghId = pr.githubId != null ? String(pr.githubId) : '';
+    const loginLc = pr.author ? pr.author.toLowerCase() : '';
+    const hotkey = pr.hotkey ?? '';
+    if (ghId) {
+      if (inWindow) bumpDaily(dailyById, ghId, bucket);
+      if (repo) bumpRepo(repoCountsById, ghId, repo);
+    }
+    if (loginLc) {
+      if (inWindow) bumpDaily(dailyByLoginLc, loginLc, bucket);
+      if (repo) bumpRepo(repoCountsByLoginLc, loginLc, repo);
+    }
+    if (hotkey) {
+      if (inWindow) bumpDaily(dailyByHotkey, hotkey, bucket);
+      if (repo) bumpRepo(repoCountsByHotkey, hotkey, repo);
+    }
+  }
+
+  const finalizeRepos = (
+    src: Map<string, Map<string, number>>,
+  ): Map<string, MinerTopRepo[]> => {
+    const out = new Map<string, MinerTopRepo[]>();
+    for (const [key, counts] of src) {
+      const list: MinerTopRepo[] = [];
+      for (const [name, count] of counts) list.push({ name, count });
+      list.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+      out.set(key, list.slice(0, TOP_REPOS_PER_MINER));
+    }
+    return out;
+  };
+
+  return {
+    dailyById,
+    dailyByLoginLc,
+    dailyByHotkey,
+    reposById: finalizeRepos(repoCountsById),
+    reposByLoginLc: finalizeRepos(repoCountsByLoginLc),
+    reposByHotkey: finalizeRepos(repoCountsByHotkey),
+  };
+}
+
+// Today's snapshot captured on first refresh of each UTC day; yesterday's drives previousRank (~24h window). SQLite-backed so movement survives restarts.
+interface RankSnapshot {
+  date: string;
+  ranksByUid: Map<number, number>;
+}
+let todayRankSnapshot: RankSnapshot | null = null;
+let yesterdayRankSnapshot: RankSnapshot | null = null;
+let snapshotHydrated = false;
+
+function utcDateStr(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+function computeRanks(miners: Miner[]): Map<number, number> {
+  const sorted = [...miners].sort(
+    (a, b) => asNum(b.totalScore) - asNum(a.totalScore),
+  );
+  const map = new Map<number, number>();
+  sorted.forEach((m, i) => map.set(m.uid, i + 1));
+  return map;
+}
+
+function ensureSnapshotTable(): void {
+  const db = getDb();
+  db.exec(`CREATE TABLE IF NOT EXISTS miner_rank_snapshots (
+    date       TEXT PRIMARY KEY,
+    ranks_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )`);
+}
+
+function loadSnapshotFromDb(date: string): RankSnapshot | null {
+  try {
+    const row = getReadDb()
+      .prepare(`SELECT date, ranks_json FROM miner_rank_snapshots WHERE date = ?`)
+      .get(date) as { date: string; ranks_json: string } | undefined;
+    if (!row) return null;
+    const entries = JSON.parse(row.ranks_json) as [number, number][];
+    return { date: row.date, ranksByUid: new Map(entries) };
+  } catch {
+    return null;
+  }
+}
+
+function loadMostRecentSnapshotBefore(date: string): RankSnapshot | null {
+  try {
+    const row = getReadDb()
+      .prepare(
+        `SELECT date, ranks_json FROM miner_rank_snapshots WHERE date < ? ORDER BY date DESC LIMIT 1`,
+      )
+      .get(date) as { date: string; ranks_json: string } | undefined;
+    if (!row) return null;
+    const entries = JSON.parse(row.ranks_json) as [number, number][];
+    return { date: row.date, ranksByUid: new Map(entries) };
+  } catch {
+    return null;
+  }
+}
+
+function persistSnapshot(snap: RankSnapshot): void {
+  try {
+    const db = getDb();
+    const json = JSON.stringify(Array.from(snap.ranksByUid.entries()));
+    db.prepare(
+      `INSERT INTO miner_rank_snapshots (date, ranks_json, created_at) VALUES (?, ?, ?)
+       ON CONFLICT(date) DO UPDATE SET ranks_json = excluded.ranks_json, created_at = excluded.created_at`,
+    ).run(snap.date, json, new Date().toISOString());
+    db.prepare(`DELETE FROM miner_rank_snapshots WHERE date < date(?, '-14 days')`).run(snap.date);
+  } catch {
+    // Persistence is best-effort; in-memory snapshots still drive the response.
+  }
+}
+
+function hydrateSnapshots(today: string): void {
+  if (snapshotHydrated) return;
+  try {
+    ensureSnapshotTable();
+    todayRankSnapshot = loadSnapshotFromDb(today);
+    yesterdayRankSnapshot = loadMostRecentSnapshotBefore(today);
+  } catch {
+    // ignore — operate from in-memory state only
+  } finally {
+    snapshotHydrated = true;
+  }
+}
+
+function rollRankSnapshots(miners: Miner[], now: Date): RankSnapshot | null {
+  const today = utcDateStr(now);
+  hydrateSnapshots(today);
+  if (!todayRankSnapshot || todayRankSnapshot.date !== today) {
+    if (todayRankSnapshot) yesterdayRankSnapshot = todayRankSnapshot;
+    todayRankSnapshot = { date: today, ranksByUid: computeRanks(miners) };
+    persistSnapshot(todayRankSnapshot);
+  }
+  return yesterdayRankSnapshot;
+}
+
 let discoveryActivityCache: { fetched_at: number; byLoginLc: Map<string, string> } | null = null;
 let discoveryActivityInFlight: Promise<Map<string, string>> | null = null;
 
@@ -173,8 +365,7 @@ async function fetchDiscoveryActivity(): Promise<Map<string, string>> {
   return discoveryActivityInFlight;
 }
 
-// Eligibility = validator's per-repo flags (canonical). We don't
-// re-derive client-side — needs per-PR token_scores.
+// Eligibility from validator's per-repo flags (canonical); can't re-derive without per-PR token scores.
 async function fetchPerMinerCounts(githubId: string): Promise<RepoCounts> {
   const now = Date.now();
   const hit = perMinerCache.get(githubId);
@@ -219,8 +410,10 @@ async function refresh(): Promise<Cached> {
   if (!minersR.ok) throw new Error(`upstream ${minersR.status}`);
   const upstreamMiners = (await minersR.json()) as Miner[];
 
+  const now = new Date();
   const validIdx = indexValidMergedPrs(prs);
   const lastPrIdx = indexLastPrActivity(prs);
+  const prAggregates = indexPrAggregates(prs, now);
 
   // Identifier fall-through: githubId → login → hotkey.
   const pickPrActivity = (m: Miner): string | null =>
@@ -228,6 +421,20 @@ async function refresh(): Promise<Cached> {
     (m.githubUsername ? lastPrIdx.byLoginLc.get(m.githubUsername.toLowerCase()) : undefined) ??
     (m.hotkey ? lastPrIdx.byHotkey.get(m.hotkey) : undefined) ??
     null;
+
+  const pickDaily35 = (m: Miner): number[] => {
+    const found =
+      (m.githubId != null ? prAggregates.dailyById.get(String(m.githubId)) : undefined) ??
+      (m.githubUsername ? prAggregates.dailyByLoginLc.get(m.githubUsername.toLowerCase()) : undefined) ??
+      (m.hotkey ? prAggregates.dailyByHotkey.get(m.hotkey) : undefined);
+    return found ?? new Array(SPARKLINE_DAYS).fill(0);
+  };
+
+  const pickTopRepos = (m: Miner): MinerTopRepo[] =>
+    (m.githubId != null ? prAggregates.reposById.get(String(m.githubId)) : undefined) ??
+    (m.githubUsername ? prAggregates.reposByLoginLc.get(m.githubUsername.toLowerCase()) : undefined) ??
+    (m.hotkey ? prAggregates.reposByHotkey.get(m.hotkey) : undefined) ??
+    [];
 
   const enriched = await Promise.all(
     upstreamMiners.map(async (m) => {
@@ -245,6 +452,8 @@ async function refresh(): Promise<Cached> {
         totalValidMergedPrs: validMerged,
         lastOssActivityAt,
         lastDiscoveryActivityAt,
+        daily35: pickDaily35(m),
+        topRepos: pickTopRepos(m),
       };
       if (!m.githubId) return baseEnrich;
       const counts = await fetchPerMinerCounts(String(m.githubId));
@@ -258,7 +467,14 @@ async function refresh(): Promise<Cached> {
     }),
   );
 
-  const next: Cached = { fetched_at: Date.now(), miners: enriched };
+  // Must run after eligibility enrichment so movement reflects the score clients see.
+  const previousRanks = rollRankSnapshots(enriched, now);
+  const withPreviousRank: Miner[] = enriched.map((m) => ({
+    ...m,
+    previousRank: previousRanks?.ranksByUid.get(m.uid) ?? null,
+  }));
+
+  const next: Cached = { fetched_at: Date.now(), miners: withPreviousRank };
   cache = next;
   return next;
 }

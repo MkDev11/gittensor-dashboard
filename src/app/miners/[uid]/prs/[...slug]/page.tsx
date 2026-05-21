@@ -20,11 +20,7 @@ import {
   MarkGithubIcon,
 } from '@primer/octicons-react';
 import { formatUsd, formatRelativeTime } from '@/lib/format';
-import { Card, CardHeader, MONO, LABEL, EmptyState } from '../../../parts';
-
-/* =========================================================================
- * Types (subset of /api/gt/miners/[uid] response)
- * ========================================================================= */
+import { Card, CardHeader, MONO, LABEL, EmptyState } from '../../../components';
 
 interface PrDetail {
   pullRequestNumber: number;
@@ -55,10 +51,7 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/* =========================================================================
- * Time-decay model (mirrors prTimeDecayModel.ts from gittensor-ui)
- * ========================================================================= */
-
+// Mirrors prTimeDecayModel.ts from gittensor-ui.
 const DECAY = { graceHours: 12, midpoint: 10, steepness: 0.4, floor: 0.05 };
 const LOOKBACK = 35;
 
@@ -67,10 +60,6 @@ function decayAt(days: number): number {
   const sig = 1 / (1 + Math.exp(DECAY.steepness * (days - DECAY.midpoint)));
   return Math.max(sig, DECAY.floor);
 }
-
-/* =========================================================================
- * Time-decay SVG chart
- * ========================================================================= */
 
 const PAD_L = 44, PAD_R = 24, PAD_T = 18, PAD_B = 30;
 const CHART_W = 480, CHART_H = 160;
@@ -134,11 +123,9 @@ function TimeDecayChart({
             </linearGradient>
           </defs>
 
-          {/* Grace shading */}
           <rect x={PAD_L} y={PAD_T} width={GRACE_X - PAD_L} height={CHART_H}
                 fill="var(--success-fg)" opacity={0.14} />
 
-          {/* Y grid + labels */}
           {Y_GRID.map((v) => {
             const y = yOf(v);
             return (
@@ -153,7 +140,6 @@ function TimeDecayChart({
             );
           })}
 
-          {/* X ticks */}
           {X_TICKS.map((d) => {
             const x = xOf(d);
             return (
@@ -168,22 +154,18 @@ function TimeDecayChart({
             );
           })}
 
-          {/* Chart border */}
           <rect x={PAD_L} y={PAD_T} width={CHART_W} height={CHART_H}
                 fill="none" stroke="var(--border-muted)" strokeWidth="1" />
 
-          {/* Curve fill + stroke */}
           <path d={FILL_PATH} fill="url(#tdc-fill)" />
           <path d={CURVE_PATH} fill="none" stroke="var(--accent-fg)" strokeWidth="1.8" strokeLinejoin="round" />
 
-          {/* Grace label */}
           <text x={PAD_L + (GRACE_X - PAD_L) / 2} y={PAD_T + 12}
                 textAnchor="middle" fontSize="9"
                 fill="var(--success-fg)" fontFamily="monospace">
             grace
           </text>
 
-          {/* "Now" marker */}
           {!isPast && (
             <>
               <line x1={nowX} y1={PAD_T} x2={nowX} y2={PAD_T + CHART_H}
@@ -197,7 +179,6 @@ function TimeDecayChart({
             </>
           )}
 
-          {/* Actual vs model marker (when available) */}
           {actualMultiplier != null && !isPast && Math.abs((actualMultiplier - modelMult)) > 0.01 && (
             <circle cx={nowX} cy={yOf(actualMultiplier)} r={3.5}
                     fill="var(--success-fg)" stroke="var(--bg-subtle, #161b22)" strokeWidth="1.5" />
@@ -207,10 +188,6 @@ function TimeDecayChart({
     </Card>
   );
 }
-
-/* =========================================================================
- * PR hero / stats
- * ========================================================================= */
 
 function PrStat({
   label, value, sub, icon, tone = 'neutral',
@@ -301,10 +278,6 @@ function BackToMiner({ uid, name }: { uid: string; name: string }) {
   );
 }
 
-/* =========================================================================
- * Page
- * ========================================================================= */
-
 export default function PrDetailPage({
   params,
 }: {
@@ -381,7 +354,6 @@ export default function PrDetailPage({
               overflow: 'hidden',
             }}
           >
-            {/* Title + meta row */}
             <Box sx={{ p: 3, display: 'flex', flexDirection: 'column', gap: 2 }}>
               <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
                 <Box sx={{ color: stateColor, mt: '4px', flexShrink: 0 }}>
@@ -464,7 +436,6 @@ export default function PrDetailPage({
               </Box>
             </Box>
 
-            {/* Stats grid */}
             <Box
               sx={{
                 display: 'grid',
