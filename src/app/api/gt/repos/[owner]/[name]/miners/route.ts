@@ -71,9 +71,7 @@ function localContributorsForRepo(fullName: string): RepoMiner[] {
     return rows.map((r) => ({
       githubId: '',
       githubUsername: r.author,
-      // Match the upstream semantic: prCount in `ossContributions` is merged
-      // PR count. Surface mergedCount when we have it, falling back to total.
-      prCount: r.mergedCount ?? r.prCount,
+      prCount: r.mergedCount > 0 ? r.mergedCount : r.prCount,
       score: 0,
       ossRank: null,
       globalScore: null,
@@ -162,8 +160,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
         row.score += num(p.score);
       }
     }
-    let ossContributions: RepoMiner[] = [...ossMap.values()]
-      .filter((r) => r.prCount > 0 || r.score > 0)
+    const ossAll = [...ossMap.values()].filter((r) => r.prCount > 0 || r.score > 0);
+    // Captured pre-slice so the UI's share denominator covers the long tail.
+    const ossContributionsTotalScore = ossAll.reduce((s, r) => s + r.score, 0);
+    let ossContributions: RepoMiner[] = ossAll
       .sort((a, b) => b.score - a.score || b.prCount - a.prCount)
       .slice(0, TOP_MINERS_LIMIT)
       .map((r) => {
@@ -180,10 +180,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
         };
       });
 
-    // Fallback: when upstream has no scored PRs for this repo (newer repos,
-    // unscored backlogs), surface contributors from the local pulls cache
-    // ranked by PR count. Score is 0 — clients can read that as "no scoring
-    // data yet" and the UI already handles the muted-zero case.
+    // Fallback for newer repos with no scored upstream PRs: contributors
+    // from local pulls cache, score=0. The muted-zero UI handles this.
     if (ossContributions.length === 0) {
       ossContributions = localContributorsForRepo(fullName);
     }
@@ -307,6 +305,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       fullName,
       issueDiscoveryEnabled,
       ossContributions,
+      ossContributionsTotalScore,
       issueDiscoveries,
       fetched_at: shared.fetched_at,
     });

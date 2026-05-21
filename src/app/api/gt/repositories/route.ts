@@ -186,14 +186,13 @@ function refreshStarsIfStale(repos: Array<{ owner: string; name: string; fullNam
 }
 
 function lastPrAtByRepo(): Map<string, number> {
-  // Most-recent GitHub PR per repo from the local cache. This is broader than
-  // the upstream /prs aggregate (which only includes scored PRs), so a repo
-  // with PRs but no scoring still shows real activity for stale detection.
+  // Must be merged_at, not created_at: a repo full of old open PRs would
+  // otherwise look fresh and never trigger the stale flag.
   try {
     const rows = getReadDb()
       .prepare(
-        `SELECT repo_full_name as repo, MAX(created_at) as ts
-         FROM pulls WHERE created_at IS NOT NULL
+        `SELECT repo_full_name as repo, MAX(merged_at) as ts
+         FROM pulls WHERE merged_at IS NOT NULL
          GROUP BY repo_full_name`,
       )
       .all() as Array<{ repo: string; ts: string | null }>;

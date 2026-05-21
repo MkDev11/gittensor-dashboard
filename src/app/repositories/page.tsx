@@ -27,7 +27,6 @@ import type { GtRepo, GtReposResponse, RepoMinersResponse, GtRepoPrsResponse } f
 const STALE_PR_MS = 14 * 24 * 60 * 60 * 1000;
 const STALE_MIN_WEIGHT = 0.01;
 const OPPORTUNITY_LIMIT = 5;
-const DEFAULT_OPEN_PR_THRESHOLD = 999;
 
 function emissionForWeight(
   weight: number,
@@ -73,6 +72,15 @@ function capacityUtilization(r: GtRepo): number {
 
 function avatarUrl(owner: string): string {
   return `https://github.com/${owner}.png?size=48`;
+}
+
+// Skip row expand/collapse when the activation originated on a nested link
+// or button — otherwise Enter on the repo link both navigates and expands.
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof Element &&
+    !!target.closest('a, button, input, select, textarea, [role="button"]')
+  );
 }
 
 export default function RepositoriesPage() {
@@ -139,14 +147,20 @@ export default function RepositoriesPage() {
     if (!data?.repos) return empty;
     const active = data.repos.filter((r) => r.isActive);
 
+    // Threshold is per-author, so utilization must divide by contributors.
+    // Repos without a configured threshold are skipped — headroom unknowable.
+    const utilization = (r: GtRepo): number | null => {
+      const thr = r.excessivePrPenaltyThreshold;
+      if (thr == null || thr <= 0) return null;
+      const contributors = Math.max(r.contributorCount, 1);
+      return r.openPrCount / contributors / thr;
+    };
     const underutilized = active
-      .filter(
-        (r) =>
-          r.weight > 0 &&
-          r.openPrCount < (r.excessivePrPenaltyThreshold ?? DEFAULT_OPEN_PR_THRESHOLD),
-      )
-      .sort((a, b) => b.weight / Math.max(b.openPrCount, 1) - a.weight / Math.max(a.openPrCount, 1))
-      .slice(0, OPPORTUNITY_LIMIT);
+      .map((r) => ({ r, u: utilization(r) }))
+      .filter(({ r, u }) => r.weight > 0 && u != null && u < 1)
+      .sort((a, b) => b.r.weight / Math.max(b.u!, 0.05) - a.r.weight / Math.max(a.u!, 0.05))
+      .slice(0, OPPORTUNITY_LIMIT)
+      .map(({ r }) => r);
 
     const openWork = [...active]
       .filter((r) => r.openIssueCount > 0)
@@ -919,6 +933,12 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
   );
 }
 
+function DetailErrorHint({ children }: { children: React.ReactNode }) {
+  return (
+    <Box sx={{ py: 3, textAlign: 'center', color: 'danger.fg', fontSize: 1 }}>{children}</Box>
+  );
+}
+
 function StatusTab({
   active,
   onClick,
@@ -1096,8 +1116,12 @@ function RepoCard({
         role="button"
         aria-expanded={isExpanded}
         aria-controls={detailId}
-        onClick={() => onToggleExpand(r.fullName)}
+        onClick={(e: React.MouseEvent<HTMLDivElement>) => {
+          if (isInteractiveTarget(e.target)) return;
+          onToggleExpand(r.fullName);
+        }}
         onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
+          if (isInteractiveTarget(e.target)) return;
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onToggleExpand(r.fullName);
@@ -1528,8 +1552,12 @@ function RepoTable({
                   role="button"
                   aria-expanded={isExpanded}
                   aria-controls={detailId}
-                  onClick={() => onToggleExpand(r.fullName)}
+                  onClick={(e: React.MouseEvent<HTMLTableRowElement>) => {
+                    if (isInteractiveTarget(e.target)) return;
+                    onToggleExpand(r.fullName);
+                  }}
                   onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => {
+                    if (isInteractiveTarget(e.target)) return;
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       onToggleExpand(r.fullName);
@@ -1750,10 +1778,18 @@ function Th({
   const isSortable = !!sortKey && !!onSort;
   const active = isSortable && current === sortKey;
   const cursor = isSortable ? 'pointer' : hint ? 'help' : 'default';
+  const ariaSort: 'ascending' | 'descending' | 'none' | undefined = isSortable
+    ? active
+      ? dir === 'asc'
+        ? 'ascending'
+        : 'descending'
+      : 'none'
+    : undefined;
+  const activate = isSortable && sortKey ? () => onSort!(sortKey) : undefined;
   return (
     <Box
       as="th"
-      onClick={isSortable && sortKey ? () => onSort!(sortKey) : undefined}
+      aria-sort={ariaSort}
       title={hint}
       sx={{
         p: 2,
@@ -1765,17 +1801,30 @@ function Th({
         textTransform: 'uppercase',
         letterSpacing: '0.5px',
         whiteSpace: 'nowrap',
-        cursor,
         userSelect: 'none',
-        '&:hover': isSortable || hint ? { color: 'fg.default' } : undefined,
       }}
     >
+      {/* Inner button — th can't be a button, but keyboard activation needs one. */}
       <Box
+        as={isSortable ? 'button' : 'span'}
+        type={isSortable ? 'button' : undefined}
+        onClick={activate}
         sx={{
           display: 'inline-flex',
           alignItems: 'center',
           gap: 1,
           justifyContent: align === 'right' ? 'flex-end' : align === 'center' ? 'center' : 'flex-start',
+          width: '100%',
+          color: 'inherit',
+          bg: 'transparent',
+          border: 0,
+          p: 0,
+          font: 'inherit',
+          letterSpacing: 'inherit',
+          textTransform: 'inherit',
+          cursor,
+          '&:hover': isSortable || hint ? { color: 'fg.default' } : undefined,
+          '&:focus-visible': { outline: '2px solid var(--accent-emphasis)', outlineOffset: '2px' },
         }}
       >
         {active && (dir === 'desc' ? <TriangleDownIcon size={12} /> : <TriangleUpIcon size={12} />)}
@@ -1992,7 +2041,7 @@ function Chip({ label, title }: { label: string; title: string }) {
 }
 
 function ExpandedRowDetail({ repo }: { repo: GtRepo }) {
-  const { data: miners, isLoading: minersLoading } = useQuery<RepoMinersResponse>({
+  const { data: miners, isLoading: minersLoading, isError: minersError } = useQuery<RepoMinersResponse>({
     queryKey: ['repo-miners', repo.fullName],
     queryFn: async () => {
       const r = await fetch(`/api/gt/repos/${repo.owner}/${repo.name}/miners`);
@@ -2003,7 +2052,7 @@ function ExpandedRowDetail({ repo }: { repo: GtRepo }) {
     refetchOnMount: false,
   });
 
-  const { data: prsResp, isLoading: prsLoading } = useQuery<GtRepoPrsResponse>({
+  const { data: prsResp, isLoading: prsLoading, isError: prsError } = useQuery<GtRepoPrsResponse>({
     queryKey: ['repo-prs', repo.fullName],
     queryFn: async () => {
       const r = await fetch(`/api/gt/repos/${repo.owner}/${repo.name}/prs`);
@@ -2015,6 +2064,7 @@ function ExpandedRowDetail({ repo }: { repo: GtRepo }) {
   });
 
   const topContributors = (miners?.ossContributions ?? []).slice(0, 5);
+  const contributorScoreTotal = miners?.ossContributionsTotalScore ?? 0;
   const openPrs = useMemo(() => {
     const list = prsResp?.prs ?? [];
     return list
@@ -2044,11 +2094,13 @@ function ExpandedRowDetail({ repo }: { repo: GtRepo }) {
       <DetailColumn title="TOP CONTRIBUTORS · LAST 90D">
         {minersLoading ? (
           <DetailListSkeleton rows={5} />
+        ) : minersError ? (
+          <DetailErrorHint>Couldn’t load contributors.</DetailErrorHint>
         ) : topContributors.length === 0 ? (
           <EmptyHint>No contributor activity yet.</EmptyHint>
         ) : (
           topContributors.map((m) => {
-            const share = repo.totalScore > 0 ? (m.score / repo.totalScore) * 100 : 0;
+            const share = contributorScoreTotal > 0 ? (m.score / contributorScoreTotal) * 100 : 0;
             return (
               <Link
                 key={`${m.githubId}-${m.githubUsername}`}
@@ -2118,6 +2170,8 @@ function ExpandedRowDetail({ repo }: { repo: GtRepo }) {
       <DetailColumn title="OPEN PRS · OLDEST FIRST">
         {prsLoading ? (
           <DetailListSkeleton rows={5} />
+        ) : prsError ? (
+          <DetailErrorHint>Couldn’t load open PRs.</DetailErrorHint>
         ) : openPrs.length === 0 ? (
           <EmptyHint>No open PRs right now.</EmptyHint>
         ) : (

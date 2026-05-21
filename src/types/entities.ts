@@ -297,6 +297,9 @@ export interface RepoMinersResponse {
   issueDiscoveryEnabled?: boolean;
   ossContributions: RepoMiner[];
   issueDiscoveries: RepoMiner[];
+  /** Sum of `ossContributions[*].score` across all contributors in the
+   * window, before the top-N slice. Used as the share denominator. */
+  ossContributionsTotalScore: number;
   fetched_at: number;
 }
 
