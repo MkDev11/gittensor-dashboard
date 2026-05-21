@@ -23,7 +23,10 @@ export interface SessionPayload {
 // invalidates the cache rather than silently using the old key.
 let _cached: { secret: string; key: Promise<CryptoKey> } | null = null;
 function getKey(): Promise<CryptoKey> {
-  const secretStr = process.env.SESSION_SECRET ?? 'unsafe-fallback-set-SESSION_SECRET-in-env';
+  // Fail closed when SESSION_SECRET is missing or empty. A hardcoded fallback
+  // would let anyone who knows the string forge admin session tokens.
+  const secretStr = process.env.SESSION_SECRET;
+  if (!secretStr) throw new Error('SESSION_SECRET is required');
   if (_cached && _cached.secret === secretStr) return _cached.key;
   const key = crypto.subtle.importKey(
     'raw',

@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getReadDb, type IssueRow } from '@/lib/db';
+import { authorCredibilityForRepo, getGittensorCredibilityIndex } from '@/lib/gittensor-credibility';
+import { getIssueDiscoveryDisabledReposAsyncServer } from '@/lib/repos-server';
 
 export const dynamic = 'force-dynamic';
 
 const LIMIT_DEFAULT = 80;
 const LIMIT_MAX = 200;
+
+function positiveInt(value: string | null, fallback: number): number {
+  const n = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
 function parseLabels(raw: string | null): Array<{ name: string; color?: string }> {
   if (!raw) return [];
@@ -24,8 +31,13 @@ export async function GET(
   const full = `${params.owner}/${params.name}`;
   const login = params.login;
   const url = new URL(req.url);
-  const requestedLimit = parseInt(url.searchParams.get('limit') ?? `${LIMIT_DEFAULT}`, 10) || LIMIT_DEFAULT;
+  const page = positiveInt(url.searchParams.get('page'), 1);
+  const requestedLimit = parseInt(
+    url.searchParams.get('pageSize') ?? url.searchParams.get('limit') ?? `${LIMIT_DEFAULT}`,
+    10,
+  ) || LIMIT_DEFAULT;
   const limit = Math.min(LIMIT_MAX, Math.max(1, requestedLimit));
+  const offset = (page - 1) * limit;
 
   const db = getReadDb();
   const mergedPrSql = `EXISTS (
@@ -93,20 +105,34 @@ export async function GET(
        FROM issues i
        WHERE i.repo_full_name = ? AND i.author_login = ?
        ORDER BY updated_at DESC, id DESC
-       LIMIT ?`,
+       LIMIT ? OFFSET ?`,
     )
-    .all(full, login, limit) as Array<IssueRow & { merged_pr_count: number }>;
+    .all(full, login, limit, offset) as Array<IssueRow & { merged_pr_count: number }>;
+
+  const total = stats?.total ?? 0;
+  const [credibilityIndex, issueDiscoveryDisabledRepos] = await Promise.all([
+    getGittensorCredibilityIndex([full]),
+    getIssueDiscoveryDisabledReposAsyncServer([full]),
+  ]);
+  const issueDiscoveryDisabled = issueDiscoveryDisabledRepos.has(full.toLowerCase());
+  const authorCredibility = authorCredibilityForRepo(credibilityIndex, login, full, {
+    issueDiscoveryDisabled,
+  });
 
   return NextResponse.json({
     repo: full,
+    page,
+    page_size: limit,
+    total_pages: Math.max(1, Math.ceil(total / limit)),
     author: {
       login,
       association,
       avatar_url: `https://github.com/${encodeURIComponent(login)}.png?size=96`,
       html_url: `https://github.com/${encodeURIComponent(login)}`,
+      credibility: authorCredibility,
     },
     stats: {
-      total: stats?.total ?? 0,
+      total,
       open: stats?.open ?? 0,
       completed: stats?.completed ?? 0,
       not_planned: stats?.not_planned ?? 0,
@@ -117,6 +143,9 @@ export async function GET(
       ...r,
       labels: parseLabels(r.labels),
       merged_pr_count: r.merged_pr_count,
+      author_credibility: authorCredibilityForRepo(credibilityIndex, r.author_login, r.repo_full_name, {
+        issueDiscoveryDisabled,
+      }),
     })),
   });
 }

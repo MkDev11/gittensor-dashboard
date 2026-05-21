@@ -9,6 +9,8 @@
   --bg-inset: #050506;
   --bg-emphasis: #1c1d20;
   --bg-overlay: #1c1d20;
+  /* Top-nav header bar — a neutral (non-blue) dark, distinct from the canvas. */
+  --header-bg: #0a0a0a;
 
   /* Borders — minimal, almost invisible at rest */
   --border-default: #23252a;
@@ -42,6 +44,8 @@
 
   /* Shadows — minimal; Linear leans on borders + bg shifts instead */
   --shadow-overlay: 0 16px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border-default);
+  /* Leftward shadow for slide-in side panels; theme-aware. */
+  --shadow-panel-overlay: -16px 0 32px rgba(0, 0, 0, 0.45);
 
   /* Semantic state tints. Kept in sync with `linear-theme.ts`. */
   --accent-subtle: rgba(94, 106, 210, 0.16);
@@ -95,6 +99,7 @@
   --bg-inset: #f4f5f7;
   --bg-emphasis: #ebebed;
   --bg-overlay: #ffffff;
+  --header-bg: #ffffff;
 
   --border-default: #e6e6e8;
   --border-muted: #efeff1;
@@ -125,6 +130,7 @@
   --selected-check: #2a8054;
 
   --shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--border-default);
+  --shadow-panel-overlay: -16px 0 32px rgba(0, 0, 0, 0.10);
 
   --btn-primary-bg: #5e6ad2;
   --btn-primary-hover-bg: #4b56b9;
@@ -296,9 +302,21 @@ html:not([data-top-header]) [data-app-header] {
 
 main {
   flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - var(--header-height));
   /* The poller status bar is now an in-flow sticky child of <main>, so it no
    * longer needs reserved space here — only clear the fixed bottom nav. */
   padding-bottom: var(--bottom-nav-height);
+}
+
+main > :not([data-poller-status-bar]) {
+  flex: 1 0 auto;
+  min-width: 0;
+}
+
+main > [data-poller-status-bar] {
+  flex: 0 0 auto;
 }
 
 /* Linear's focus ring: subtle inset glow, no harsh 2px outline. */
@@ -419,7 +437,8 @@ select {
   color: var(--fg-default);
   font-size: 14px;
   line-height: 1.55;
-  overflow-wrap: break-word;
+  min-width: 0;
+  overflow-wrap: anywhere;
   word-wrap: break-word;
   max-width: 100%;
 }
@@ -465,15 +484,62 @@ select {
 .md-content li { margin-top: 0.25em; }
 .md-content li > p { margin-top: 16px; }
 .md-content li + li { margin-top: 0.25em; }
-.md-content ul.contains-task-list { padding-left: 1.2em; list-style: none; }
-.md-content li.task-list-item { list-style: none; }
-.md-content input[type="checkbox"] { margin: 0 0.35em 0.25em -1.4em; vertical-align: middle; }
+.md-content ul.contains-task-list {
+  padding-left: 1.55em;
+  list-style: none;
+}
+.md-content li.task-list-item {
+  position: relative;
+  list-style: none;
+}
+.md-content li.task-list-item > input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 14px;
+  height: 14px;
+  margin: 0 0.5em 0 -1.55em;
+  vertical-align: -2px;
+  border: 1px solid var(--border-default);
+  border-radius: 3px;
+  background: var(--bg-canvas);
+  opacity: 1;
+  pointer-events: none;
+}
+.md-content li.task-list-item > input[type="checkbox"]:checked {
+  border-color: var(--accent-emphasis);
+  background: var(--accent-emphasis);
+}
+.md-content li.task-list-item > input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 1px;
+  width: 4px;
+  height: 7px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
 
 .md-content a {
   color: var(--accent-fg);
   text-decoration: none;
 }
 .md-content a:hover { text-decoration: underline; }
+.md-content a.gh-ref {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  white-space: nowrap;
+  vertical-align: baseline;
+}
+.md-content a.gh-ref .gh-ref-icon {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  transform: translateY(1px);
+}
 
 .md-content code {
   background: var(--bg-emphasis);
@@ -481,7 +547,8 @@ select {
   border-radius: 4px;
   font-family: var(--font-mono), ui-monospace, SFMono-Regular, 'SF Mono', Consolas, monospace;
   font-size: 85%;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   white-space: break-spaces;
 }
 .md-content pre {
@@ -490,6 +557,7 @@ select {
   border-radius: 8px;
   padding: 16px;
   overflow: auto;
+  max-width: 100%;
   margin: 0 0 16px;
   font-family: var(--font-mono), ui-monospace, SFMono-Regular, 'SF Mono', Consolas, monospace;
   font-size: 85%;

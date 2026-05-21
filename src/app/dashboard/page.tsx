@@ -6,7 +6,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Box, Heading, PageLayout, Spinner, Text } from '@primer/react';
+import { Box, Heading, PageLayout, Text } from '@primer/react';
 import {
   AlertIcon,
   CheckIcon,
@@ -24,6 +24,7 @@ import type { IssueDto, PullDto } from '@/lib/api-types';
 import type { RepoEntry } from '@/lib/repos';
 import { formatRelativeTime } from '@/lib/format';
 import SearchInput from '@/components/SearchInput';
+import { SkeletonBar } from '@/components/Skeleton';
 
 const OSS_SHARE = 0.9;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -1204,12 +1205,7 @@ export default function DashboardPage() {
     return (
       <PageLayout containerWidth="full" padding="normal">
         <PageLayout.Content>
-          <Box sx={{ minHeight: 320, display: 'grid', placeItems: 'center', color: 'fg.muted' }}>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-              <Spinner size="small" />
-              <Text>Loading dashboard</Text>
-            </Box>
-          </Box>
+          <DashboardSkeleton />
         </PageLayout.Content>
       </PageLayout>
     );
@@ -1263,6 +1259,8 @@ export default function DashboardPage() {
               label="Network Activity"
               value={fmtCount(rangeStats.workItems)}
               spark={statSparks.network}
+              sparkDuration={statSparkDuration}
+              sparkUnit="PR/issue activity"
               tooltip="Total lifecycle events in the selected range: PRs opened, merged, or closed plus issues opened or resolved."
               metrics={[
                 { label: 'PRs', value: fmtCount(activitySummary.prEvents), tone: activitySummary.prEvents > 0 ? 'accent' : 'muted' },
@@ -1275,6 +1273,8 @@ export default function DashboardPage() {
               label="OSS Contributions"
               value={fmtCount(scoredPrCount)}
               spark={statSparks.oss}
+              sparkDuration={statSparkDuration}
+              sparkUnit="scored PRs"
               tooltip="Officially scored OSS contribution PRs. Merged PRs awaiting validator scoring are shown separately."
               metrics={[
                 { label: 'Merged', value: fmtCount(mergedPrCount), tone: mergedPrCount > 0 ? 'success' : 'muted' },
@@ -1287,6 +1287,8 @@ export default function DashboardPage() {
               label="Discoveries"
               value={fmtCount(resolvedIssueCount)}
               spark={statSparks.discoveries}
+              sparkDuration={statSparkDuration}
+              sparkUnit="resolved issues"
               tooltip={issueDiscoveryDetailUnavailable ? "Scored includes completed issues whose linked solver PR has an official Gittensor score. Discovery badges show enabled repos plus eligibility; Discovery +score appears only when per-issue discovery_earned_score is exposed." : "Scored includes completed issues whose linked solver PR has an official Gittensor score. Discovery badges show enabled repos, eligibility, and discovery_earned_score when available."}
               metrics={[
                 { label: 'Scored', value: fmtCount(issueStageCounts.scored), tone: issueStageCounts.scored > 0 ? 'accent' : 'muted' },
@@ -1299,6 +1301,8 @@ export default function DashboardPage() {
               label="OSS Score"
               value={fmtNumber(rangeStats.prScore)}
               spark={statSparks.score}
+              sparkDuration={statSparkDuration}
+              sparkUnit="score pts"
               tooltip="Sum of official Gittensor OSS PR scores in the selected range. Average and top use scored PRs only."
               metrics={[
                 { label: 'Avg score', value: fmtNumber(rangeStats.avgPrScore), tone: rangeStats.avgPrScore > 0 ? 'success' : 'muted' },
@@ -1311,6 +1315,8 @@ export default function DashboardPage() {
               label="Active Contributors"
               value={fmtCount(rangeStats.actors)}
               spark={statSparks.contributors}
+              sparkDuration={statSparkDuration}
+              sparkUnit="contributors"
               tooltip="Unique GitHub contributors seen in the selected range. Open PRs/issues shows the current open work queue."
               metrics={[
                 { label: 'Active repos', value: fmtCount(rangeStats.repos), tone: rangeStats.repos > 0 ? 'accent' : 'muted' },
@@ -1330,7 +1336,6 @@ export default function DashboardPage() {
 
           <BestWorkShowcase
             pulls={bestWorkPulls.slice(0, 7)}
-            totalScored={scoredRangePulls.length}
             trendingRepos={trendingRepos}
             authorLeaders={bestWorkAuthors}
             durationLabel={duration.label}
@@ -1492,10 +1497,99 @@ function statMetricColor(tone: StatMetricTone = 'muted'): string {
   return 'fg.muted';
 }
 
-function StatCard({ tone, icon, label, value, suffix, metrics, tooltip, spark }: { tone: StatTone; icon: React.ReactNode; label: string; value: string; suffix?: string; metrics: StatMetric[]; tooltip?: string; spark?: number[] }) {
+// Loading placeholder that mirrors the real dashboard layout (header, stat
+// cards, activity/recent, best work, pipeline) so the page doesn't jump when
+// data lands. Reuses the same responsive grids as the live content.
+function DashboardSkeleton() {
+  // Use raw CSS vars (set pre-paint by the inline theme script) rather than
+  // Primer color tokens — during this early loading render Primer's React
+  // color-mode hasn't synced yet, so `bg: 'canvas.default'` would paint the
+  // dark value even in light mode.
+  const panelSx = { border: '1px solid var(--border-default)', borderRadius: 2, bg: 'var(--bg-canvas)', p: 3 } as const;
+  return (
+    <Box aria-busy="true" aria-label="Loading dashboard" sx={{ maxWidth: 1440, mx: 'auto', width: '100%', display: 'grid', gap: 3 }}>
+      {/* Header */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 3, flexWrap: 'wrap' }}>
+        <Box sx={{ display: 'grid', gap: 2 }}>
+          <SkeletonBar width={190} height={26} />
+          <SkeletonBar width={280} height={12} />
+        </Box>
+        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+          <SkeletonBar width={130} height={28} rounded={8} />
+          <SkeletonBar width={130} height={28} rounded={8} />
+        </Box>
+      </Box>
+
+      {/* Stat cards (same auto-fit grid as the live row) */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 3 }}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Box key={i} sx={{ ...panelSx, display: 'grid', gap: 2 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr)', gap: 2, alignItems: 'start' }}>
+              <SkeletonBar width={38} height={38} rounded={8} />
+              <Box sx={{ display: 'grid', gap: 2 }}>
+                <SkeletonBar width="70%" height={10} />
+                <SkeletonBar width={72} height={22} />
+              </Box>
+            </Box>
+            <SkeletonBar height={44} rounded={6} />
+          </Box>
+        ))}
+      </Box>
+
+      {/* Activity Over Time | Recent Activity */}
+      <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, null, 'minmax(0, 1.05fr) minmax(380px, 0.95fr)'], gap: 3, alignItems: 'stretch' }}>
+        <Box sx={{ ...panelSx, display: 'grid', gap: 3, alignContent: 'start' }}>
+          <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+            {Array.from({ length: 5 }).map((_, i) => <SkeletonBar key={i} width={96} height={12} />)}
+          </Box>
+          <SkeletonBar height={260} rounded={6} />
+        </Box>
+        <Box sx={{ ...panelSx, display: 'grid', gap: 2, alignContent: 'start' }}>
+          <SkeletonBar width={140} height={14} />
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Box key={i} style={{ opacity: Math.max(0.3, 1 - i * 0.13) }} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <SkeletonBar width={18} height={18} rounded={999} />
+              <Box sx={{ display: 'grid', gap: 1, flex: 1, minWidth: 0 }}>
+                <SkeletonBar flex={1} height={12} />
+                <SkeletonBar width="55%" height={10} />
+              </Box>
+              <SkeletonBar width={40} height={10} />
+            </Box>
+          ))}
+        </Box>
+      </Box>
+
+      {/* Best Work */}
+      <Box sx={{ ...panelSx, display: 'grid', gap: 3, alignContent: 'start' }}>
+        <SkeletonBar width={120} height={14} />
+        <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, null, 'minmax(0, 1.2fr) minmax(320px, 0.8fr)'], gap: 3 }}>
+          <SkeletonBar height={150} rounded={6} />
+          <Box sx={{ display: 'grid', gap: 2, alignContent: 'start' }}>
+            {Array.from({ length: 3 }).map((_, i) => <SkeletonBar key={i} height={28} rounded={6} />)}
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Pull Request Pipeline */}
+      <Box sx={{ ...panelSx, display: 'grid', gap: 3, alignContent: 'start' }}>
+        <SkeletonBar width={170} height={14} />
+        <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', 'repeat(2, minmax(0, 1fr))', 'repeat(5, minmax(0, 1fr))'], gap: 2 }}>
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Box key={i} sx={{ border: '1px solid var(--border-muted)', borderRadius: 2, p: 2, display: 'grid', gap: 2, alignContent: 'start' }}>
+              <SkeletonBar width="65%" height={10} />
+              {Array.from({ length: 3 }).map((_, j) => <SkeletonBar key={j} height={56} rounded={6} />)}
+            </Box>
+          ))}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+function StatCard({ tone, icon, label, value, suffix, metrics, tooltip, spark, sparkDuration, sparkUnit }: { tone: StatTone; icon: React.ReactNode; label: string; value: string; suffix?: string; metrics: StatMetric[]; tooltip?: string; spark?: number[]; sparkDuration?: ReturnType<typeof durationConfig>; sparkUnit?: string }) {
   const color = statColor(tone);
   return (
-    <Box title={tooltip} sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', boxShadow: 'shadow.small', p: 3, minWidth: 0, overflow: 'hidden', cursor: tooltip ? 'help' : 'default', transition: 'border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease', '&:hover': { borderColor: color.fg, transform: 'translateY(-1px)', boxShadow: 'shadow.medium' } }}>
+    <Box title={tooltip} sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', boxShadow: 'shadow.small', p: 3, minWidth: 0, overflow: 'visible', cursor: tooltip ? 'help' : 'default', transition: 'border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease', '&:hover': { borderColor: color.fg, transform: 'translateY(-1px)', boxShadow: 'shadow.medium' } }}>
       <Box sx={{ display: 'grid', gridTemplateColumns: '44px minmax(0, 1fr)', gap: 2, alignItems: 'start' }}>
         <Box sx={{ width: 38, height: 38, borderRadius: 2, bg: color.bg, color: color.fg, display: 'grid', placeItems: 'center' }}>{icon}</Box>
         <Box sx={{ minWidth: 0 }}>
@@ -1506,9 +1600,9 @@ function StatCard({ tone, icon, label, value, suffix, metrics, tooltip, spark }:
           </Box>
         </Box>
       </Box>
-      {spark && (
-        <Box sx={{ mt: 2, height: 48, minWidth: 0, overflow: 'hidden' }}>
-          <StatSparkline points={spark} tone={tone} variant="wide" />
+      {spark && sparkDuration && (
+        <Box sx={{ mt: 2, height: 48, minWidth: 0, position: 'relative' }}>
+          <StatSparkline points={spark} tone={tone} duration={sparkDuration} unit={sparkUnit ?? ''} />
         </Box>
       )}
       <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 2, mt: 3 }}>
@@ -1525,59 +1619,163 @@ function StatCard({ tone, icon, label, value, suffix, metrics, tooltip, spark }:
   );
 }
 
-function StatSparkline({ points, tone, variant = 'inline' }: { points: number[]; tone: StatTone; variant?: 'inline' | 'wide' }) {
-  const values = points.length > 0 ? points : [0, 0];
-  const wide = variant === 'wide';
-  const width = wide ? 160 : 96;
-  const height = wide ? 54 : 24;
-  const pad = wide ? { x: 4, y: 7 } : { x: 3, y: 4 };
+function StatSparkline({ points, tone, duration, unit }: { points: number[]; tone: StatTone; duration: ReturnType<typeof durationConfig>; unit: string }) {
+  const formatValue = unit === 'score pts' ? fmtNumber : fmtCount;
+  const color = statSparkColor(tone);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  // Measure the real rendered width so the viewBox maps 1:1 (no stretch/distortion).
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(160);
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.getBoundingClientRect().width;
+      if (w > 0) setWidth(w);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const height = 48;
+  const pad = { x: 5, top: 6, bottom: 7 };
+  // One point per bucket so hover maps to a real period range.
+  const values = points.length > 0 ? points : [0];
   const max = Math.max(...values);
   const min = Math.min(...values);
   const isFlat = max === min;
   const span = Math.max(1, max - min);
-  const color = statSparkColor(tone);
-  const coords = values.map((value, index) => ({
-    x: pad.x + (index * (width - pad.x * 2)) / Math.max(1, values.length - 1),
-    y: isFlat ? height / 2 : pad.y + (1 - (value - min) / span) * (height - pad.y * 2),
-  }));
-  const line = smoothPath(coords);
-  const area = coords.length > 0
-    ? line + ' L ' + coords[coords.length - 1].x + ' ' + (height - pad.y) + ' L ' + coords[0].x + ' ' + (height - pad.y) + ' Z'
-    : '';
-  const last = coords[coords.length - 1] ?? { x: width - pad.x, y: height / 2 };
-  const sparkKey = values.map((value) => Math.round(value * 100) / 100).join('-');
+  const hasActivity = max > 0;
+  const n = values.length;
+  const innerW = Math.max(1, width - pad.x * 2);
+  const innerH = height - pad.top - pad.bottom;
+  const baseline = height - pad.bottom;
+  const coords = values.map((value, index) => {
+    const scaled = hasActivity ? (isFlat ? 0.52 : (value - min) / span) : 0;
+    const norm = hasActivity ? 0.16 + scaled * 0.78 : 0;
+    return {
+      value,
+      scaled,
+      x: pad.x + (index * innerW) / Math.max(1, n - 1),
+      y: hasActivity ? pad.top + (1 - norm) * innerH : baseline,
+    };
+  });
+  const linePath = hasActivity ? smoothPath(coords) : `M ${pad.x} ${baseline} L ${width - pad.x} ${baseline}`;
+  const latest = coords[coords.length - 1] ?? { x: width - pad.x, y: baseline, value: 0, scaled: 0 };
+  const peakIndex = hasActivity ? coords.reduce((bestIndex, point, index) => (point.value > coords[bestIndex].value ? index : bestIndex), 0) : -1;
+  const sparkKey = `${Math.round(width)}:${values.map((value) => Math.round(value * 100) / 100).join('-')}`;
+  const hoveredValue = hoveredIndex === null ? 0 : values[hoveredIndex] ?? 0;
+  const hovered = hoveredIndex === null ? null : coords[hoveredIndex] ?? null;
+  const tooltipLeft = hovered ? (hovered.x / Math.max(1, width)) * 100 : 0;
+  const tooltipTransform = hoveredIndex === null
+    ? 'translateX(-50%)'
+    : hoveredIndex < n * 0.22
+      ? 'translateX(0)'
+      : hoveredIndex > n * 0.78
+        ? 'translateX(-100%)'
+        : 'translateX(-50%)';
+  const hitWidth = Math.max(12, innerW / Math.max(1, n));
 
   return (
-    <Box aria-hidden="true" sx={wide ? { width: '100%', height: '100%', opacity: 0.94, overflow: 'hidden' } : { width: 'clamp(48px, 4.8vw, 72px)', height: '20px', flex: '0 1 clamp(44px, 30%, 72px)', minWidth: 44, maxWidth: '34%', opacity: 0.9, overflow: 'hidden' }}>
+    <Box ref={containerRef} onMouseLeave={() => setHoveredIndex(null)} sx={{ position: 'relative', width: '100%', height: '100%', zIndex: hoveredIndex === null ? 'auto' : 20 }}>
       <style>{`
-        @keyframes stat-spark-draw {
-          from { stroke-dashoffset: 1; opacity: 0.35; }
-          to { stroke-dashoffset: 0; opacity: 1; }
-        }
-        @keyframes stat-spark-pulse {
-          0%, 100% { transform: scale(0.82); opacity: 0.58; }
-          50% { transform: scale(1.18); opacity: 0.18; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .stat-spark-line, .stat-spark-pulse { animation: none !important; opacity: 1 !important; stroke-dashoffset: 0 !important; }
-        }
+        @keyframes stat-spark-draw { from { stroke-dashoffset: 1; opacity: 0.22; } to { stroke-dashoffset: 0; opacity: 1; } }
+        @keyframes stat-spark-pop { from { transform: scale(0.65); opacity: 0.12; } to { transform: scale(1); opacity: 1; } }
+        .stat-spark-line { animation: stat-spark-draw 680ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+        .stat-spark-bead { transform-box: fill-box; transform-origin: center; animation: stat-spark-pop 360ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+        @media (prefers-reduced-motion: reduce) { .stat-spark-line, .stat-spark-bead { animation: none !important; opacity: 1 !important; stroke-dashoffset: 0 !important; } }
       `}</style>
-      <svg key={sparkKey} viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" preserveAspectRatio="none" focusable="false">
-        <path d={area} fill={color} opacity={wide ? '0.16' : '0.12'} />
+      <svg key={sparkKey} viewBox={`0 0 ${width} ${height}`} width="100%" height="100%" preserveAspectRatio="none" focusable="false" aria-hidden="true">
+        <line x1={pad.x} y1={baseline} x2={width - pad.x} y2={baseline} stroke="var(--border-muted)" strokeWidth="1" />
         <path
           className="stat-spark-line"
-          d={line}
+          d={linePath}
           fill="none"
-          stroke={color}
-          strokeWidth={wide ? '2.6' : '2'}
+          stroke={hasActivity ? color : 'var(--border-muted)'}
+          strokeWidth={hasActivity ? 1.9 : 1.4}
           strokeLinecap="round"
           strokeLinejoin="round"
           pathLength={1}
-          style={{ strokeDasharray: 1, strokeDashoffset: 1, animation: 'stat-spark-draw 720ms cubic-bezier(0.22, 1, 0.36, 1) forwards' }}
+          opacity={hasActivity ? 0.76 : 0.48}
+          style={{ strokeDasharray: 1, strokeDashoffset: 1 }}
         />
-        <circle className="stat-spark-pulse" cx={last.x} cy={last.y} r="5" fill={color} opacity="0.18" style={{ transformOrigin: `${last.x}px ${last.y}px`, animation: 'stat-spark-pulse 1.8s ease-in-out infinite' }} />
-        <circle cx={last.x} cy={last.y} r="2.4" fill={color} stroke="var(--canvas-default)" strokeWidth="1.4" />
+        {coords.map((point, index) => {
+          const hoveredPoint = hoveredIndex === index;
+          const latestPoint = index === n - 1;
+          const peakPoint = index === peakIndex;
+          const radius = hasActivity
+            ? hoveredPoint ? 4.3 : latestPoint ? 4 : peakPoint ? 3.2 : 2.1 + point.scaled * 1.1
+            : 1.7;
+          const fill = hasActivity && (latestPoint || hoveredPoint) ? color : 'var(--bg-canvas)';
+          const stroke = hasActivity ? color : 'var(--border-muted)';
+          return (
+            <circle
+              key={index}
+              className="stat-spark-bead"
+              cx={point.x}
+              cy={hasActivity ? point.y : baseline}
+              r={radius}
+              fill={fill}
+              stroke={stroke}
+              strokeWidth={latestPoint || hoveredPoint ? 1.8 : 1.35}
+              opacity={!hasActivity ? 0.42 : hoveredPoint ? 1 : latestPoint ? 1 : peakPoint ? 0.92 : 0.72}
+              style={{ animationDelay: `${index * 22}ms` }}
+            />
+          );
+        })}
+        {hovered && hasActivity && (
+          <g>
+            <line x1={hovered.x} y1={pad.top} x2={hovered.x} y2={baseline} stroke={color} strokeWidth="1" strokeDasharray="2 3" opacity="0.35" />
+            <circle cx={hovered.x} cy={hovered.y} r="5.4" fill="none" stroke={color} strokeWidth="1.2" opacity="0.55" />
+          </g>
+        )}
+        {coords.map((point, index) => (
+          <rect
+            key={index}
+            x={Math.max(0, point.x - hitWidth / 2)}
+            y={0}
+            width={hitWidth}
+            height={height}
+            fill="transparent"
+            onMouseEnter={() => setHoveredIndex(index)}
+            style={{ cursor: 'default' }}
+          />
+        ))}
       </svg>
+      {hoveredIndex !== null && hasActivity && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: `${tooltipLeft}%`,
+            bottom: 'calc(100% + 6px)',
+            transform: tooltipTransform,
+            minWidth: 132,
+            backgroundColor: 'color-mix(in srgb, var(--canvas-overlay, var(--bgColor-overlay)) 84%, transparent)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            border: '1px solid',
+            borderColor: 'border.default',
+            borderRadius: 2,
+            boxShadow: 'shadow.medium',
+            px: 2,
+            py: '6px',
+            pointerEvents: 'none',
+            zIndex: 30,
+          }}
+        >
+          <Text sx={{ display: 'block', color: 'fg.default', fontWeight: 700, fontSize: 0, mb: '2px' }}>
+            {bucketRangeLabel(hoveredIndex, duration)}
+          </Text>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Box sx={{ width: 8, height: 8, borderRadius: 99, bg: color, flexShrink: 0 }} />
+            <Text sx={{ color: 'fg.muted', flex: 1, fontSize: 0, whiteSpace: 'nowrap' }}>{unit}</Text>
+            <Text sx={{ color: 'fg.default', fontWeight: 700, fontFamily: 'mono', fontSize: 0 }}>{formatValue(hoveredValue)}</Text>
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -1780,7 +1978,7 @@ function LineChart({ points }: { points: DayPoint[] }) {
                 cy={y(displayPoint[series.key])}
                 r="4"
                 fill={series.color}
-                stroke="var(--canvas-default)"
+                stroke="var(--bg-canvas)"
                 strokeWidth="2"
                 style={{ transition: 'cx 140ms cubic-bezier(0.4, 0, 0.2, 1), cy 140ms cubic-bezier(0.4, 0, 0.2, 1)' }}
               />
@@ -1887,13 +2085,11 @@ function buildBestWorkPulls(pulls: PullDto[], scorePoolPulls: PullDto[], repoByN
 
 function BestWorkShowcase({
   pulls,
-  totalScored,
   trendingRepos,
   authorLeaders,
   durationLabel,
 }: {
   pulls: BestWorkPull[];
-  totalScored: number;
   trendingRepos: Array<{ repo: RepoEntry; stats?: GtRepo; trend: number; prs: number; score: number }>;
   authorLeaders: AuthorLeader[];
   durationLabel: string;
@@ -1905,11 +2101,11 @@ function BestWorkShowcase({
   return (
     <Box sx={{ border: '1px solid', borderColor: 'border.default', borderRadius: 2, bg: 'canvas.default', minWidth: 0, overflow: 'hidden', boxShadow: 'shadow.small' }}>
       <Box sx={{ px: 3, py: 2, borderBottom: '1px solid', borderColor: 'border.default', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, flexWrap: 'wrap' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0 }}>
-          <Heading sx={{ fontSize: 1, m: 0 }}>Best Work</Heading>
+        <Heading sx={{ fontSize: 1, m: 0, minWidth: 0 }}>Top Contributions</Heading>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
+          <Text sx={{ color: 'fg.muted', fontSize: 0, fontFamily: 'mono' }}>ranked by modeled reward</Text>
           <RangePill label={durationLabel} />
         </Box>
-        <Text sx={{ color: 'fg.muted', fontSize: 0, fontFamily: 'mono' }}>{fmtCount(totalScored)} official scored PRs · ranked by modeled reward</Text>
       </Box>
       {top ? (
         <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, null, 'minmax(0, 1.2fr) minmax(320px, 0.8fr)'], gap: 0 }}>

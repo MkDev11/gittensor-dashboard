@@ -1,4 +1,4 @@
-import type { PullDto } from '@/lib/api-types';
+import type { Pull } from '@/types/entities';
 
 const LINK_REGEX =
   /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s*(?:(?:https?:\/\/github\.com\/)?([\w.-]+\/[\w.-]+))?#(\d+)/gi;
@@ -25,9 +25,9 @@ export function extractLinkedIssues(pr: { body: string | null; title: string; re
 }
 
 export function findRelatedPulls(
-  pulls: PullDto[],
+  pulls: Pull[],
   issue: { number: number; repo_full_name: string }
-): PullDto[] {
+): Pull[] {
   return pulls.filter((pr) => {
     if (pr.repo_full_name !== issue.repo_full_name) return false;
     const links = extractLinkedIssues(pr);

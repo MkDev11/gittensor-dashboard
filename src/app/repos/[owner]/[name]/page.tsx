@@ -26,63 +26,17 @@ import {
 import type { Icon } from '@primer/octicons-react';
 import Spinner from '@/components/Spinner';
 import { SkeletonBar } from '@/components/Skeleton';
-import { useTrackedRepos } from '@/lib/tracked-repos';
-import type { IssueDto, IssuesResponse } from '@/lib/api-types';
+import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
+import type {
+  Issue,
+  IssuesResponse,
+  GtRepoSummary,
+  GtRepoPrsResponse,
+  RepoMiner,
+  RepoMinersResponse,
+} from '@/types/entities';
 import { renderMarkdownToHtml } from '@/lib/markdown';
 import { formatRelativeTime } from '@/lib/format';
-
-interface RepoSummary {
-  fullName: string;
-  owner: string;
-  name: string;
-  weight: number | null;
-  isActive: boolean;
-  totalScore: number;
-  mergedPrCount: number;
-  contributorCount: number;
-  issueDiscoveryEnabled: boolean;
-  issueDiscoveryShare: number;
-  closedIssueCount: number;
-  completedIssueCount: number;
-  otherClosedIssueCount: number;
-  github: {
-    description: string | null;
-    isPrivate: boolean;
-    defaultBranch: string;
-    htmlUrl: string;
-    stargazersCount: number;
-    forksCount: number;
-    openIssuesCount: number;
-    license: string | null;
-    topics: string[];
-    pushedAt: string | null;
-    createdAt: string | null;
-  } | null;
-}
-
-interface MinerRow {
-  githubId: string;
-  githubUsername: string;
-  prCount: number;
-  score: number;
-  ossRank: number | null;
-  globalScore?: number | null;
-  avatarUrl: string;
-  issueCount?: number;
-  completedIssueCount?: number;
-  otherClosedIssueCount?: number;
-  solvedIssueCount?: number;
-  candidateIssueCount?: number;
-  reason?: string | null;
-}
-
-interface MinersResp {
-  fullName: string;
-  ossContributions: MinerRow[];
-  issueDiscoveryEnabled: boolean;
-  issueDiscoveries: MinerRow[];
-  fetched_at: number;
-}
 
 type TabKey = 'readme' | 'code' | 'issues' | 'pulls' | 'contributing' | 'check';
 
@@ -99,10 +53,10 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
   const params = use(ctx.params);
   const fullName = `${params.owner}/${params.name}`;
   const { tracked, toggle } = useTrackedRepos();
-  const isTracked = tracked.has(fullName);
+  const isTracked = repoIsTracked(tracked, fullName);
   const [tab, setTab] = useState<TabKey>('readme');
 
-  const summary = useQuery<RepoSummary>({
+  const summary = useQuery<GtRepoSummary>({
     queryKey: ['gt-repo', fullName],
     queryFn: async () => {
       const r = await fetch(`/api/gt/repos/${params.owner}/${params.name}`);
@@ -260,8 +214,8 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
                 tone={summary.data?.issueDiscoveryEnabled ? 'success' : 'muted'}
               />
               <KvRow label="Closed Issues" value={summary.data ? summary.data.closedIssueCount : '—'} />
-              <KvSubRow label="Completed" value={summary.data ? summary.data.completedIssueCount : '—'} />
-              <KvSubRow label="Closed" value={summary.data ? summary.data.otherClosedIssueCount : '—'} />
+              <KvSubRow label="Completed" value={summary.data?.completedIssueCount ?? '—'} />
+              <KvSubRow label="Closed" value={summary.data?.otherClosedIssueCount ?? '—'} />
             </SidebarSection>
 
             <TopMinersCard owner={params.owner} name={params.name} />
@@ -359,7 +313,10 @@ function ReadmeTab({ owner, name }: { owner: string; name: string }) {
     },
     staleTime: 5 * 60_000,
   });
-  const html = useMemo(() => (data?.content ? renderMarkdownToHtml(data.content) : ''), [data]);
+  const html = useMemo(
+    () => (data?.content ? renderMarkdownToHtml(data.content, { repoFullName: `${owner}/${name}` }) : ''),
+    [data, name, owner]
+  );
   if (isLoading) return <PanelLoading />;
   if (isError) return <PanelError message="Failed to load README." />;
   if (!data?.content) return <PanelEmpty title="No README" message="This repository doesn't have a README file." />;
@@ -382,7 +339,10 @@ function ContributingTab({ owner, name }: { owner: string; name: string }) {
     },
     staleTime: 5 * 60_000,
   });
-  const html = useMemo(() => (data?.content ? renderMarkdownToHtml(data.content) : ''), [data]);
+  const html = useMemo(
+    () => (data?.content ? renderMarkdownToHtml(data.content, { repoFullName: `${owner}/${name}` }) : ''),
+    [data, name, owner]
+  );
   if (isLoading) return <PanelLoading />;
   if (isError) return <PanelError message="Failed to load contributing guide." />;
   if (!data?.content) return <PanelEmpty title="No contributing guide" message="This repository doesn't have a CONTRIBUTING.md." />;
@@ -409,7 +369,7 @@ function IssuesTab({ owner, name }: { owner: string; name: string }) {
     },
     refetchInterval: 30_000,
   });
-  const prsQ = useQuery<{ prs: GtRepoPrLite[] }>({
+  const prsQ = useQuery<Pick<GtRepoPrsResponse, 'prs'>>({
     queryKey: ['gt-repo-prs', owner, name],
     queryFn: async () => {
       const r = await fetch(`/api/gt/repos/${owner}/${name}/prs`);
@@ -436,7 +396,7 @@ function IssuesTab({ owner, name }: { owner: string; name: string }) {
     return { all: issues.length, open, closed: issues.length - open };
   }, [issuesQ.data]);
 
-  const rows: IssueDto[] = useMemo(() => {
+  const rows: Issue[] = useMemo(() => {
     const issues = issuesQ.data?.issues ?? [];
     return issues.filter((i) => {
       if (filter === 'open') return i.state === 'open';
@@ -546,22 +506,6 @@ function IssuesTab({ owner, name }: { owner: string; name: string }) {
 
 // ─── Pull Requests tab ───────────────────────────────────────────────────────
 
-interface GtRepoPrLite {
-  pullRequestNumber: number;
-  title: string;
-  author: string;
-  githubId: string | null;
-  avatarUrl: string;
-  prState: 'OPEN' | 'MERGED' | 'CLOSED';
-  prCreatedAt: string;
-  mergedAt: string | null;
-  additions: number;
-  deletions: number;
-  commitCount: number;
-  score: number;
-  linkedIssueNumber: number | null;
-}
-
 type PrFilter = 'all' | 'open' | 'merged' | 'closed';
 type PrSortKey = 'score' | 'commits' | 'changes' | 'created' | 'merged' | 'number';
 
@@ -570,7 +514,7 @@ function PullsTab({ owner, name }: { owner: string; name: string }) {
   const [sortKey, setSortKey] = useState<PrSortKey>('score');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
-  const { data, isLoading, isError } = useQuery<{ prs: GtRepoPrLite[]; counts: { all: number; open: number; merged: number; closed: number } }>({
+  const { data, isLoading, isError } = useQuery<GtRepoPrsResponse>({
     queryKey: ['gt-repo-prs', owner, name],
     queryFn: async () => {
       const r = await fetch(`/api/gt/repos/${owner}/${name}/prs`);
@@ -1340,7 +1284,7 @@ function formatDate(iso: string): string {
 
 function TopMinersCard({ owner, name }: { owner: string; name: string }) {
   const [tab, setTab] = useState<'oss' | 'issue'>('oss');
-  const { data, isLoading } = useQuery<MinersResp>({
+  const { data, isLoading } = useQuery<RepoMinersResponse>({
     queryKey: ['gt-repo-miners', owner, name],
     queryFn: async () => {
       const r = await fetch(`/api/gt/repos/${owner}/${name}/miners`);
@@ -1453,7 +1397,7 @@ function emptyMinerMessage(tab: 'oss' | 'issue', otherCount: number): string {
   return otherCount > 0 ? `No issue-discovery candidates yet. OSS Contributions has ${otherCount}.` : 'No issue-discovery candidates yet.';
 }
 
-function issueReasonColor(row: MinerRow): 'success.fg' | 'attention.fg' | 'danger.fg' | 'fg.muted' {
+function issueReasonColor(row: RepoMiner): 'success.fg' | 'attention.fg' | 'danger.fg' | 'fg.muted' {
   if ((row.candidateIssueCount ?? 0) > 0) return 'success.fg';
   const reason = (row.reason ?? '').toLowerCase();
   if (reason.includes('owner') || reason.includes('maintainer')) return 'danger.fg';

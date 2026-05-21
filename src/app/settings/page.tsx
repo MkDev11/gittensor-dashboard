@@ -174,17 +174,16 @@ export default function SettingsPage() {
           </Field>
           <Field
             label="Page size"
-            hint="Rows per page in the Explorer Issues / PRs tables. Choose 'All' to disable pagination."
+            hint="Rows per page in paginated issue and pull request tables."
           >
             <Dropdown
-              value={String(settings.pageSize)}
+              value={String(settings.pageSize > 0 ? settings.pageSize : 50)}
               onChange={(v) => update('pageSize', parseInt(v, 10))}
               options={[
                 { value: '10', label: '10 per page' },
                 { value: '25', label: '25 per page' },
                 { value: '50', label: '50 per page' },
                 { value: '100', label: '100 per page' },
-                { value: '0', label: 'All (no pagination)' },
               ]}
               width={220}
               ariaLabel="Page size"

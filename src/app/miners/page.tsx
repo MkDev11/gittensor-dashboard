@@ -17,44 +17,8 @@ import {
 import { TableRowsSkeleton, CardGridSkeleton } from '@/components/Skeleton';
 import { useMinerLogin } from '@/lib/use-miner';
 import { useTrackedMiners } from '@/lib/tracked-miners';
-
-interface Miner {
-  id: string;
-  uid: number;
-  hotkey: string;
-  githubUsername: string;
-  githubId?: string;
-  isEligible: boolean;
-  isIssueEligible?: boolean;
-  failedReason?: string | null;
-  credibility: string;
-  issueCredibility?: string;
-  issueDiscoveryScore?: string;
-  issueTokenScore?: string;
-  totalScore: string;
-  baseTotalScore?: string;
-  totalSolvedIssues?: number;
-  totalValidSolvedIssues?: number;
-  totalOpenIssues?: number;
-  totalClosedIssues?: number;
-  totalOpenPrs?: number;
-  totalClosedPrs?: number;
-  totalMergedPrs?: number;
-  totalPrs?: number;
-  totalAdditions?: number;
-  totalDeletions?: number;
-  uniqueReposCount?: number;
-  alphaPerDay?: number;
-  taoPerDay?: number;
-  usdPerDay?: number;
-}
-
-interface MinersResp {
-  count: number;
-  fetched_at: number;
-  source?: string;
-  miners: Miner[];
-}
+import { formatUsd, formatUsdMonthly, formatPercent } from '@/lib/format';
+import type { Miner, MinersResponse } from '@/types/entities';
 
 type SortKey = 'score' | 'earnings' | 'issues' | 'credibility';
 type EligibilityFilter = 'all' | 'eligible' | 'ineligible';
@@ -72,22 +36,6 @@ const SORT_KEYS: SortKey[] = ['score', 'earnings', 'issues', 'credibility'];
 function num(v: unknown): number {
   const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0;
   return Number.isFinite(n) ? n : 0;
-}
-
-function fmtUsd(n: number): string {
-  if (!n) return '$0';
-  if (n >= 1000) return `$${n.toFixed(0)}`;
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  if (n >= 1) return `$${n.toFixed(2)}`;
-  return `$${n.toFixed(4)}`;
-}
-
-function fmtMonthly(daily: number): string {
-  return `~$${(daily * 30).toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo`;
-}
-
-function fmtPct(credStr: string): string {
-  return `${Math.round(num(credStr) * 100)}%`;
 }
 
 export default function MinersPage() {
@@ -108,7 +56,7 @@ export default function MinersPage() {
     }
   };
 
-  const { data, isLoading, isError } = useQuery<MinersResp>({
+  const { data, isLoading, isError } = useQuery<MinersResponse>({
     queryKey: ['miners'],
     queryFn: async () => {
       const r = await fetch('/api/miners');
@@ -552,7 +500,7 @@ function LeaderboardCard({
                   color: mode === 'usd' ? 'success.fg' : 'fg.default',
                 }}
               >
-                {mode === 'usd' ? fmtUsd(num(m.usdPerDay)) : (m.totalOpenIssues ?? 0).toLocaleString()}
+                {mode === 'usd' ? formatUsd(num(m.usdPerDay)) : (m.totalOpenIssues ?? 0).toLocaleString()}
               </Box>
             </Box>
           ))}
@@ -782,11 +730,11 @@ function MinerCard({
         <Box>
           <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
             <Text sx={{ fontSize: 5, fontWeight: 700, color: dim ? 'fg.muted' : 'success.fg', fontFamily: 'mono', fontVariantNumeric: 'tabular-nums' }}>
-              {fmtUsd(usd)}
+              {formatUsd(usd)}
             </Text>
             <Text sx={{ color: 'fg.muted', fontSize: 1 }}>/day</Text>
           </Box>
-          <Text sx={{ fontSize: 0, color: 'fg.muted', fontFamily: 'mono' }}>{fmtMonthly(usd)}</Text>
+          <Text sx={{ fontSize: 0, color: 'fg.muted', fontFamily: 'mono' }}>{formatUsdMonthly(usd)}</Text>
         </Box>
         <CredibilityRing value={cred} dim={dim} />
       </Box>
@@ -855,7 +803,7 @@ function MinerListView({
                 sx={{
                   borderBottom: '1px solid',
                   borderColor: 'border.muted',
-                  bg: isMe ? 'rgba(94, 106, 210, 0.10)' : 'transparent',
+                  bg: isMe ? 'var(--accent-subtle)' : 'transparent',
                   '&:hover': { bg: 'canvas.default' },
                   '&:last-child': { borderBottom: 'none' },
                   opacity: dim ? 0.55 : 1,
@@ -897,7 +845,7 @@ function MinerListView({
                 </Box>
                 <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
                   <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: dim ? 'fg.muted' : 'success.fg' }}>
-                    {fmtUsd(num(m.usdPerDay))}
+                    {formatUsd(num(m.usdPerDay))}
                   </Text>
                 </Box>
                 <Box as="td" sx={{ p: 2, textAlign: 'center', verticalAlign: 'middle' }}>
@@ -918,7 +866,7 @@ function MinerListView({
                 </Box>
                 <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
                   <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', fontWeight: 700, color: 'fg.default' }}>
-                    {fmtPct(m.issueCredibility ?? m.credibility)}
+                    {formatPercent(m.issueCredibility ?? m.credibility, { scale: 100 })}
                   </Text>
                 </Box>
                 <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>

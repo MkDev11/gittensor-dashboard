@@ -2,10 +2,10 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ALL_REPOS, type RepoEntry } from '@/lib/repos';
+import { ALL_REPOS, type Sn74Repo } from '@/lib/repos';
 
 interface Sn74ReposResp {
-  repos: RepoEntry[];
+  repos: Sn74Repo[];
   source: 'live' | 'empty';
   fetched_at: string | null;
   count: number;
@@ -23,7 +23,7 @@ interface Sn74ReposResp {
  * cadence so newly discovered repos appear without a page reload.
  */
 export function useSn74Repos(): {
-  repos: RepoEntry[];
+  repos: Sn74Repo[];
   weights: Map<string, number>;
   isSuccess: boolean;
 } {

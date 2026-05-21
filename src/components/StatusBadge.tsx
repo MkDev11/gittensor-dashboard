@@ -12,8 +12,8 @@ import {
   SkipIcon,
   type Icon,
 } from '@primer/octicons-react';
-import type { IssueDto, PullDto } from '@/lib/api-types';
-import { pullStatus } from '@/lib/api-types';
+import type { Issue, Pull } from '@/types/entities';
+import { pullStatus } from '@/types/entities';
 
 const ISSUE_STYLE = {
   open: { bg: 'open.emphasis', fg: 'fg.onEmphasis', icon: IssueOpenedIcon, label: 'Open' },
@@ -45,20 +45,20 @@ export type EffectiveIssueState = 'open' | 'completed' | 'not_planned' | 'duplic
  *                 *without* a merged linked PR (Gittensor's risky/negative
  *                 category) and reopened/null-reason
  *
- * `mergedPRCount === null` means the related-PR map hasn't loaded yet. We
- * default to NOT claiming Completed in that case — a brief render as
- * "Closed" while data hydrates is preferable to a stale "Completed" badge
- * being wrong per the strict mining rule.
+ * `mergedPRCount === null` means the related-PR map hasn't loaded yet. In
+ * that transient detail-view state we trust GitHub's close reason so a
+ * completed issue doesn't briefly render as generic Closed. List/table views
+ * pass a concrete count from the server and keep the strict mining buckets.
  */
 export function effectiveIssueState(
-  issue: IssueDto,
+  issue: Issue,
   mergedPRCount: number | null,
 ): EffectiveIssueState {
   if (issue.state === 'open') return 'open';
   const reason = (issue.state_reason ?? '').toUpperCase();
   if (reason === 'NOT_PLANNED') return 'not_planned';
   if (reason === 'DUPLICATE') return 'duplicate';
-  if (reason === 'COMPLETED' && (mergedPRCount ?? 0) > 0) return 'completed';
+  if (reason === 'COMPLETED' && (mergedPRCount === null || mergedPRCount > 0)) return 'completed';
   return 'closed';
 }
 
@@ -66,13 +66,13 @@ export const IssueStatusBadge = React.memo(function IssueStatusBadge({
   issue,
   mergedPRCount = null,
 }: {
-  issue: IssueDto;
+  issue: Issue;
   mergedPRCount?: number | null;
 }) {
   return <Pill style={ISSUE_STYLE[effectiveIssueState(issue, mergedPRCount)]} />;
 });
 
-export const PullStatusBadge = React.memo(function PullStatusBadge({ pr }: { pr: PullDto }) {
+export const PullStatusBadge = React.memo(function PullStatusBadge({ pr }: { pr: Pull }) {
   const s = pullStatus(pr);
   return <Pill style={PR_STYLE[s]} />;
 });

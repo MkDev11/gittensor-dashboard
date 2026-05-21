@@ -1,28 +1,3 @@
-export interface RepoEntry {
-  fullName: string;
-  owner: string;
-  name: string;
-  /** Backward-compatible alias for the repo's SN74 emission_share. */
-  weight: number;
-  emissionShare: number;
-  issueDiscoveryShare: number;
-  labelMultipliers: Record<string, number>;
-  defaultLabelMultiplier: number;
-  trustedLabelPipeline: boolean;
-  additionalAcceptableBranches: string[];
-  fixedBaseScore: number | null;
-  maintainerCut: number;
-  eligibility: RepoEligibilityConfig;
-  scoring: RepoScoringConfig;
-  /**
-   * SN74's authoritative "this repo is inactive" timestamp. Set by the
-   * Gittensor validator team in master_repositories.json when a repo is
-   * deprioritised - miners earn no rewards from inactive repos. Absent on
-   * active repos.
-   */
-  inactiveAt: string | null;
-}
-
 export interface RepoEligibilityConfig {
   minValidMergedPrs: number | null;
   minCredibility: number | null;
@@ -54,6 +29,37 @@ export interface RepoScoringConfig {
   timeDecay: RepoTimeDecayConfig;
 }
 
+export interface RepoEntry {
+  fullName: string;
+  owner: string;
+  name: string;
+  /** Backward-compatible alias for the repo's SN74 emission_share. */
+  weight: number;
+  emissionShare: number;
+  issueDiscoveryShare: number;
+  maintainerCut: number;
+  fixedBaseScore: number | null;
+  labelMultipliers: Record<string, number>;
+  defaultLabelMultiplier: number;
+  trustedLabelPipeline: boolean;
+  additionalAcceptableBranches: string[];
+  eligibility: RepoEligibilityConfig;
+  scoring: RepoScoringConfig;
+  excessivePrPenaltyThreshold: number | null;
+  openIssueSpamThreshold: number | null;
+  minCredibility: number | null;
+  minIssueCredibility: number | null;
+  /**
+   * SN74's authoritative "this repo is inactive" timestamp. Set by the
+   * Gittensor validator team in master_repositories.json when a repo is
+   * deprioritised - miners earn no rewards from inactive repos. Absent on
+   * active repos.
+   */
+  inactiveAt: string | null;
+}
+
+export type Sn74Repo = RepoEntry;
+
 /**
  * Empty by design - the bundled `master_repositories.json` is no longer
  * consulted. Live data flows from `/api/sn74-repos` (server-side) into
@@ -61,7 +67,7 @@ export interface RepoScoringConfig {
  * a synchronous initial value now just gets an empty list until the live
  * fetch lands; render an empty/loading state accordingly.
  */
-export const ALL_REPOS: RepoEntry[] = [];
+export const ALL_REPOS: Sn74Repo[] = [];
 
 const EMPTY_ELIGIBILITY: RepoEligibilityConfig = {
   minValidMergedPrs: null,
@@ -101,14 +107,18 @@ export function createRepoEntry(fullName: string, weight = 0, inactiveAt: string
     weight,
     emissionShare: weight,
     issueDiscoveryShare: 0.5,
+    maintainerCut: 0,
+    fixedBaseScore: null,
     labelMultipliers: {},
     defaultLabelMultiplier: 1,
     trustedLabelPipeline: false,
     additionalAcceptableBranches: [],
-    fixedBaseScore: null,
-    maintainerCut: 0,
     eligibility: { ...EMPTY_ELIGIBILITY },
     scoring: { ...DEFAULT_SCORING, timeDecay: { ...DEFAULT_SCORING.timeDecay } },
+    excessivePrPenaltyThreshold: null,
+    openIssueSpamThreshold: null,
+    minCredibility: null,
+    minIssueCredibility: null,
     inactiveAt,
   };
 }

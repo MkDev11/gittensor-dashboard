@@ -2,8 +2,21 @@
 // imported by client components. The `repos.ts` sibling stays as the
 // client-safe type/helper surface; the bundled JSON snapshot it ships is
 // intentionally not consulted here: live is the sole source of truth.
-import { DEFAULT_SCORING, type RepoEligibilityConfig, type RepoEntry, type RepoScoringConfig, type RepoTimeDecayConfig } from './repos';
+import {
+  DEFAULT_SCORING,
+  type RepoEligibilityConfig,
+  type RepoEntry,
+  type RepoScoringConfig,
+  type RepoTimeDecayConfig,
+  type Sn74Repo,
+} from './repos';
 import { getDb } from './db';
+import {
+  DEFAULT_EXCESSIVE_PR_PENALTY_THRESHOLD,
+  DEFAULT_MIN_CREDIBILITY,
+  DEFAULT_MIN_ISSUE_CREDIBILITY,
+  DEFAULT_OPEN_ISSUE_SPAM_THRESHOLD,
+} from './gittensor-policy';
 
 // Live source. We poll entrius/gittensor:main/master_repositories.json every
 // 5 minutes. Per-poll semantics:
@@ -47,21 +60,24 @@ interface MasterRepoScoring {
   time_decay?: MasterRepoTimeDecay | null;
 }
 
+// Upstream replaced `weight` with `emission_share` plus scoring knobs. The hub
+// keeps `weight` as a UI/backward-compatible alias and also surfaces the
+// detailed scoring policy for dashboard explanations.
 interface MasterRepoEntry {
-  emission_share?: number;
-  issue_discovery_share?: number;
+  emission_share?: number | string | null;
+  issue_discovery_share?: number | string | null;
+  maintainer_cut?: number | string | null;
   eligibility_mode?: boolean;
-  eligibility?: MasterRepoEligibility;
+  eligibility?: MasterRepoEligibility | null;
   scoring?: MasterRepoScoring | null;
-  fixed_base_score?: number | null;
-  label_multipliers?: Record<string, number> | null;
-  default_label_multiplier?: number;
-  trusted_label_pipeline?: boolean;
+  fixed_base_score?: number | string | null;
+  label_multipliers?: Record<string, number | string> | null;
+  default_label_multiplier?: number | string | null;
+  trusted_label_pipeline?: boolean | null;
   additional_acceptable_branches?: string[] | null;
-  maintainer_cut?: number;
   // Legacy field: older snapshots used this; keep as fallback in case the
   // upstream schema regresses or a mirror still serves the old shape.
-  weight?: number;
+  weight?: number | string | null;
   inactive_at?: string | null;
 }
 
@@ -92,7 +108,7 @@ function nullableNum(value: unknown): number | null {
 }
 
 function stringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+  return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string' && v.trim() !== '') : [];
 }
 
 function normalizeEligibility(raw: MasterRepoEligibility | null | undefined): RepoEligibilityConfig {
@@ -138,20 +154,18 @@ function normalizeLabelMultipliers(raw: MasterRepoEntry['label_multipliers']): R
   const out: Record<string, number> = {};
   for (const [label, multiplier] of Object.entries(raw)) {
     const parsed = num(multiplier, Number.NaN);
-    if (Number.isFinite(parsed)) out[label] = parsed;
+    if (label.trim() && Number.isFinite(parsed)) out[label] = parsed;
   }
   return out;
 }
 
 function entryWeight(ent: MasterRepoEntry): number {
-  if (typeof ent.emission_share === 'number') return ent.emission_share;
-  if (typeof ent.weight === 'number') return ent.weight;
-  return 0;
+  return num(ent.emission_share ?? ent.weight, 0);
 }
 
 function entryInactiveAt(ent: MasterRepoEntry): string | null {
   // New schema: eligibility_mode=false marks an explicitly ineligible repo.
-  // We don't have a real timestamp to attach, but the dashboard only checks
+  // We don't have a real timestamp to attach, but consumers only check
   // truthiness on inactiveAt, so a synthetic marker is enough.
   if (ent.eligibility_mode === false) return ent.inactive_at ?? 'ineligible';
   return ent.inactive_at ?? null;
@@ -166,31 +180,40 @@ function baseRepoEntry(fullName: string, weight: number): RepoEntry {
     weight,
     emissionShare: weight,
     issueDiscoveryShare: DEFAULT_ISSUE_DISCOVERY_SHARE,
+    maintainerCut: 0,
+    fixedBaseScore: null,
     labelMultipliers: {},
     defaultLabelMultiplier: 1,
     trustedLabelPipeline: false,
     additionalAcceptableBranches: [],
-    fixedBaseScore: null,
-    maintainerCut: 0,
     eligibility: { ...EMPTY_ELIGIBILITY },
     scoring: { ...DEFAULT_SCORING, timeDecay: { ...DEFAULT_SCORING.timeDecay } },
+    excessivePrPenaltyThreshold: DEFAULT_EXCESSIVE_PR_PENALTY_THRESHOLD,
+    openIssueSpamThreshold: DEFAULT_OPEN_ISSUE_SPAM_THRESHOLD,
+    minCredibility: DEFAULT_MIN_CREDIBILITY,
+    minIssueCredibility: DEFAULT_MIN_ISSUE_CREDIBILITY,
     inactiveAt: null,
   };
 }
 
 function buildRepoEntry(fullName: string, ent: MasterRepoEntry): RepoEntry {
   const weight = entryWeight(ent);
+  const eligibility = normalizeEligibility(ent.eligibility);
   return {
     ...baseRepoEntry(fullName, weight),
     issueDiscoveryShare: num(ent.issue_discovery_share, DEFAULT_ISSUE_DISCOVERY_SHARE),
+    maintainerCut: num(ent.maintainer_cut, 0),
+    fixedBaseScore: nullableNum(ent.fixed_base_score),
     labelMultipliers: normalizeLabelMultipliers(ent.label_multipliers),
     defaultLabelMultiplier: num(ent.default_label_multiplier, 1),
     trustedLabelPipeline: Boolean(ent.trusted_label_pipeline),
     additionalAcceptableBranches: stringList(ent.additional_acceptable_branches),
-    fixedBaseScore: nullableNum(ent.fixed_base_score),
-    maintainerCut: num(ent.maintainer_cut, 0),
-    eligibility: normalizeEligibility(ent.eligibility),
+    eligibility,
     scoring: normalizeScoring(ent.scoring),
+    excessivePrPenaltyThreshold: eligibility.excessivePrPenaltyBaseThreshold ?? DEFAULT_EXCESSIVE_PR_PENALTY_THRESHOLD,
+    openIssueSpamThreshold: eligibility.openIssueSpamBaseThreshold ?? DEFAULT_OPEN_ISSUE_SPAM_THRESHOLD,
+    minCredibility: eligibility.minCredibility ?? DEFAULT_MIN_CREDIBILITY,
+    minIssueCredibility: eligibility.minIssueCredibility ?? DEFAULT_MIN_ISSUE_CREDIBILITY,
     inactiveAt: entryInactiveAt(ent),
   };
 }
@@ -222,9 +245,6 @@ const liveByLc = new Map<string, RepoEntry>();
 const liveConfigJsonByLc = new Map<string, string>();
 
 async function refreshLiveIfStale(): Promise<void> {
-  // Honor the 5-minute window after a successful fetch, and a shorter
-  // backoff after a failure: otherwise a degraded upstream would see every
-  // incoming request kick off a new fetch.
   const sinceSuccess = Date.now() - lastFetchedAt;
   const sinceAttempt = Date.now() - lastAttemptAt;
   if (lastFetchedAt > 0 && sinceSuccess < REFRESH_MS) return;
@@ -239,9 +259,6 @@ async function refreshLiveIfStale(): Promise<void> {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = (await r.json()) as Record<string, MasterRepoEntry>;
 
-      // Rebuild the in-memory mirror from scratch every poll so dropped
-      // entries vanish from the inactiveAt/config lookup. GitHub repo names
-      // are case-insensitive, so keep a lower-cased lookup key.
       liveByLc.clear();
       liveConfigJsonByLc.clear();
       for (const [fn, ent] of Object.entries(data)) {
@@ -268,7 +285,6 @@ async function refreshLiveIfStale(): Promise<void> {
       let updated = 0;
       let added = 0;
       const tx = db.transaction(() => {
-        // Existing repos: set to live weight/config, or 0 if upstream dropped them.
         for (const e of existing) {
           const key = e.full_name.toLowerCase();
           const live = liveByLc.get(key);
@@ -283,7 +299,6 @@ async function refreshLiveIfStale(): Promise<void> {
             zeroed += 1;
           }
         }
-        // Brand-new live entries: add with their live weight/config.
         for (const [key, live] of liveByLc.entries()) {
           if (existingLc.has(key)) continue;
           upsert.run(live.fullName, live.weight, now, liveConfigJsonByLc.get(key) ?? null);
@@ -299,7 +314,6 @@ async function refreshLiveIfStale(): Promise<void> {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[repos] live fetch failed (${msg})`);
     } finally {
-      // Stamp the attempt regardless of outcome so the failure backoff engages.
       lastAttemptAt = Date.now();
       inFlight = null;
     }
@@ -307,20 +321,14 @@ async function refreshLiveIfStale(): Promise<void> {
   return inFlight;
 }
 
-function readAll(): RepoEntry[] {
+function readAll(): Sn74Repo[] {
   try {
     const rows = getDb()
       .prepare('SELECT full_name, weight, config_json FROM repo_weights')
       .all() as Array<{ full_name: string; weight: number; config_json: string | null }>;
-    // Cold-start floor: before the first live fetch resolves, `liveByLc` is
-    // empty even though the DB may have a good cached snapshot from a previous
-    // run. Serve those rows with their stored config if present.
     if (lastFetchedAt === 0) {
       return rows.map((r) => storedRepoEntry(r.full_name, r.weight, r.config_json));
     }
-    // Steady state: surface only rows present in the CURRENT live snapshot.
-    // Historical rows stay in the DB for cache/audit, but the displayed list
-    // mirrors live exactly.
     return rows
       .filter((r) => liveByLc.has(r.full_name.toLowerCase()))
       .map((r) => liveByLc.get(r.full_name.toLowerCase()) ?? storedRepoEntry(r.full_name, r.weight, r.config_json));
@@ -329,26 +337,34 @@ function readAll(): RepoEntry[] {
   }
 }
 
-function buildList(): RepoEntry[] {
+function buildList(): Sn74Repo[] {
   return readAll().sort((a, b) => b.weight - a.weight);
 }
 
-export function getLiveReposServer(): RepoEntry[] {
+export function getLiveReposServer(): Sn74Repo[] {
   void refreshLiveIfStale();
   return buildList();
 }
 
 export async function getLiveReposAsyncServer(): Promise<{
-  repos: RepoEntry[];
+  repos: Sn74Repo[];
   source: 'live' | 'empty';
   fetchedAt: number;
 }> {
   await refreshLiveIfStale();
   return {
-    // `empty` means we haven't completed a live fetch yet. The DB may still
-    // have a previous run's snapshot, but we cannot vouch for its freshness.
     repos: buildList(),
     source: lastFetchedAt > 0 ? 'live' : 'empty',
     fetchedAt: lastFetchedAt,
   };
+}
+
+export async function getIssueDiscoveryDisabledReposAsyncServer(repoFullNames: Iterable<string>): Promise<Set<string>> {
+  await refreshLiveIfStale();
+  const disabled = new Set<string>();
+  for (const repoFullName of repoFullNames) {
+    const live = liveByLc.get(repoFullName.toLowerCase());
+    if (live?.issueDiscoveryShare === 0) disabled.add(repoFullName.toLowerCase());
+  }
+  return disabled;
 }

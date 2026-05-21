@@ -43,6 +43,7 @@ export default function PollerStatusBar() {
   if (!data) {
     return (
       <Box
+        data-poller-status-bar=""
         sx={{
           bg: 'var(--bg-subtle)',
           borderTop: '1px solid',
@@ -80,6 +81,7 @@ export default function PollerStatusBar() {
 
   return (
     <Box
+      data-poller-status-bar=""
       sx={{
         // In-flow as the last child of <main> so it sits right after the page
         // content (no floating, no gap). Spans the content column since <main>

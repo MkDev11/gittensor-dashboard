@@ -131,7 +131,7 @@ export default function AppSidebar() {
     >
       {/* Brand */}
       <Link
-        href="/"
+        href="/dashboard"
         prefetch={false}
         style={{
           display: 'flex',

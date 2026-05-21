@@ -5,12 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useToast } from '@/lib/toast';
 import { useSn74Repos } from '@/lib/use-sn74-repos';
-import type { IssueDto } from '@/lib/api-types';
+import type { Issue } from '@/types/entities';
 
 interface IssuesResp {
   count: number;
   repo_count: number;
-  issues: IssueDto[];
+  issues: Issue[];
 }
 
 interface UserReposResp {

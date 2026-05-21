@@ -22,46 +22,9 @@ import {
   ArrowUpIcon,
 } from '@primer/octicons-react';
 import { TableRowsSkeleton, CardGridSkeleton } from '@/components/Skeleton';
-import { useTrackedRepos } from '@/lib/tracked-repos';
-import { formatRelativeTime } from '@/lib/format';
-
-interface GtRepo {
-  fullName: string;
-  owner: string;
-  name: string;
-  weight: number;
-  isActive: boolean;
-  inactiveAt: string | null;
-  totalScore: number;
-  totalPrCount: number;
-  mergedPrCount: number;
-  contributorCount: number;
-  collateralStaked: number;
-  prsThisWeek: number;
-  prsLastWeek: number;
-  trendingPct: number;
-  lastPrAt: string | null;
-}
-
-interface GtPrSummary {
-  pullRequestNumber: number;
-  title: string;
-  repository: string;
-  author: string;
-  prCreatedAt: string;
-  prState: string;
-  mergedAt: string | null;
-}
-
-interface GtReposResp {
-  fetched_at: number;
-  source?: string;
-  count: number;
-  activeCount: number;
-  inactiveCount: number;
-  repos: GtRepo[];
-  recentPrs: GtPrSummary[];
-}
+import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
+import { formatRelativeTime, formatNumber, formatCount, formatPercent } from '@/lib/format';
+import type { GtRepo, GtPrSummary, GtReposResponse } from '@/types/entities';
 
 type SortKey = 'weight' | 'totalScore' | 'mergedPrCount' | 'contributorCount' | 'fullName';
 type StatusFilter = 'all' | 'active' | 'inactive';
@@ -77,24 +40,6 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: 'fullName', label: 'Repository' },
 ];
 
-function fmtNum(n: number, digits = 2): string {
-  if (n === 0) return '-';
-  if (Math.abs(n) >= 1000) return n.toFixed(0);
-  return n.toFixed(digits);
-}
-
-function fmtCount(n: number): string {
-  if (!n) return '-';
-  return n.toLocaleString();
-}
-
-function fmtPct(n: number): string {
-  if (!Number.isFinite(n) || n === 0) return '0%';
-  const sign = n > 0 ? '+' : '';
-  if (Math.abs(n) >= 100) return `${sign}${n.toFixed(0)}%`;
-  return `${sign}${n.toFixed(0)}%`;
-}
-
 function avatarUrl(owner: string): string {
   return `https://github.com/${owner}.png?size=48`;
 }
@@ -109,7 +54,7 @@ export default function RepositoriesPage() {
   const [pageSize, setPageSize] = useState<number>(10);
   const [page, setPage] = useState<number>(1);
 
-  const { data, isLoading, isError } = useQuery<GtReposResp>({
+  const { data, isLoading, isError } = useQuery<GtReposResponse>({
     queryKey: ['gt-repositories'],
     queryFn: async () => {
       const r = await fetch('/api/gt/repositories');
@@ -565,7 +510,7 @@ function PctBadge({ pct }: { pct: number }) {
         fontWeight: 700,
       }}
     >
-      {fmtPct(pct)}
+      {formatPercent(pct, { signed: true })}
     </Box>
   );
 }
@@ -804,7 +749,7 @@ function RepoTable({
         <Box as="tbody">
           {rows.map((r, i) => {
             const rank = startRank + i;
-            const isTracked = tracked.has(r.fullName);
+            const isTracked = repoIsTracked(tracked, r.fullName);
             return (
               <Box
                 as="tr"
@@ -872,17 +817,17 @@ function RepoTable({
                 </Box>
                 <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
                   <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', color: r.totalScore > 0 ? 'fg.default' : 'fg.muted' }}>
-                    {fmtNum(r.totalScore)}
+                    {formatNumber(r.totalScore)}
                   </Text>
                 </Box>
                 <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
                   <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', color: r.mergedPrCount > 0 ? 'fg.default' : 'fg.muted' }}>
-                    {fmtCount(r.mergedPrCount)}
+                    {formatCount(r.mergedPrCount)}
                   </Text>
                 </Box>
                 <Box as="td" sx={{ p: 2, textAlign: 'right', verticalAlign: 'middle' }}>
                   <Text sx={{ fontFamily: 'mono', fontVariantNumeric: 'tabular-nums', color: r.contributorCount > 0 ? 'fg.default' : 'fg.muted' }}>
-                    {fmtCount(r.contributorCount)}
+                    {formatCount(r.contributorCount)}
                   </Text>
                 </Box>
                 <Box as="td" sx={{ p: 2, textAlign: 'center', verticalAlign: 'middle' }}>
@@ -963,7 +908,7 @@ function RepoCards({
               key={r.fullName}
               repo={r}
               rank={startRank + i}
-              isTracked={tracked.has(r.fullName)}
+              isTracked={repoIsTracked(tracked, r.fullName)}
               onToggleTrack={() => onToggleTrack(r.fullName)}
             />
           ))}
@@ -1089,9 +1034,9 @@ function RepoGridCard({
           borderColor: 'border.muted',
         }}
       >
-        <GridStat label="TOTAL SCORE" value={fmtNum(repo.totalScore)} muted={repo.totalScore === 0} />
-        <GridStat label="PRS" value={fmtCount(repo.mergedPrCount)} muted={repo.mergedPrCount === 0} />
-        <GridStat label="CONTRIBUTORS" value={fmtCount(repo.contributorCount)} muted={repo.contributorCount === 0} />
+        <GridStat label="TOTAL SCORE" value={formatNumber(repo.totalScore)} muted={repo.totalScore === 0} />
+        <GridStat label="PRS" value={formatCount(repo.mergedPrCount)} muted={repo.mergedPrCount === 0} />
+        <GridStat label="CONTRIBUTORS" value={formatCount(repo.contributorCount)} muted={repo.contributorCount === 0} />
       </Box>
     </Box>
   );

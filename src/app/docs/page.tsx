@@ -6,14 +6,15 @@ import React, { useState, useEffect, useRef } from 'react';
 import { PageLayout, Heading, Text, Box, Label } from '@primer/react';
 import {
   BookIcon,
-  TelescopeIcon,
+  ChecklistIcon,
+  GlobeIcon,
   RepoIcon,
+  StackIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
   PersonIcon,
   GearIcon,
   BellIcon,
-  CheckCircleIcon,
   EyeIcon,
 } from '@primer/octicons-react';
 
@@ -25,8 +26,9 @@ interface Section {
 
 const SECTIONS: Section[] = [
   { id: 'overview', title: 'Overview', icon: <BookIcon size={16} /> },
-  { id: 'explorer', title: 'Explorer', icon: <TelescopeIcon size={16} /> },
-  { id: 'repositories', title: 'Repositories', icon: <RepoIcon size={16} /> },
+  { id: 'dashboard', title: 'Dashboard', icon: <ChecklistIcon size={16} /> },
+  { id: 'explorer', title: 'Explorer', icon: <GlobeIcon size={16} /> },
+  { id: 'repositories', title: 'Repositories', icon: <StackIcon size={16} /> },
   { id: 'issues', title: 'Issues', icon: <IssueOpenedIcon size={16} /> },
   { id: 'pulls', title: 'Pull Requests', icon: <GitPullRequestIcon size={16} /> },
   { id: 'my-prs', title: 'My PRs', icon: <PersonIcon size={16} /> },
@@ -102,10 +104,10 @@ export default function DocsPage() {
           <Box sx={{ flexShrink: 0, display: 'inline-flex' }}>
             <BookIcon size={20} />
           </Box>
-          <Heading sx={{ fontSize: [3, null, 4], lineHeight: 1.2 }}>Dashboard Documentation</Heading>
+          <Heading sx={{ fontSize: [3, null, 4], lineHeight: 1.2 }}>Gittensor Hub Documentation</Heading>
         </Box>
         <Text sx={{ color: 'fg.muted', display: 'block', maxWidth: 720 }}>
-          Everything this dashboard does — features, conventions, and how scoring works.
+          How the dashboard, explorer, pipelines, and SN74 scoring views work.
         </Text>
       </PageLayout.Header>
       <PageLayout.Content>
@@ -186,26 +188,81 @@ export default function DocsPage() {
           <Box sx={{ flex: 1, minWidth: 0, width: '100%', lineHeight: 1.65, fontSize: 1, color: 'fg.default' }}>
             <Article id="overview" title="Overview">
               <P>
-                <strong>Gittensor Hub</strong> is a real-time monitoring and decision tool for miners on{' '}
-                <strong>Bittensor Subnet 74 (SN74)</strong> — a subnet that rewards merged GitHub PRs in whitelisted
-                open-source repositories.
+                <strong>Gittensor Hub</strong> is a daily operating workspace for miners, validators, and repository
+                owners on <strong>Bittensor Subnet 74 (SN74)</strong>. It combines live Gittensor score data, local
+                GitHub issue/PR cache data, and the SN74 repository registry into one dashboard.
               </P>
               <P>
-                The dashboard polls GitHub for issues and pull requests across all 200+ SN74 whitelisted repos plus any
-                custom repos you add, caches them locally, and surfaces the data through several interconnected views.
+                <Code>/</Code> opens the <strong>Dashboard</strong>. <Code>/explorer</Code> is the repo drill-down view.
+                Global pages for miners, repositories, issues, pull requests, and your PRs are available from the
+                sidebar or mobile bottom navigation.
               </P>
               <H3>Tech stack</H3>
               <Ul>
                 <Li>Next.js 15 (App Router) + TypeScript + Primer React</Li>
                 <Li>SQLite cache for issues / PRs / linked-issue map</Li>
                 <Li>TanStack Query for client-side polling and cache</Li>
-                <Li>Octokit for GitHub REST + raw fetch for SN74 whitelist auto-sync</Li>
+                <Li>Gittensor live APIs for repo, PR, and miner score data</Li>
+                <Li>GitHub REST polling for issue, PR, and linked-issue metadata</Li>
+              </Ul>
+            </Article>
+
+            <Article id="dashboard" title="Dashboard">
+              <P>
+                <Code>/dashboard</Code> is the default landing page. It is designed for information worth checking
+                every day: network activity, work waiting for validation, best scored work, changing repo momentum,
+                and current PR/issue queues.
+              </P>
+              <H3>Time range</H3>
+              <Ul>
+                <Li><strong>24H</strong> and <strong>7D</strong> use fixed rolling windows.</Li>
+                <Li><strong>30D</strong> follows each repo's configured Gittensor PR lookback window when available; otherwise it uses the current SN74 default of 30 days.</Li>
+                <Li>The freshness chips show when repo config, issue/PR cache data, and miner score data last updated.</Li>
+              </Ul>
+              <H3>Top cards</H3>
+              <Ul>
+                <Li><strong>Network Activity</strong>: PR and issue lifecycle events in the selected range.</Li>
+                <Li><strong>OSS Contributions</strong>: official scored PRs, plus merged PRs awaiting Gittensor validation.</Li>
+                <Li><strong>Discoveries</strong>: issues resolved through linked solver PRs or real issue-discovery scoring.</Li>
+                <Li><strong>OSS Score</strong>: sum, average, and top official PR scores in the selected range.</Li>
+                <Li><strong>Active Contributors</strong>: unique GitHub actors plus current open PR/issue queue size.</Li>
+              </Ul>
+              <H3>Best Work</H3>
+              <P>
+                Best Work is ranked by modeled <strong>reward share</strong>, not raw PR score. The dashboard mirrors the
+                Gittensor allocator at a UI level:
+              </P>
+              <Pre>{`PR share = PR score / repo total scored PRs
+reward share = PR share x effective repo PR reward pool`}</Pre>
+              <Ul>
+                <Li>The repo slice starts from <Code>emission_share x 90%</Code>.</Li>
+                <Li><Code>maintainer_cut</Code> is subtracted only when registered maintainer miners exist for that repo.</Li>
+                <Li>The remaining slice is split by <Code>issue_discovery_share</Code>.</Li>
+                <Li>If only PRs or only issue discovery has non-zero scores in a repo, that repo's other sub-pool spills to the active side.</Li>
+              </Ul>
+              <H3>Pull Request Pipeline</H3>
+              <Ul>
+                <Li><strong>Drafting</strong>: draft PRs.</Li>
+                <Li><strong>Submitted</strong>: open non-draft PRs.</Li>
+                <Li><strong>Closed</strong>: closed and not merged.</Li>
+                <Li><strong>Merged</strong>: merged on GitHub but not yet validated/scored by Gittensor.</Li>
+                <Li><strong>Scored</strong>: PRs with official Gittensor score data, including score <Code>0</Code>.</Li>
+                <Li>Repo chips filter only the PR pipeline. Multi-select is supported; <strong>All</strong> clears the filter.</Li>
+              </Ul>
+              <H3>Issue Pipeline</H3>
+              <Ul>
+                <Li><strong>Opened</strong>: open GitHub issues.</Li>
+                <Li><strong>Closed</strong>: not validation-ready, not planned, or completed without a rewardable merged/scored linked PR.</Li>
+                <Li><strong>Completed</strong>: completed issue with a rewardable merged linked PR waiting for Gittensor validation.</Li>
+                <Li><strong>Scored</strong>: issue has a linked solver PR with official Gittensor score, or real <Code>discovery_earned_score</Code>.</Li>
+                <Li>A <strong>Discovery</strong> score badge means real issue-discovery score data is present. The compact warning icon means issue discovery is enabled for the repo but the issue author appears ineligible or unknown.</Li>
+                <Li>Repo chips filter only the issue pipeline, independently from the PR pipeline.</Li>
               </Ul>
             </Article>
 
             <Article id="explorer" title="Explorer">
               <P>
-                The default landing page (<Code>/</Code>). Three-pane layout:
+                <Code>/explorer</Code> is the repo drill-down view. Three-pane layout:
               </P>
               <Ul>
                 <Li>
@@ -216,7 +273,8 @@ export default function DocsPage() {
                 <Li>
                   <strong>Middle pane</strong> — Issues / Pull Requests tabs for the selected repo. Each table shows
                   state badges, author with avatar, opened/updated/closed timestamps (recent items in bold green),
-                  and related-PR count for issues.
+                  related-PR count for issues, linked issue chips for pull requests, and Gittensor PR scores where
+                  available. Clicking a linked issue opens its detail view directly.
                 </Li>
                 <Li>
                   <strong>Right rail (when open)</strong> — issue/PR content viewer. Slides in from the right and
@@ -232,7 +290,7 @@ export default function DocsPage() {
                 per-repository statistics:
               </P>
               <Ul>
-                <Li><strong>Weight</strong>: SN74's payout multiplier (0–1)</Li>
+                <Li><strong>Weight / emission share</strong>: the repo's configured SN74 reward allocation share (0-1)</Li>
                 <Li><strong>Band</strong>: Flagship (≥0.5), High (0.3–0.5), Mid-high (0.15–0.3), Standard (0.05–0.15), Low</Li>
                 <Li><strong>Issues / Open</strong>: total cached issues + currently open</Li>
                 <Li><strong>PRs / PR Open / Merged</strong>: total / open / merged pulls</Li>
@@ -249,29 +307,38 @@ export default function DocsPage() {
 
             <Article id="issues" title="Issues page">
               <P>
-                <Code>/issues</Code> — global aggregated view of every cached issue across every tracked repo. Sortable
-                on Repository, Weight, Comments, Opened, Closed.
+                <Code>/issues</Code> — global server-backed issue feed across current SN74 and custom repositories.
+                Results are fetched a page at a time, with compact pagination and configurable rows per page.
               </P>
               <Ul>
+                <Li><strong>Search</strong>: filter by title, repository, issue number, or author</Li>
                 <Li><strong>State filter</strong>: All / Open / Completed / Not planned / Closed (other)</Li>
                 <Li><strong>Author filter</strong>: searchable combobox with avatars + per-author counts</Li>
-                <Li><strong>Closed filter</strong>: All / Closed only / Still open</Li>
-                <Li><strong>Tracked-only</strong> toggle: limits to repos you've starred</Li>
-                <Li><strong>Lazy rendering</strong>: 50 rows initial, more load as you scroll (smoother on huge lists)</Li>
+                <Li><strong>Tracked only</strong>: limits results to repos you've starred; row stars update that watchlist</Li>
+                <Li><strong>Linked PRs</strong>: PR count chips open the related pull requests for each issue</Li>
+                <Li><strong>Author activity</strong>: click an author to open their repo-scoped activity sidebar</Li>
+                <Li><strong>Sorting</strong>: server-backed sorting on Repository, Weight, Comments, Opened, and Closed</Li>
               </Ul>
             </Article>
 
             <Article id="pulls" title="Pull Requests page">
               <P>
-                <Code>/pulls</Code> — global PR feed with linked-issue parsing. Each PR's body is scanned for{' '}
-                <Code>Fixes #N</Code> / <Code>Closes owner/repo#N</Code> patterns, and the linked issues appear inline.
-                Click a linked issue chip to jump to that issue.
+                <Code>/pulls</Code> — global server-backed PR feed across current SN74 and custom repositories. Results
+                are fetched a page at a time, with the same compact pagination and row-count controls used by the Issues
+                view.
               </P>
               <P>
-                Same filter set as Issues plus a <strong>My PRs only</strong> checkbox. The <strong>Author</strong> and{' '}
-                <strong>Merged / Closed</strong> column headers contain inline filter dropdowns — small blue dot
-                indicates a filter is active.
+                Use search, state, author, <strong>Tracked only</strong>, and <strong>My PRs only</strong> filters to
+                narrow the feed without loading the full cache into the browser. Star controls on each row update the
+                tracked repo set used by the filter.
               </P>
+              <Ul>
+                <Li><strong>Pagination</strong>: page controls at the table edge with configurable rows per page</Li>
+                <Li><strong>Author activity</strong>: click an author to open their repo-scoped activity sidebar with latest PRs and issues</Li>
+                <Li><strong>Score</strong>: Gittensor-backed PR score column; open PRs show potential and collateral values, merged PRs show the final score</Li>
+                <Li><strong>Linked issues</strong>: issue chips mirror Explorer and open the issue detail view directly</Li>
+                <Li><strong>Sorting</strong>: server-backed sort controls keep large PR sets responsive</Li>
+              </Ul>
             </Article>
 
             <Article id="my-prs" title="My PRs">
@@ -323,7 +390,7 @@ export default function DocsPage() {
                 <Li><strong>Issue / PR content display</strong>: modal / side panel / inline accordion</Li>
                 <Li><strong>Render markdown</strong>: on/off for issue & PR bodies</Li>
                 <Li><strong>Default issue state filter</strong> and <strong>repo sort order</strong></Li>
-                <Li><strong>Page size</strong>: 10/25/50/100/All for paginated tables</Li>
+                <Li><strong>Page size</strong>: 10/25/50/100 for paginated tables</Li>
                 <Li><strong>Notifications</strong>: enable/disable + UI tick interval</Li>
               </Ul>
             </Article>

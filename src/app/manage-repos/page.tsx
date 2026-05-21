@@ -11,13 +11,7 @@ import { TableRowsSkeleton } from '@/components/Skeleton';
 import SearchInput from '@/components/SearchInput';
 import { formatRelativeTime } from '@/lib/format';
 import { useSession } from '@/lib/settings';
-
-interface UserRepo {
-  full_name: string;
-  weight: number;
-  notes: string | null;
-  added_at: string;
-}
+import type { UserRepo } from '@/types/entities';
 
 export default function ManageReposPage() {
   const qc = useQueryClient();

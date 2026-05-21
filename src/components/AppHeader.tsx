@@ -95,7 +95,7 @@ export default function AppHeader() {
       <Box
         as="header"
         sx={{
-          bg: 'var(--bg-subtle)',
+          bg: 'var(--header-bg)',
           borderBottom: '1px solid',
           borderColor: 'var(--border-default)',
           minHeight: ['96px', null, '64px', null, '64px'],
@@ -116,7 +116,7 @@ export default function AppHeader() {
         }}
       >
         <Box sx={{ gridArea: 'brand', minWidth: 0, display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Link href="/" prefetch={false} style={{ minWidth: 0, textDecoration: 'none' }}>
+          <Link href="/dashboard" prefetch={false} style={{ minWidth: 0, textDecoration: 'none' }}>
             <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2, minWidth: 0, color: 'var(--fg-default)' }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/gt-logo.png" alt="Gittensor Hub" width={28} height={28} style={{ display: 'block', flexShrink: 0 }} />

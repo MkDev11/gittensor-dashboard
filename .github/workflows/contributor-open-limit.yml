@@ -1,0 +1,50 @@
+name: Contributor open item limit
+
+on:
+  issues:
+    types: [opened, reopened]
+  pull_request_target:
+    types: [opened, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  enforce-limit:
+    runs-on: ubuntu-latest
+    env:
+      LIMIT: "2"
+      TARGET_REPO: ${{ github.repository }}
+      ITEM_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+      AUTHOR: ${{ github.event.issue.user.login || github.event.pull_request.user.login }}
+    steps:
+      - name: Close contributor's excess open items
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          items="$(gh api "repos/$TARGET_REPO/issues?state=open&creator=$AUTHOR&sort=created&direction=asc&per_page=100")"
+
+          position="$(jq --argjson n "$ITEM_NUMBER" '[.[] | select(.user.login == env.AUTHOR)] | to_entries[] | select(.value.number == $n) | .key + 1' <<< "$items")"
+          total="$(jq '[.[] | select(.user.login == env.AUTHOR)] | length' <<< "$items")"
+
+          if [ -z "$position" ] || [ "$position" -le "$LIMIT" ]; then
+            echo "$AUTHOR has $total open items; current item position is ${position:-unknown}. Nothing to close."
+            exit 0
+          fi
+
+          body="Thanks for contributing. Gittensor policy allows at most 2 open issues or pull requests per contributor at a time.
+
+          @$AUTHOR currently has $total open issues/PRs, and this is open item #$position. Please finish or close one of the older open items before opening another."
+
+          gh issue comment "$ITEM_NUMBER" --repo "$TARGET_REPO" --body "$body"
+
+          is_pr="$(jq --argjson n "$ITEM_NUMBER" '.[] | select(.number == $n) | has("pull_request")' <<< "$items")"
+          if [ "$is_pr" = "true" ]; then
+            gh pr close "$ITEM_NUMBER" --repo "$TARGET_REPO"
+          else
+            gh issue close "$ITEM_NUMBER" --repo "$TARGET_REPO" --reason "not planned"
+          fi
