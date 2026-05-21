@@ -6,6 +6,7 @@ import StyledComponentsRegistry from '@/lib/StyledRegistry';
 import Providers from '@/components/Providers';
 import AppShell from '@/components/AppShell';
 import BackgroundWatchers from '@/components/BackgroundWatchers';
+import PollerStatusBar from '@/components/PollerStatusBar';
 import TopProgressBar from '@/components/TopProgressBar';
 
 const inter = Inter({
@@ -55,7 +56,10 @@ export default function RootLayout({
             </Suspense>
             <AppShell />
             <BackgroundWatchers />
-            <main>{children}</main>
+            <main>
+              {children}
+              <PollerStatusBar />
+            </main>
           </Providers>
         </StyledComponentsRegistry>
       </body>

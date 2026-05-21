@@ -9,7 +9,7 @@ import {
   ChecklistIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
-  TelescopeIcon,
+  GlobeIcon,
   BookIcon,
   PeopleIcon,
   PersonIcon,
@@ -28,7 +28,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: ChecklistIcon },
-  { href: '/explorer', label: 'Explorer', icon: TelescopeIcon },
+  { href: '/explorer', label: 'Explorer', icon: GlobeIcon },
   { href: '/miners', label: 'Miners', icon: PeopleIcon },
   { href: '/repositories', label: 'Repositories', icon: StackIcon },
   { href: '/issues', label: 'Issues', icon: IssueOpenedIcon },

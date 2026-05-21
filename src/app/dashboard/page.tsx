@@ -1218,7 +1218,7 @@ export default function DashboardPage() {
   return (
     <PageLayout containerWidth="full" padding="normal">
       <PageLayout.Header sx={{ mb: -1 }}>
-        <Box sx={{ maxWidth: 1480, mx: 'auto', width: '100%' }}>
+        <Box sx={{ maxWidth: 1440, mx: 'auto', width: '100%' }}>
           <Box
             sx={{
               display: 'grid',
@@ -1250,7 +1250,7 @@ export default function DashboardPage() {
       </PageLayout.Header>
 
       <PageLayout.Content>
-        <Box sx={{ maxWidth: 1480, mx: 'auto', width: '100%', display: 'grid', gap: 3, position: 'relative', mb: [-2, null, -3] }}>
+        <Box sx={{ maxWidth: 1440, mx: 'auto', width: '100%', display: 'grid', gap: 3, position: 'relative', mb: [-2, null, -3] }}>
           <Box sx={{ position: 'sticky', top: ['calc(var(--header-height) + 8px)', null, null, null, '72px'], zIndex: 160, display: 'flex', justifyContent: 'flex-end', pointerEvents: 'none', mt: [2, null, 0], mb: -1 }}>
             <Box sx={{ pointerEvents: 'auto', borderRadius: 2, boxShadow: 'shadow.medium', bg: 'canvas.default' }}>
               <DurationPicker value={durationKey} onChange={setDurationKey} />
@@ -2058,28 +2058,26 @@ function BestWorkMiniPr({ row }: { row: BestWorkPull }) {
   const author = pr.author_login ?? 'unknown';
   return (
     <Link href={pullHref(pr)} target="_blank" rel="noreferrer" style={{ color: 'inherit', textDecoration: 'none', minWidth: 0 }}>
-      <Box sx={{ border: '1px solid', borderColor: 'border.muted', borderRadius: 2, px: 2, py: 2, minWidth: 0, height: '100%', transition: 'border-color 80ms ease, transform 80ms ease', '&:hover': { borderColor: 'border.default', transform: 'translateY(-1px)' } }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 1 }}>
+      <Box sx={{ border: '1px solid', borderColor: 'border.muted', borderRadius: 2, px: 3, py: 3, minWidth: 0, height: '100%', minHeight: 132, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '12px', alignContent: 'space-between', transition: 'border-color 80ms ease, transform 80ms ease', '&:hover': { borderColor: 'border.default', transform: 'translateY(-1px)' } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
           <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
             <Box as="img" src={`https://github.com/${pr.repo_full_name.split('/')[0]}.png?size=40`} alt="" sx={{ width: 14, height: 14, borderRadius: 1, bg: 'canvas.inset', flexShrink: 0 }} />
             <Text sx={{ color: 'fg.muted', fontFamily: 'mono', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pr.repo_full_name}</Text>
           </Box>
-          <MetricChip tone="success" title="Modeled subnet emission share represented by this PR.">reward {fmtPct(row.reward)}</MetricChip>
+          <MetricChip tone="success" title="Modeled subnet emission share (reward) represented by this PR.">{fmtPct(row.reward)}</MetricChip>
         </Box>
         <Text sx={{ display: 'block', fontWeight: 700, fontSize: 0, lineHeight: 1.35, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>#{pr.number} {pr.title}</Text>
-        <Box sx={{ display: 'grid', gap: 1, mt: 2, minWidth: 0 }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minWidth: 0 }}>
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-              <Box as="img" src={`https://github.com/${author}.png?size=40`} alt="" sx={{ width: 14, height: 14, borderRadius: 99, bg: 'canvas.inset', flexShrink: 0 }} />
-              <Text sx={{ color: 'fg.muted', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{author}</Text>
-              <RoleBadge association={pr.author_association} />
-            </Box>
-            <LineChanges additions={pr.additions} deletions={pr.deletions} />
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, minWidth: 0 }}>
+          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
+            <Box as="img" src={`https://github.com/${author}.png?size=40`} alt="" sx={{ width: 14, height: 14, borderRadius: 99, bg: 'canvas.inset', flexShrink: 0 }} />
+            <Text sx={{ color: 'fg.muted', fontSize: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{author}</Text>
+            <RoleBadge association={pr.author_association} />
           </Box>
-          <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
-            <MetricChip tone="accent" title="Gittensor validated score for this PR.">score {fmtNumber(num(pr.score))}</MetricChip>
-            <MetricChip title="This PR's score divided by total scored PR points in the same repo.">share {fmtPct(row.repoShare)}</MetricChip>
-          </Box>
+          <LineChanges additions={pr.additions} deletions={pr.deletions} />
+        </Box>
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', justifyContent: 'flex-end', minWidth: 0 }}>
+          <MetricChip tone="accent" title="Gittensor validated score for this PR.">score {fmtNumber(num(pr.score))}</MetricChip>
+          <MetricChip title="This PR's score divided by total scored PR points in the same repo.">share {fmtPct(row.repoShare)}</MetricChip>
         </Box>
       </Box>
     </Link>
@@ -2272,8 +2270,8 @@ function PullRequestPipeline({ columns, durationLabel, chartDuration, repos, sel
           <LinkPill href="/pulls">View all</LinkPill>
         </Box>
       </Box>
-      <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'repeat(5, minmax(220px, 1fr))'], overflowX: ['visible', null, 'auto'] }}>
-        {columns.map((column, index) => {
+      <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', 'repeat(2, minmax(0, 1fr))', 'repeat(5, minmax(264px, 1fr))'], gap: 2, p: [2, null, 3], overflowX: ['visible', null, 'auto'] }}>
+        {columns.map((column) => {
           const selectedBucket = bucketFilters[column.key] ?? null;
           const visiblePulls = selectedBucket === null
             ? column.pulls
@@ -2282,7 +2280,7 @@ function PullRequestPipeline({ columns, durationLabel, chartDuration, repos, sel
             ? fmtCount(column.pulls.length)
             : fmtCount(visiblePulls.length) + '/' + fmtCount(column.pulls.length);
           return (
-            <Box key={column.key} sx={{ p: 3, borderLeft: [0, null, index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))'], borderTop: [index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))', null, 0], minWidth: 0 }}>
+            <Box key={column.key} sx={{ p: 3, border: '1px solid', borderColor: 'border.muted', borderRadius: 2, minWidth: 0 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
                 <Box sx={{ minWidth: 0 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -2593,8 +2591,8 @@ function IssuePipeline({ columns, durationLabel, chartDuration, repos, selectedR
           <LinkPill href="/issues">View all</LinkPill>
         </Box>
       </Box>
-      <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', null, 'repeat(4, minmax(240px, 1fr))'], overflowX: ['visible', null, 'auto'] }}>
-        {columns.map((column, index) => {
+      <Box sx={{ display: 'grid', gridTemplateColumns: ['1fr', 'repeat(2, minmax(0, 1fr))', 'repeat(4, minmax(264px, 1fr))'], gap: 2, p: [2, null, 3], overflowX: ['visible', null, 'auto'] }}>
+        {columns.map((column) => {
           const selectedBucket = bucketFilters[column.key] ?? null;
           const visibleIssues = selectedBucket === null
             ? column.issues
@@ -2604,7 +2602,7 @@ function IssuePipeline({ columns, durationLabel, chartDuration, repos, selectedR
             : fmtCount(visibleIssues.length) + '/' + fmtCount(column.issues.length);
           const caption = column.caption;
           return (
-            <Box key={column.key} sx={{ p: 3, borderLeft: [0, null, index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))'], borderTop: [index === 0 ? 0 : '1px solid var(--borderColor-default, var(--border-default, var(--color-border-default)))', null, 0], minWidth: 0 }}>
+            <Box key={column.key} sx={{ p: 3, border: '1px solid', borderColor: 'border.muted', borderRadius: 2, minWidth: 0 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 2 }}>
                 <Box sx={{ minWidth: 0 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>

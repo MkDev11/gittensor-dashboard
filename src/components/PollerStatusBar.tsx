@@ -1,10 +1,14 @@
 'use client';
 
 import React from 'react';
+import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Box, Text } from '@primer/react';
 import { SyncIcon, DatabaseIcon } from '@primer/octicons-react';
 import { formatRelativeTime } from '@/lib/format';
+
+// Pre-auth routes where polling would just rack up 401s and the bar shouldn't show.
+const NO_POLL_ROUTES = new Set(['/sign-in']);
 
 interface PollerStatus {
   repos_cached: number;
@@ -19,6 +23,8 @@ function compactCount(value: number): string {
 }
 
 export default function PollerStatusBar() {
+  const pathname = usePathname();
+  const enabled = !NO_POLL_ROUTES.has(pathname);
   const { data } = useQuery<PollerStatus>({
     queryKey: ['poller-status'],
     queryFn: async () => {
@@ -27,7 +33,9 @@ export default function PollerStatusBar() {
       return r.json();
     },
     refetchInterval: 5000,
+    enabled,
   });
+  if (!enabled) return null;
 
   // Reserve the bar's footprint even before the first /api/poller-status
   // response — otherwise the bottom of the viewport is empty until the
@@ -36,10 +44,6 @@ export default function PollerStatusBar() {
     return (
       <Box
         sx={{
-          position: 'fixed',
-          bottom: 'var(--bottom-nav-height, 0px)',
-          left: 'var(--sidebar-width, 240px)',
-          right: 0,
           bg: 'var(--bg-subtle)',
           borderTop: '1px solid',
           borderColor: 'var(--border-default)',
@@ -54,7 +58,6 @@ export default function PollerStatusBar() {
           py: ['6px', null, '6px'],
           overflow: 'hidden',
           whiteSpace: ['normal', null, 'nowrap'],
-          zIndex: 90,
         }}
       >
         <Box sx={{ gridArea: ['poller', null, 'auto'] }}>
@@ -78,12 +81,9 @@ export default function PollerStatusBar() {
   return (
     <Box
       sx={{
-        position: 'fixed',
-        bottom: 'var(--bottom-nav-height, 0px)',
-        // Sit to the right of the fixed sidebar instead of edge-to-edge so
-        // the status bar doesn't overlap nav items.
-        left: 'var(--sidebar-width, 240px)',
-        right: 0,
+        // In-flow as the last child of <main> so it sits right after the page
+        // content (no floating, no gap). Spans the content column since <main>
+        // is already offset from the fixed sidebar by the body's padding-left.
         bg: 'var(--bg-subtle)',
         borderTop: '1px solid',
         borderColor: 'var(--border-default)',
@@ -101,7 +101,6 @@ export default function PollerStatusBar() {
         fontSize: 0,
         lineHeight: 1.2,
         color: 'var(--fg-muted)',
-        zIndex: 90,
       }}
     >
       <Box sx={{ gridArea: ['poller', null, 'auto'], display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>

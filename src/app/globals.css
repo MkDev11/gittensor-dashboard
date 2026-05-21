@@ -218,7 +218,6 @@ a {
    * gap (e.g. `top: calc(var(--header-height) + 16px)`). */
   --header-height: 0px;
   --bottom-nav-height: 0px;
-  --poller-status-height: 28px;
 }
 
 body {
@@ -267,7 +266,6 @@ html[data-top-header] {
   html[data-top-header] {
     --header-height: 96px;
     --bottom-nav-height: calc(72px + env(safe-area-inset-bottom));
-    --poller-status-height: 44px;
   }
 }
 
@@ -298,7 +296,9 @@ html:not([data-top-header]) [data-app-header] {
 
 main {
   flex: 1 0 auto;
-  padding-bottom: calc(var(--poller-status-height) + var(--bottom-nav-height));
+  /* The poller status bar is now an in-flow sticky child of <main>, so it no
+   * longer needs reserved space here — only clear the fixed bottom nav. */
+  padding-bottom: var(--bottom-nav-height);
 }
 
 /* Linear's focus ring: subtle inset glow, no harsh 2px outline. */
