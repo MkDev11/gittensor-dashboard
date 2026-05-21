@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 const PAGE_SIZE_DEFAULT = 25;
 const PAGE_SIZE_MAX = 100;
 const SINCE_LIMIT = 200;
+const ACTIVITY_LIMIT = 5000;
 
 type SortKey = 'opened' | 'closed' | 'updated' | 'comments' | 'repo' | 'weight' | 'number';
 type SortDir = 'asc' | 'desc';
@@ -22,6 +23,9 @@ interface LinkedPullRow {
   draft: number;
   merged: number;
   author_login: string | null;
+  closed_at: string | null;
+  merged_at: string | null;
+  html_url: string | null;
 }
 
 const HAS_MERGED_PR_SQL =
@@ -57,6 +61,12 @@ function normalizeRepoList(raw: string | null): string[] | null {
     repos.push(name);
   }
   return repos;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
 }
 
 async function resolveRepoScope(reqRepos: string[] | null): Promise<string[]> {
@@ -115,6 +125,7 @@ function buildWhere({
   repos,
   q,
   since,
+  activitySince,
   state,
   close,
   author,
@@ -123,6 +134,7 @@ function buildWhere({
   repos: string[];
   q: string;
   since: string | null;
+  activitySince: string | null;
   state: string | null;
   close: string | null;
   author: string | null;
@@ -139,6 +151,15 @@ function buildWhere({
     args.push(since);
   }
 
+  if (activitySince) {
+    where.push(`(
+      COALESCE(i.created_at, '') >= ?
+      OR COALESCE(i.updated_at, '') >= ?
+      OR COALESCE(i.closed_at, '') >= ?
+    )`);
+    args.push(activitySince, activitySince, activitySince);
+  }
+
   if (q) {
     const like = `%${q.toLowerCase()}%`;
     where.push(
@@ -153,14 +174,20 @@ function buildWhere({
   else if (close === 'still_open') where.push("i.state != 'closed'");
 
   if (includeAuthor && author && author !== 'all') {
-    where.push('i.author_login = ?');
-    args.push(author);
+    where.push('LOWER(i.author_login) = ?');
+    args.push(author.toLowerCase());
   }
 
   return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', args };
 }
 
-function orderBy(sort: SortKey, dir: SortDir): string {
+function latestIssueActivitySql(): string {
+  return "MAX(COALESCE(i.closed_at, ''), COALESCE(i.updated_at, ''), COALESCE(i.created_at, ''), COALESCE(i.first_seen_at, ''))";
+}
+
+function orderBy(sort: SortKey, dir: SortDir, since: string | null, activitySince: string | null): string {
+  if (since) return 'ORDER BY i.first_seen_at DESC';
+  if (activitySince) return `ORDER BY ${latestIssueActivitySql()} DESC`;
   const direction = dir === 'asc' ? 'ASC' : 'DESC';
   const col =
     sort === 'opened'
@@ -183,10 +210,8 @@ function orderBy(sort: SortKey, dir: SortDir): string {
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const reqRepos = normalizeRepoList(url.searchParams.get('repos'));
-  // Watcher mode: caller passes `?since=ISO` to receive only newly-cached
-  // issues. Filters on first_seen_at so we surface anything the poller picked
-  // up after the watcher's baseline, regardless of GitHub's created_at.
   const since = url.searchParams.get('since');
+  const activitySince = url.searchParams.get('activity_since');
   const q = url.searchParams.get('q')?.trim().toLowerCase() ?? '';
   const state = url.searchParams.get('state');
   const close = url.searchParams.get('closed');
@@ -196,22 +221,25 @@ export async function GET(req: NextRequest) {
   const sort: SortKey =
     sortParam && ['opened', 'closed', 'updated', 'comments', 'repo', 'weight', 'number'].includes(sortParam)
       ? sortParam
-      : since
+      : since || activitySince
       ? 'updated'
       : 'opened';
   const dir: SortDir = dirParam === 'asc' ? 'asc' : 'desc';
   const page = positiveInt(url.searchParams.get('page'), 1);
   const pageSize = Math.min(PAGE_SIZE_MAX, positiveInt(url.searchParams.get('pageSize'), PAGE_SIZE_DEFAULT));
-  const limit = since ? SINCE_LIMIT : pageSize;
-  const offset = since ? 0 : (page - 1) * pageSize;
+  const windowMode = Boolean(since || activitySince);
+  const limit = activitySince ? ACTIVITY_LIMIT : since ? SINCE_LIMIT : pageSize;
+  const offset = windowMode ? 0 : (page - 1) * pageSize;
+  const responsePage = windowMode ? 1 : page;
+  const responsePageSize = windowMode ? limit : pageSize;
 
   const repos = await resolveRepoScope(reqRepos);
   if (repos.length === 0) {
     return NextResponse.json({
       count: 0,
       repo_count: 0,
-      page,
-      page_size: pageSize,
+      page: responsePage,
+      page_size: responsePageSize,
       total_pages: 1,
       authors: [],
       author_count: 0,
@@ -229,6 +257,7 @@ export async function GET(req: NextRequest) {
     repos,
     q,
     since,
+    activitySince,
     state,
     close,
     author,
@@ -238,6 +267,7 @@ export async function GET(req: NextRequest) {
     repos,
     q,
     since,
+    activitySince,
     state,
     close,
     author,
@@ -271,40 +301,42 @@ export async function GET(req: NextRequest) {
               i.created_at, i.updated_at, i.closed_at, i.html_url, i.fetched_at, i.first_seen_at
        ${fromSql}
        ${filteredWhere.sql}
-       ${since ? 'ORDER BY i.first_seen_at DESC' : orderBy(sort, dir)}
+       ${orderBy(sort, dir, since, activitySince)}
        LIMIT ? OFFSET ?`,
     )
     .all(...filteredWhere.args, limit, offset) as IssueRow[];
 
-  const linkedPrsByIssue = new Map<string, Array<{ number: number; title: string; state: string; draft: number; merged: number; author_login: string | null }>>();
+  const linkedPrsByIssue = new Map<string, LinkedPullRow[]>();
   if (rows.length > 0) {
-    for (const repoFullName of new Set(rows.map((r) => r.repo_full_name))) {
-      backfillPrIssueLinksIfNeeded(repoFullName);
+    const repoNames = Array.from(new Set(rows.map((r) => r.repo_full_name)));
+    for (const repoFullName of repoNames) {
+      try {
+        backfillPrIssueLinksIfNeeded(repoFullName);
+      } catch (err) {
+        console.warn(`[issues] skipped PR-link backfill for ${repoFullName}:`, err);
+      }
     }
 
-    const pairWhere = rows.map(() => '(l.repo_full_name = ? AND l.issue_number = ?)').join(' OR ');
-    const pairArgs = rows.flatMap((r) => [r.repo_full_name, r.number]);
-    const linkRows = db
-      .prepare(
-        `SELECT l.repo_full_name, l.issue_number, p.number, p.title, p.state, p.draft, p.merged, p.author_login
-         FROM pr_issue_links l
-         JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
-         WHERE ${pairWhere}
-         ORDER BY l.repo_full_name ASC, l.issue_number ASC, p.number ASC`,
-      )
-      .all(...pairArgs) as LinkedPullRow[];
-    for (const r of linkRows) {
-      const key = `${r.repo_full_name}#${r.issue_number}`;
-      const list = linkedPrsByIssue.get(key) ?? [];
-      list.push({
-        number: r.number,
-        title: r.title,
-        state: r.state,
-        draft: r.draft,
-        merged: r.merged,
-        author_login: r.author_login,
-      });
-      linkedPrsByIssue.set(key, list);
+    const wanted = new Set(rows.map((r) => `${r.repo_full_name.toLowerCase()}#${r.number}`));
+    for (const batch of chunk(repoNames, 200)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const linkRows = db
+        .prepare(
+          `SELECT l.repo_full_name, l.issue_number, p.number, p.title, p.state, p.draft, p.merged,
+                  p.author_login, p.closed_at, p.merged_at, p.html_url
+           FROM pr_issue_links l
+           JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
+           WHERE l.repo_full_name IN (${placeholders})
+           ORDER BY l.repo_full_name ASC, l.issue_number ASC, p.number ASC`,
+        )
+        .all(...batch) as LinkedPullRow[];
+      for (const row of linkRows) {
+        const key = `${row.repo_full_name.toLowerCase()}#${row.issue_number}`;
+        if (!wanted.has(key)) continue;
+        const list = linkedPrsByIssue.get(key) ?? [];
+        list.push(row);
+        linkedPrsByIssue.set(key, list);
+      }
     }
   }
 
@@ -315,23 +347,25 @@ export async function GET(req: NextRequest) {
         getIssueDiscoveryDisabledReposAsyncServer(rowRepoNames),
       ])
     : [null, new Set<string>()];
-  const totalPages = Math.max(1, Math.ceil(totals.count / pageSize));
+  const totalPages = windowMode ? 1 : Math.max(1, Math.ceil(totals.count / pageSize));
 
   return NextResponse.json({
     count: totals.count,
     repo_count: totals.repo_count,
-    page,
-    page_size: pageSize,
+    page: responsePage,
+    page_size: responsePageSize,
     total_pages: totalPages,
     authors: authorRows,
     author_count: authorRows.length,
     issues: rows.map((r) => {
-      const linkedPrs = linkedPrsByIssue.get(`${r.repo_full_name}#${r.number}`) ?? [];
+      const linkedPrs = linkedPrsByIssue.get(`${r.repo_full_name.toLowerCase()}#${r.number}`) ?? [];
       return {
         ...r,
         labels: parseLabels(r.labels),
-        merged_pr_count: linkedPrs.filter((pr) => pr.merged === 1).length,
         linked_prs: linkedPrs,
+        linked_pr_count: linkedPrs.length,
+        merged_pr_count: linkedPrs.filter((pr) => pr.merged === 1 || Boolean(pr.merged_at)).length,
+        closed_pr_count: linkedPrs.filter((pr) => pr.merged !== 1 && !pr.merged_at && pr.state.toLowerCase() === 'closed').length,
         author_credibility: authorCredibilityForRepo(credibilityIndex, r.author_login, r.repo_full_name, {
           issueDiscoveryDisabled: issueDiscoveryDisabledRepos.has(r.repo_full_name.toLowerCase()),
         }),

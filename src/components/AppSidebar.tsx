@@ -5,9 +5,10 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   StackIcon,
+  GlobeIcon,
+  ChecklistIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
-  TelescopeIcon,
   BookIcon,
   PeopleIcon,
   PersonIcon,
@@ -23,11 +24,12 @@ interface NavItem {
   icon: Icon;
 }
 
-// Primary route switching lives in the sidebar — replaces the prior
+// Primary route switching lives in the sidebar - replaces the prior
 // horizontal top-nav with a Linear-style left rail. Docs is grouped at the
 // bottom as a "reference" link rather than mixed in with the working pages.
 const PRIMARY: NavItem[] = [
-  { href: '/', label: 'Explorer', icon: TelescopeIcon },
+  { href: '/dashboard', label: 'Dashboard', icon: ChecklistIcon },
+  { href: '/explorer', label: 'Explorer', icon: GlobeIcon },
   { href: '/miners', label: 'Miners', icon: PeopleIcon },
   { href: '/repositories', label: 'Repositories', icon: StackIcon },
   { href: '/issues', label: 'Issues', icon: IssueOpenedIcon },
@@ -43,7 +45,6 @@ const SECONDARY: NavItem[] = [
 const HIDE_ROUTES = new Set(['/sign-in']);
 
 function isActive(pathname: string, href: string): boolean {
-  if (href === '/') return pathname === '/';
   return pathname === href || pathname.startsWith(href + '/');
 }
 
@@ -63,7 +64,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
         borderRadius: 6,
         textDecoration: 'none',
         // Linear's active treatment is a subtle bg tint, not a font-weight
-        // bump — the affordance reads as "this row is selected" rather than
+        // bump - the affordance reads as "this row is selected" rather than
         // "this text is heavier".
         background: active ? 'var(--menu-item-hover-bg)' : 'transparent',
         color: active ? 'var(--fg-default)' : 'var(--fg-muted)',
@@ -130,7 +131,7 @@ export default function AppSidebar() {
     >
       {/* Brand */}
       <Link
-        href="/"
+        href="/dashboard"
         prefetch={false}
         style={{
           display: 'flex',

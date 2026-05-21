@@ -9,6 +9,7 @@ export const dynamic = 'force-dynamic';
 
 const PAGE_SIZE_DEFAULT = 25;
 const PAGE_SIZE_MAX = 100;
+const SINCE_LIMIT = 3000;
 
 type SortKey = 'updated' | 'opened' | 'closed' | 'repo' | 'weight' | 'number';
 type SortDir = 'asc' | 'desc';
@@ -42,6 +43,12 @@ function normalizeRepoList(raw: string | null): string[] | null {
   return repos;
 }
 
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
 async function resolveRepoScope(reqRepos: string[] | null): Promise<string[]> {
   const { repos: liveRepos } = await getLiveReposAsyncServer();
   const db = getReadDb();
@@ -65,6 +72,14 @@ async function resolveRepoScope(reqRepos: string[] | null): Promise<string[]> {
   }
 
   return Array.from(allowed.values());
+}
+
+function parseSinceIso(raw: string | null): string | null {
+  if (!raw) return null;
+  const sinceMs = Number(raw);
+  if (Number.isFinite(sinceMs) && sinceMs > 0) return new Date(sinceMs).toISOString();
+  const sinceDate = new Date(raw);
+  return Number.isFinite(sinceDate.getTime()) ? sinceDate.toISOString() : null;
 }
 
 function addStateFilter(where: string[], state: string | null) {
@@ -92,18 +107,30 @@ function buildWhere({
   state,
   author,
   includeAuthor,
+  sinceIso,
 }: {
   repos: string[];
   q: string;
   state: string | null;
   author: string | null;
   includeAuthor: boolean;
+  sinceIso: string | null;
 }): { sql: string; args: unknown[] } {
   const where: string[] = [];
   const args: unknown[] = [];
 
   where.push(`p.repo_full_name IN (${repos.map(() => '?').join(',')})`);
   args.push(...repos);
+
+  if (sinceIso) {
+    where.push(`(
+      COALESCE(p.created_at, '') >= ?
+      OR COALESCE(p.updated_at, '') >= ?
+      OR COALESCE(p.closed_at, '') >= ?
+      OR COALESCE(p.merged_at, '') >= ?
+    )`);
+    args.push(sinceIso, sinceIso, sinceIso, sinceIso);
+  }
 
   if (q) {
     const like = `%${q.toLowerCase()}%`;
@@ -123,7 +150,12 @@ function buildWhere({
   return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', args };
 }
 
-function orderBy(sort: SortKey, dir: SortDir): string {
+function latestPullActivitySql(): string {
+  return "MAX(COALESCE(p.merged_at, ''), COALESCE(p.closed_at, ''), COALESCE(p.updated_at, ''), COALESCE(p.created_at, ''), COALESCE(p.first_seen_at, ''))";
+}
+
+function orderBy(sort: SortKey, dir: SortDir, sinceIso: string | null): string {
+  if (sinceIso) return `ORDER BY ${latestPullActivitySql()} DESC`;
   const direction = dir === 'asc' ? 'ASC' : 'DESC';
   const col =
     sort === 'opened'
@@ -149,6 +181,7 @@ export async function GET(req: NextRequest) {
   const author = url.searchParams.get('author');
   const sortParam = url.searchParams.get('sort') as SortKey | null;
   const dirParam = url.searchParams.get('dir') as SortDir | null;
+  const sinceIso = parseSinceIso(url.searchParams.get('since'));
   const sort: SortKey =
     sortParam && ['updated', 'opened', 'closed', 'repo', 'weight', 'number'].includes(sortParam)
       ? sortParam
@@ -156,15 +189,19 @@ export async function GET(req: NextRequest) {
   const dir: SortDir = dirParam === 'asc' ? 'asc' : 'desc';
   const page = positiveInt(url.searchParams.get('page'), 1);
   const pageSize = Math.min(PAGE_SIZE_MAX, positiveInt(url.searchParams.get('pageSize'), PAGE_SIZE_DEFAULT));
-  const offset = (page - 1) * pageSize;
+  const sinceMode = Boolean(sinceIso);
+  const limit = sinceMode ? SINCE_LIMIT : pageSize;
+  const offset = sinceMode ? 0 : (page - 1) * pageSize;
+  const responsePage = sinceMode ? 1 : page;
+  const responsePageSize = sinceMode ? limit : pageSize;
 
   const repos = await resolveRepoScope(reqRepos);
   if (repos.length === 0) {
     return NextResponse.json({
       count: 0,
       repo_count: 0,
-      page,
-      page_size: pageSize,
+      page: responsePage,
+      page_size: responsePageSize,
       total_pages: 1,
       authors: [],
       author_count: 0,
@@ -185,6 +222,7 @@ export async function GET(req: NextRequest) {
     state,
     author,
     includeAuthor: true,
+    sinceIso,
   });
   const authorWhere = buildWhere({
     repos,
@@ -192,6 +230,7 @@ export async function GET(req: NextRequest) {
     state,
     author,
     includeAuthor: false,
+    sinceIso,
   });
 
   const totals = db
@@ -221,10 +260,10 @@ export async function GET(req: NextRequest) {
               p.html_url, p.fetched_at, p.first_seen_at
        ${fromSql}
        ${filteredWhere.sql}
-       ${orderBy(sort, dir)}
+       ${orderBy(sort, dir, sinceIso)}
        LIMIT ? OFFSET ?`,
     )
-    .all(...filteredWhere.args, pageSize, offset) as PullRow[];
+    .all(...filteredWhere.args, limit, offset) as PullRow[];
 
   const rowRepoNames = rows.map((r) => r.repo_full_name);
   const [scoreMap, credibilityIndex, issueDiscoveryDisabledRepos] = rows.length > 0
@@ -237,42 +276,44 @@ export async function GET(req: NextRequest) {
 
   const linked_issues_by_pull: Record<string, LinkedIssueReference[]> = {};
   if (rows.length > 0) {
-    const uniquePulls = Array.from(
-      new Map(rows.map((r) => [pullIssueMapKey(r.repo_full_name, r.number), r])).values(),
-    );
-    const where = uniquePulls.map(() => '(l.repo_full_name = ? AND l.pr_number = ?)').join(' OR ');
-    const args = uniquePulls.flatMap((r) => [r.repo_full_name, r.number]);
-    const linkRows = db
-      .prepare(
-        `SELECT l.repo_full_name, l.pr_number, i.number AS issue_number, i.title, i.state, i.state_reason, i.author_login
-         FROM pr_issue_links l
-         JOIN issues i ON i.repo_full_name = l.repo_full_name AND i.number = l.issue_number
-         WHERE ${where}
-         ORDER BY LOWER(l.repo_full_name) ASC, l.pr_number DESC, i.number ASC`,
-      )
-      .all(...args) as Array<{
-        repo_full_name: string;
-        pr_number: number;
-        issue_number: number;
-        title: string;
-        state: string;
-        state_reason: string | null;
-        author_login: string | null;
-      }>;
-    for (const lr of linkRows) {
-      const key = pullIssueMapKey(lr.repo_full_name, lr.pr_number);
-      if (!linked_issues_by_pull[key]) linked_issues_by_pull[key] = [];
-      linked_issues_by_pull[key].push({
-        number: lr.issue_number,
-        title: lr.title,
-        state: lr.state,
-        state_reason: lr.state_reason,
-        author_login: lr.author_login,
-      });
+    const repoNames = Array.from(new Set(rows.map((r) => r.repo_full_name)));
+    const wanted = new Set(rows.map((r) => pullIssueMapKey(r.repo_full_name.toLowerCase(), r.number)));
+    for (const batch of chunk(repoNames, 200)) {
+      const placeholders = batch.map(() => '?').join(',');
+      const linkRows = db
+        .prepare(
+          `SELECT l.repo_full_name, l.pr_number, i.number AS issue_number, i.title, i.state, i.state_reason, i.author_login
+           FROM pr_issue_links l
+           JOIN issues i ON i.repo_full_name = l.repo_full_name AND i.number = l.issue_number
+           WHERE l.repo_full_name IN (${placeholders})
+           ORDER BY LOWER(l.repo_full_name) ASC, l.pr_number DESC, i.number ASC`,
+        )
+        .all(...batch) as Array<{
+          repo_full_name: string;
+          pr_number: number;
+          issue_number: number;
+          title: string;
+          state: string;
+          state_reason: string | null;
+          author_login: string | null;
+        }>;
+      for (const lr of linkRows) {
+        const wantedKey = pullIssueMapKey(lr.repo_full_name.toLowerCase(), lr.pr_number);
+        if (!wanted.has(wantedKey)) continue;
+        const key = pullIssueMapKey(lr.repo_full_name, lr.pr_number);
+        if (!linked_issues_by_pull[key]) linked_issues_by_pull[key] = [];
+        linked_issues_by_pull[key].push({
+          number: lr.issue_number,
+          title: lr.title,
+          state: lr.state,
+          state_reason: lr.state_reason,
+          author_login: lr.author_login,
+        });
+      }
     }
   }
 
-  const totalPages = Math.max(1, Math.ceil(totals.count / pageSize));
+  const totalPages = sinceMode ? 1 : Math.max(1, Math.ceil(totals.count / pageSize));
   const pulls: AggPullRow[] = rows.map((r) => ({
     ...r,
     score: scoreMap?.get(pullScoreKey(r.repo_full_name, r.number)) ?? null,
@@ -284,8 +325,8 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     count: totals.count,
     repo_count: totals.repo_count,
-    page,
-    page_size: pageSize,
+    page: responsePage,
+    page_size: responsePageSize,
     total_pages: totalPages,
     authors: authorRows,
     author_count: authorRows.length,

@@ -27,7 +27,7 @@ import {
   ChevronDownIcon,
   CheckIcon,
 } from '@primer/octicons-react';
-import { ALL_REPOS, type Sn74Repo } from '@/lib/repos';
+import { ALL_REPOS, createRepoEntry, type Sn74Repo } from '@/lib/repos';
 import { isTracked as repoIsTracked, useTrackedRepos } from '@/lib/tracked-repos';
 import { IssueStatusBadge, PullStatusBadge } from '@/components/StatusBadge';
 import { formatRelativeTime, isRecent } from '@/lib/format';
@@ -154,24 +154,7 @@ function RepoPolicyChip({
 // `null` selection without making every downstream read nullable, so we hold a
 // dummy entry that yields empty issues/PRs and gets swapped out the moment
 // `allRepos` populates (see the `selected`-hydration effect below).
-const EMPTY_REPO: Sn74Repo = {
-  fullName: '',
-  owner: '',
-  name: '',
-  weight: 0,
-  issueDiscoveryShare: null,
-  maintainerCut: null,
-  fixedBaseScore: null,
-  excessivePrPenaltyThreshold: null,
-  openIssueSpamThreshold: null,
-  minCredibility: null,
-  minIssueCredibility: null,
-  defaultLabelMultiplier: null,
-  trustedLabelPipeline: null,
-  additionalAcceptableBranches: null,
-  labelMultipliers: null,
-  inactiveAt: null,
-};
+const EMPTY_REPO: Sn74Repo = createRepoEntry('');
 
 function keepPreviousDataForRepo<T>(owner: string, name: string) {
   return (
@@ -586,26 +569,11 @@ export default function RepoExplorer() {
     const sn74Set = new Set(sn74Repos.map((r) => r.fullName));
     const userExtras: Sn74Repo[] = (userReposData?.repos ?? [])
       .filter((u) => !sn74Set.has(u.full_name))
-      .map((u) => {
-        const [owner, name] = u.full_name.split('/');
-        return {
-          fullName: u.full_name,
-          owner,
-          name,
-          weight: u.weight,
-          issueDiscoveryShare: null,
-          maintainerCut: null,
-          fixedBaseScore: null,
-          excessivePrPenaltyThreshold: null,
-          openIssueSpamThreshold: null,
-          minCredibility: null,
-          minIssueCredibility: null,
-          defaultLabelMultiplier: null,
-          trustedLabelPipeline: null,
-          additionalAcceptableBranches: null,
-          labelMultipliers: null,
-          inactiveAt: null,
-        };
+      .flatMap((u) => {
+        const parts = u.full_name.split('/');
+        if (parts.length !== 2 || !parts[0] || !parts[1]) return [];
+        const [owner, name] = parts;
+        return [{ ...createRepoEntry(u.full_name, u.weight), owner, name }];
       });
     return [...sn74Repos, ...userExtras];
   }, [sn74Repos, userReposData]);

@@ -54,7 +54,7 @@ export default function NewIssuesWatcher() {
       title: `★ ${role} opened issue in entrius/allways`,
       body: `#999 — Demo notification: this is what a ${role.toLowerCase()}-authored issue looks like · @${fakeLogin}`,
       onClick: () => {
-        router.push(`/?repo=${encodeURIComponent('entrius/allways')}&tab=issues`);
+        router.push(`/explorer?repo=${encodeURIComponent('entrius/allways')}&tab=issues`);
       },
       icon: 'issue',
       variant: 'success',
@@ -141,7 +141,7 @@ export default function NewIssuesWatcher() {
           title: `★ ${role} opened issue in ${repoSlug}`,
           body: `#${issueNum} — ${issueTitle}${i.author_login ? ` · @${i.author_login}` : ''}`,
           onClick: () => {
-            router.push(`/?repo=${encodeURIComponent(repoSlug)}&tab=issues&issue=${issueNum}`);
+            router.push(`/explorer?repo=${encodeURIComponent(repoSlug)}&tab=issues&issue=${issueNum}`);
           },
           icon: 'issue',
           variant: 'success',
@@ -157,7 +157,7 @@ export default function NewIssuesWatcher() {
         title: `New issue in ${repoSlug}`,
         body: `#${issueNum} — ${issueTitle}`,
         onClick: () => {
-          router.push(`/?repo=${encodeURIComponent(repoSlug)}&tab=issues&issue=${issueNum}`);
+          router.push(`/explorer?repo=${encodeURIComponent(repoSlug)}&tab=issues&issue=${issueNum}`);
         },
         icon: 'issue',
         variant: 'info',

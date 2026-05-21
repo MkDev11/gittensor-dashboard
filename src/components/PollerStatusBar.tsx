@@ -1,10 +1,14 @@
 'use client';
 
 import React from 'react';
+import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Box, Text } from '@primer/react';
 import { SyncIcon, DatabaseIcon } from '@primer/octicons-react';
 import { formatRelativeTime } from '@/lib/format';
+
+// Pre-auth routes where polling would just rack up 401s and the bar shouldn't show.
+const NO_POLL_ROUTES = new Set(['/sign-in']);
 
 interface PollerStatus {
   repos_cached: number;
@@ -14,7 +18,13 @@ interface PollerStatus {
   last_fetch: string | null;
 }
 
+function compactCount(value: number): string {
+  return Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
 export default function PollerStatusBar() {
+  const pathname = usePathname();
+  const enabled = !NO_POLL_ROUTES.has(pathname);
   const { data } = useQuery<PollerStatus>({
     queryKey: ['poller-status'],
     queryFn: async () => {
@@ -23,7 +33,9 @@ export default function PollerStatusBar() {
       return r.json();
     },
     refetchInterval: 5000,
+    enabled,
   });
+  if (!enabled) return null;
 
   // Reserve the bar's footprint even before the first /api/poller-status
   // response — otherwise the bottom of the viewport is empty until the
@@ -31,30 +43,36 @@ export default function PollerStatusBar() {
   if (!data) {
     return (
       <Box
+        data-poller-status-bar=""
         sx={{
-          position: 'fixed',
-          bottom: 'var(--bottom-nav-height, 0px)',
-          left: 'var(--sidebar-width, 240px)',
-          right: 0,
           bg: 'var(--bg-subtle)',
           borderTop: '1px solid',
           borderColor: 'var(--border-default)',
-          height: 30,
-          display: 'flex',
+          height: 'auto',
+          minHeight: 'auto',
+          display: ['grid', null, 'flex'],
+          gridTemplateColumns: ['auto minmax(0, 1fr) auto', null, 'none'],
+          gridTemplateAreas: ['"poller repos sync" "counts counts counts"', null, 'none'],
           alignItems: 'center',
-          gap: [2, null, 3],
+          gap: ['4px 8px', null, 3],
           px: [2, null, 3],
-          overflowX: 'auto',
-          whiteSpace: 'nowrap',
-          zIndex: 90,
+          py: ['6px', null, '6px'],
+          overflow: 'hidden',
+          whiteSpace: ['normal', null, 'nowrap'],
         }}
       >
-        <span className="gt-skeleton" style={{ width: 56, height: 10 }} />
-        <span className="gt-skeleton" style={{ width: 92, height: 10 }} />
+        <Box sx={{ gridArea: ['poller', null, 'auto'] }}>
+          <span className="gt-skeleton" style={{ display: 'block', width: 56, height: 10 }} />
+        </Box>
+        <Box sx={{ gridArea: ['repos', null, 'auto'] }}>
+          <span className="gt-skeleton" style={{ display: 'block', width: 92, height: 10 }} />
+        </Box>
         <Box sx={{ display: ['none', null, 'inline-block'] }}>
           <span className="gt-skeleton" style={{ width: 120, height: 4, borderRadius: 999 }} />
         </Box>
-        <span className="gt-skeleton" style={{ width: 128, height: 10 }} />
+        <Box sx={{ gridArea: ['counts', null, 'auto'] }}>
+          <span className="gt-skeleton" style={{ display: 'block', width: 128, height: 10 }} />
+        </Box>
       </Box>
     );
   }
@@ -63,49 +81,55 @@ export default function PollerStatusBar() {
 
   return (
     <Box
+      data-poller-status-bar=""
       sx={{
-        position: 'fixed',
-        bottom: 'var(--bottom-nav-height, 0px)',
-        // Sit to the right of the fixed sidebar instead of edge-to-edge so
-        // the status bar doesn't overlap nav items.
-        left: 'var(--sidebar-width, 240px)',
-        right: 0,
+        // In-flow as the last child of <main> so it sits right after the page
+        // content (no floating, no gap). Spans the content column since <main>
+        // is already offset from the fixed sidebar by the body's padding-left.
         bg: 'var(--bg-subtle)',
         borderTop: '1px solid',
         borderColor: 'var(--border-default)',
         px: [2, null, 3],
-        py: '6px',
-        display: 'flex',
+        py: ['6px', null, '6px'],
+        height: 'auto',
+        minHeight: 'auto',
+        display: ['grid', null, 'flex'],
+        gridTemplateColumns: ['auto minmax(0, 1fr) auto', null, 'none'],
+        gridTemplateAreas: ['"poller repos sync" "counts counts counts"', null, 'none'],
         alignItems: 'center',
-        gap: [2, null, 3],
-        overflowX: 'auto',
-        whiteSpace: 'nowrap',
+        gap: ['4px 8px', null, 3],
+        overflow: 'hidden',
+        whiteSpace: ['normal', null, 'nowrap'],
         fontSize: 0,
+        lineHeight: 1.2,
         color: 'var(--fg-muted)',
-        zIndex: 90,
       }}
     >
-      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ gridArea: ['poller', null, 'auto'], display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
         <SyncIcon size={12} />
-        <Text>Poller</Text>
+        <Text sx={{ fontWeight: 600 }}>Poller</Text>
       </Box>
-      <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+      <Box sx={{ gridArea: ['repos', null, 'auto'], display: 'inline-flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
         <DatabaseIcon size={12} />
         <Text sx={{ display: ['none', null, 'inline'] }}>
           {data.repos_cached} / {data.repos_total} repos cached
         </Text>
         <Text sx={{ display: ['inline', null, 'none'] }}>
-          {data.repos_cached}/{data.repos_total} repos
+          repos {data.repos_cached}/{data.repos_total}
         </Text>
       </Box>
       <Box sx={{ width: 120, height: 4, bg: 'var(--bg-inset)', borderRadius: 999, overflow: 'hidden', display: ['none', null, 'block'] }}>
         <Box sx={{ height: '100%', bg: 'var(--success-emphasis)', transition: 'width 200ms' }} style={{ width: `${pct}%` }} />
       </Box>
-      <Text>
+      <Text sx={{ display: ['none', null, 'inline'] }}>
         {data.issues_cached.toLocaleString()} issues · {data.pulls_cached.toLocaleString()} pulls
       </Text>
-      <Box sx={{ ml: 'auto' }}>
-        <Text>last sync {formatRelativeTime(data.last_fetch)}</Text>
+      <Text sx={{ gridArea: ['counts', null, 'auto'], display: ['block', null, 'none'], minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {compactCount(data.issues_cached)} issues · {compactCount(data.pulls_cached)} PRs
+      </Text>
+      <Box sx={{ gridArea: ['sync', null, 'auto'], justifySelf: ['end', null, 'auto'], ml: ['0', null, 'auto'], color: 'fg.subtle', minWidth: 0 }}>
+        <Text sx={{ display: ['none', null, 'inline'] }}>last sync {formatRelativeTime(data.last_fetch)}</Text>
+        <Text sx={{ display: ['inline', null, 'none'] }}>sync {formatRelativeTime(data.last_fetch)}</Text>
       </Box>
     </Box>
   );

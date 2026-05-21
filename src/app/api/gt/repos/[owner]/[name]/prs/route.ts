@@ -69,10 +69,11 @@ async function refresh(): Promise<Cached> {
       score: num(p.score),
       linkedIssueNumber: parseLinkedIssue(p.pullRequestTitle ?? ''),
     };
-    let list = byRepo.get(p.repository);
+    const repoKey = p.repository.toLowerCase();
+    let list = byRepo.get(repoKey);
     if (!list) {
       list = [];
-      byRepo.set(p.repository, list);
+      byRepo.set(repoKey, list);
     }
     list.push(row);
   }
@@ -93,7 +94,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
   const fullName = `${params.owner}/${params.name}`;
   try {
     const shared = await getShared();
-    const prs = shared.byRepo.get(fullName) ?? [];
+    const prs = shared.byRepo.get(fullName.toLowerCase()) ?? [];
     // Newest first by created date.
     const sorted = [...prs].sort((a, b) => (Date.parse(b.prCreatedAt) || 0) - (Date.parse(a.prCreatedAt) || 0));
     const counts = {

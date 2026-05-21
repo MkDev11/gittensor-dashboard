@@ -83,6 +83,9 @@ export interface GtPrSummary {
   prCreatedAt: string;
   prState: string;
   mergedAt: string | null;
+  score?: number | null;
+  additions?: number | null;
+  deletions?: number | null;
 }
 
 /** `/api/gt/repositories` response envelope. */
@@ -94,6 +97,7 @@ export interface GtReposResponse {
   inactiveCount: number;
   repos: GtRepo[];
   recentPrs: GtPrSummary[];
+  prs?: GtPrSummary[];
 }
 
 /**
@@ -109,7 +113,11 @@ export interface GtRepoSummary {
   totalScore: number;
   mergedPrCount: number;
   contributorCount: number;
+  issueDiscoveryEnabled?: boolean;
+  issueDiscoveryShare?: number;
   closedIssueCount: number;
+  completedIssueCount?: number;
+  otherClosedIssueCount?: number | null;
   github: GtRepoGithubMeta | null;
 }
 
@@ -249,11 +257,19 @@ export interface RepoMiner {
   prCount: number;
   score: number;
   ossRank: number | null;
+  globalScore?: number | null;
   avatarUrl: string;
+  issueCount?: number;
+  completedIssueCount?: number;
+  otherClosedIssueCount?: number | null;
+  solvedIssueCount?: number;
+  candidateIssueCount?: number;
+  reason?: string | null;
 }
 
 export interface RepoMinersResponse {
   fullName: string;
+  issueDiscoveryEnabled?: boolean;
   ossContributions: RepoMiner[];
   issueDiscoveries: RepoMiner[];
   fetched_at: number;

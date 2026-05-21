@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { withRotation } from '@/lib/github';
-import type { GtRepoSummary } from '@/types/entities';
+import { getReadDb } from '@/lib/db';
+import { backfillPrIssueLinksIfNeeded } from '@/lib/refresh';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,7 +9,29 @@ const REPOS_URL = 'https://api.gittensor.io/dash/repos';
 const PRS_URL = 'https://api.gittensor.io/prs';
 const TTL_MS = 30_000;
 
-interface UpstreamRepo { fullName: string; weight: string | number; inactiveAt?: string | null }
+interface UpstreamRepoConfig {
+  weight?: string | number;
+  emission_share?: string | number;
+  emissionShare?: string | number;
+  inactiveAt?: string | null;
+  inactive_at?: string | null;
+  eligibility_mode?: boolean;
+  issueDiscoveryShare?: string | number;
+  issue_discovery_share?: string | number;
+}
+
+interface UpstreamRepo {
+  fullName: string;
+  config?: UpstreamRepoConfig | null;
+  weight?: string | number;
+  emission_share?: string | number;
+  emissionShare?: string | number;
+  inactiveAt?: string | null;
+  inactive_at?: string | null;
+  eligibility_mode?: boolean;
+  issueDiscoveryShare?: string | number;
+  issue_discovery_share?: string | number;
+}
 interface UpstreamPr {
   repository: string;
   author?: string | null;
@@ -20,7 +43,7 @@ interface UpstreamPr {
 
 interface CachedAggregates {
   fetched_at: number;
-  byRepo: Map<string, { totalScore: number; mergedPrCount: number; contributors: Set<string>; weight: number; isActive: boolean }>;
+  byRepo: Map<string, { totalScore: number; mergedPrCount: number; contributors: Set<string>; weight: number; isActive: boolean; issueDiscoveryShare: number }>;
 }
 
 let cache: CachedAggregates | null = null;
@@ -31,17 +54,34 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function repoWeight(repo: UpstreamRepo): number {
+  return num(repo.config?.emission_share ?? repo.config?.emissionShare ?? repo.config?.weight ?? repo.emission_share ?? repo.emissionShare ?? repo.weight);
+}
+
+function repoInactiveAt(repo: UpstreamRepo): string | null {
+  const inactiveAt = repo.config?.inactive_at ?? repo.config?.inactiveAt ?? repo.inactive_at ?? repo.inactiveAt ?? null;
+  if (repo.config?.eligibility_mode === false || repo.eligibility_mode === false) return inactiveAt ?? 'ineligible';
+  return inactiveAt;
+}
+
+function repoIssueDiscoveryShare(repo: UpstreamRepo): number {
+  return num(repo.config?.issueDiscoveryShare ?? repo.config?.issue_discovery_share ?? repo.issueDiscoveryShare ?? repo.issue_discovery_share);
+}
+
 async function refresh(): Promise<CachedAggregates> {
   const [reposRaw, prsRaw] = await Promise.all([
     fetch(REPOS_URL, { cache: 'no-store', signal: AbortSignal.timeout(15_000) }).then((r) => r.json() as Promise<UpstreamRepo[]>),
     fetch(PRS_URL, { cache: 'no-store', signal: AbortSignal.timeout(15_000) }).then((r) => r.json() as Promise<UpstreamPr[]>),
   ]);
-  const byRepo = new Map<string, { totalScore: number; mergedPrCount: number; contributors: Set<string>; weight: number; isActive: boolean }>();
+  const byRepo = new Map<string, { totalScore: number; mergedPrCount: number; contributors: Set<string>; weight: number; isActive: boolean; issueDiscoveryShare: number }>();
   for (const r of reposRaw) {
-    byRepo.set(r.fullName, { totalScore: 0, mergedPrCount: 0, contributors: new Set<string>(), weight: num(r.weight), isActive: !r.inactiveAt });
+    const weight = repoWeight(r);
+    const inactiveAt = repoInactiveAt(r);
+    const issueDiscoveryShare = repoIssueDiscoveryShare(r);
+    byRepo.set(r.fullName.toLowerCase(), { totalScore: 0, mergedPrCount: 0, contributors: new Set<string>(), weight, isActive: !inactiveAt, issueDiscoveryShare });
   }
   for (const p of prsRaw) {
-    const a = byRepo.get(p.repository);
+    const a = byRepo.get(p.repository.toLowerCase());
     if (!a) continue;
     a.totalScore += num(p.score);
     if (p.mergedAt) {
@@ -75,24 +115,55 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       }),
     ]);
 
-    const a = agg.byRepo.get(fullName);
-    // Closed-issue count: exclude PRs (GitHub treats PRs as a kind of issue) by
-    // search API. We use a single search call instead of paginating /issues.
+    const a = agg.byRepo.get(fullName.toLowerCase());
     let closedIssueCount = 0;
+    let completedIssueCount = 0;
+    let usedFallbackClosedTotal = false;
     try {
-      const search = await withRotation(
-        (octokit) => octokit.rest.search.issuesAndPullRequests({
-          q: `repo:${fullName} is:issue is:closed`,
-          per_page: 1,
-        }),
-        { kind: 'search' },
-      );
-      closedIssueCount = search.data.total_count ?? 0;
+      backfillPrIssueLinksIfNeeded(fullName);
+      const HAS_MERGED_PR =
+        `EXISTS (SELECT 1 FROM pr_issue_links l
+                 JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
+                 WHERE l.repo_full_name = i.repo_full_name AND l.issue_number = i.number AND p.merged = 1)`;
+      const counts = getReadDb()
+        .prepare(
+          `SELECT
+             SUM(CASE WHEN i.state = 'closed' THEN 1 ELSE 0 END) AS closedIssueCount,
+             SUM(CASE WHEN i.state = 'closed'
+                       AND UPPER(COALESCE(i.state_reason,'')) = 'COMPLETED'
+                       AND ${HAS_MERGED_PR}
+                 THEN 1 ELSE 0 END) AS completedIssueCount
+           FROM issues i
+           WHERE LOWER(i.repo_full_name) = LOWER(?)`,
+        )
+        .get(fullName) as { closedIssueCount: number | null; completedIssueCount: number | null } | undefined;
+      closedIssueCount = counts?.closedIssueCount ?? 0;
+      completedIssueCount = counts?.completedIssueCount ?? 0;
     } catch {
       closedIssueCount = 0;
+      completedIssueCount = 0;
     }
 
-    const body: GtRepoSummary = {
+    if (closedIssueCount === 0) {
+      // Fallback only for a cold local cache. It gives the total but cannot
+      // safely split completed vs other closed without local PR links.
+      try {
+        const search = await withRotation(
+          (octokit) => octokit.rest.search.issuesAndPullRequests({
+            q: `repo:${fullName} is:issue is:closed`,
+            per_page: 1,
+          }),
+          { kind: 'search' },
+        );
+        closedIssueCount = search.data.total_count ?? 0;
+        usedFallbackClosedTotal = true;
+      } catch {
+        closedIssueCount = 0;
+      }
+    }
+    const otherClosedIssueCount = usedFallbackClosedTotal ? null : Math.max(0, closedIssueCount - completedIssueCount);
+
+    return NextResponse.json({
       fullName,
       owner: params.owner,
       name: params.name,
@@ -102,7 +173,11 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       totalScore: a?.totalScore ?? 0,
       mergedPrCount: a?.mergedPrCount ?? 0,
       contributorCount: a?.contributors.size ?? 0,
+      issueDiscoveryEnabled: (a?.issueDiscoveryShare ?? 0) > 0,
+      issueDiscoveryShare: a?.issueDiscoveryShare ?? 0,
       closedIssueCount,
+      completedIssueCount,
+      otherClosedIssueCount,
       // github-side metadata (null if repo missing/private)
       github: gh
         ? {
@@ -119,8 +194,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
             createdAt: gh.data.created_at,
           }
         : null,
-    };
-    return NextResponse.json(body);
+    });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 502 });
   }

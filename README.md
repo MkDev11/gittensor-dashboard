@@ -2,9 +2,23 @@
 
 A dashboard for miners on **Bittensor Subnet 74 (SN74)** — the subnet that rewards merged GitHub PRs in whitelisted open-source repos.
 
-It polls GitHub for issues and PRs across the 200+ SN74 repos (plus any you add), caches them in SQLite, and surfaces them in Browse, Issues, Pulls, My PRs, and Repositories views.
+It polls GitHub for issues and PRs across the 200+ SN74 repos (plus any you add), caches them in SQLite, and surfaces them in Dashboard, Explorer, Miners, Repositories, Issues, Pull Requests, and My PRs views.
 
 Built with Next.js 15 (App Router), TypeScript, Primer React, and `better-sqlite3`.
+
+## Main views
+
+- `/` redirects to `/dashboard`, the daily SN74 overview.
+- `/dashboard` shows network activity, scored PRs, issue discovery, reward-ranked Top Contributions, and PR/issue pipelines.
+- `/explorer` is the repo drill-down view for issues and pull requests.
+- `/miners`, `/repositories`, `/issues`, `/pulls`, and `/my-prs` provide focused global tables.
+
+Dashboard reward-share cards follow the Gittensor allocator at UI level:
+
+- Repo slice = `emission_share * 90%`.
+- Active `maintainer_cut` is removed only when registered maintainer miners exist.
+- The remaining slice is split by `issue_discovery_share`.
+- Empty PR/issue sub-pools spill within the same repo.
 
 ## Quick start
 

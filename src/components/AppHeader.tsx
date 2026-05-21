@@ -6,9 +6,10 @@ import { usePathname } from 'next/navigation';
 import { Box, Text } from '@primer/react';
 import {
   StackIcon,
+  ChecklistIcon,
   IssueOpenedIcon,
   GitPullRequestIcon,
-  TelescopeIcon,
+  GlobeIcon,
   BookIcon,
   PeopleIcon,
   PersonIcon,
@@ -26,7 +27,8 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { href: '/', label: 'Explorer', icon: TelescopeIcon },
+  { href: '/dashboard', label: 'Dashboard', icon: ChecklistIcon },
+  { href: '/explorer', label: 'Explorer', icon: GlobeIcon },
   { href: '/miners', label: 'Miners', icon: PeopleIcon },
   { href: '/repositories', label: 'Repositories', icon: StackIcon },
   { href: '/issues', label: 'Issues', icon: IssueOpenedIcon },
@@ -35,9 +37,16 @@ const navItems: NavItem[] = [
   { href: '/docs', label: 'Docs', icon: BookIcon },
 ];
 
-const mobilePrimaryHrefs = new Set(['/', '/miners', '/repositories', '/issues']);
-const mobilePrimaryItems = navItems.filter((item) => mobilePrimaryHrefs.has(item.href));
-const mobileOverflowItems = navItems.filter((item) => !mobilePrimaryHrefs.has(item.href));
+const mobilePrimaryHrefs = ['/dashboard', '/explorer', '/miners', '/repositories'];
+const mobileOverflowHrefs = ['/issues', '/pulls', '/my-prs', '/docs'];
+const mobilePrimaryHrefSet = new Set(mobilePrimaryHrefs);
+const mobilePrimaryItems = mobilePrimaryHrefs
+  .map((href) => navItems.find((item) => item.href === href))
+  .filter((item): item is NavItem => Boolean(item));
+const mobileOverflowItems = [
+  ...mobileOverflowHrefs.map((href) => navItems.find((item) => item.href === href)).filter((item): item is NavItem => Boolean(item)),
+  ...navItems.filter((item) => !mobilePrimaryHrefSet.has(item.href) && !mobileOverflowHrefs.includes(item.href)),
+];
 
 // Routes that should render full-bleed without the nav header (pre-auth screens).
 const HIDE_HEADER_ROUTES = new Set(['/sign-in']);
@@ -77,7 +86,7 @@ export default function AppHeader() {
   if (HIDE_HEADER_ROUTES.has(pathname)) return null;
 
   // Wrap in a plain div so the `data-app-header` attribute reliably lands
-  // on a DOM node — Primer's <Header> doesn't forward arbitrary data
+  // on a DOM node - Primer's <Header> doesn't forward arbitrary data
   // attributes, which is why CSS-driven show/hide couldn't target it before.
   // `userSelect: none` prevents nav-item text from getting highlighted on
   // accidental double-clicks (the sidebar applies the same to its <aside>).
@@ -86,7 +95,7 @@ export default function AppHeader() {
       <Box
         as="header"
         sx={{
-          bg: 'var(--bg-subtle)',
+          bg: 'var(--header-bg)',
           borderBottom: '1px solid',
           borderColor: 'var(--border-default)',
           minHeight: ['96px', null, '64px', null, '64px'],
@@ -107,7 +116,7 @@ export default function AppHeader() {
         }}
       >
         <Box sx={{ gridArea: 'brand', minWidth: 0, display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Link href="/" prefetch={false} style={{ minWidth: 0, textDecoration: 'none' }}>
+          <Link href="/dashboard" prefetch={false} style={{ minWidth: 0, textDecoration: 'none' }}>
             <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 2, minWidth: 0, color: 'var(--fg-default)' }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/gt-logo.png" alt="Gittensor Hub" width={28} height={28} style={{ display: 'block', flexShrink: 0 }} />
@@ -225,6 +234,7 @@ export default function AppHeader() {
         {mobilePrimaryItems.map((item) => (
           <MobileNavLink key={item.href} href={item.href} label={item.label} icon={item.icon} active={isActive(item.href)} />
         ))}
+        {mobileOverflowItems.length > 0 && (
         <Box sx={{ position: 'relative', minWidth: 0 }}>
           <button
             ref={moreButtonRef}
@@ -313,6 +323,7 @@ export default function AppHeader() {
             </div>
           )}
         </Box>
+        )}
       </Box>
     </div>
   );

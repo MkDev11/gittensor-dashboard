@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import type { GtRepo, GtPrSummary, GtReposResponse } from '@/types/entities';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +9,11 @@ const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 interface UpstreamRepoConfig {
   weight?: string | number;
+  emission_share?: string | number;
+  emissionShare?: string | number;
   inactiveAt?: string | null;
+  inactive_at?: string | null;
+  eligibility_mode?: boolean;
 }
 
 interface UpstreamRepo {
@@ -22,7 +25,11 @@ interface UpstreamRepo {
   // both are present.
   config?: UpstreamRepoConfig | null;
   weight?: string | number;
+  emission_share?: string | number;
+  emissionShare?: string | number;
   inactiveAt?: string | null;
+  inactive_at?: string | null;
+  eligibility_mode?: boolean;
 }
 
 interface UpstreamPr {
@@ -36,12 +43,47 @@ interface UpstreamPr {
   prState: string;
   score?: string | number | null;
   collateralScore?: string | number | null;
+  additions?: number | null;
+  deletions?: number | null;
+  commitCount?: number | null;
+}
+
+export interface GtRepo {
+  fullName: string;
+  owner: string;
+  name: string;
+  weight: number;
+  isActive: boolean;
+  inactiveAt: string | null;
+  totalScore: number;
+  totalPrCount: number;
+  mergedPrCount: number;
+  contributorCount: number;
+  collateralStaked: number;
+  prsThisWeek: number;
+  prsLastWeek: number;
+  trendingPct: number;
+  lastPrAt: string | null;
+}
+
+export interface GtPrSummary {
+  pullRequestNumber: number;
+  title: string;
+  repository: string;
+  author: string;
+  prCreatedAt: string;
+  prState: string;
+  mergedAt: string | null;
+  score: number | null;
+  additions: number | null;
+  deletions: number | null;
 }
 
 interface Cached {
   fetched_at: number;
   repos: GtRepo[];
   recentPrs: GtPrSummary[];
+  prs: GtPrSummary[];
 }
 
 let cache: Cached | null = null;
@@ -50,6 +92,22 @@ let inFlight: Promise<Cached> | null = null;
 function num(v: unknown): number {
   const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : 0;
   return Number.isFinite(n) ? n : 0;
+}
+
+function nullableNum(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : Number.NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+function repoWeight(repo: UpstreamRepo): number {
+  return num(repo.config?.emission_share ?? repo.config?.emissionShare ?? repo.config?.weight ?? repo.emission_share ?? repo.emissionShare ?? repo.weight);
+}
+
+function repoInactiveAt(repo: UpstreamRepo): string | null {
+  const inactiveAt = repo.config?.inactive_at ?? repo.config?.inactiveAt ?? repo.inactive_at ?? repo.inactiveAt ?? null;
+  if (repo.config?.eligibility_mode === false || repo.eligibility_mode === false) return inactiveAt ?? 'ineligible';
+  return inactiveAt;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -80,7 +138,8 @@ async function refresh(): Promise<Cached> {
   }
   const aggMap = new Map<string, Agg>();
   const ensure = (k: string): Agg => {
-    let a = aggMap.get(k);
+    const key = k.toLowerCase();
+    let a = aggMap.get(key);
     if (!a) {
       a = {
         totalScore: 0,
@@ -92,7 +151,7 @@ async function refresh(): Promise<Cached> {
         contributors: new Set<string>(),
         lastPrAt: 0,
       };
-      aggMap.set(k, a);
+      aggMap.set(key, a);
     }
     return a;
   };
@@ -114,7 +173,7 @@ async function refresh(): Promise<Cached> {
   }
 
   const repos: GtRepo[] = reposRaw.map((r) => {
-    const a = aggMap.get(r.fullName);
+    const a = aggMap.get(r.fullName.toLowerCase());
     const prsThisWeek = a?.prsThisWeek ?? 0;
     const prsLastWeek = a?.prsLastWeek ?? 0;
     // % growth this week vs last; if last week was 0, use this week as the
@@ -122,8 +181,8 @@ async function refresh(): Promise<Cached> {
     const trendingPct = prsLastWeek > 0
       ? ((prsThisWeek - prsLastWeek) / prsLastWeek) * 100
       : prsThisWeek > 0 ? prsThisWeek * 100 : 0;
-    const weight = num(r.config?.weight ?? r.weight);
-    const inactiveAt = r.config?.inactiveAt ?? r.inactiveAt ?? null;
+    const weight = repoWeight(r);
+    const inactiveAt = repoInactiveAt(r);
     return {
       fullName: r.fullName,
       owner: r.owner,
@@ -143,10 +202,9 @@ async function refresh(): Promise<Cached> {
     };
   });
 
-  const recentPrs: GtPrSummary[] = [...prsRaw]
+  const prs: GtPrSummary[] = [...prsRaw]
     .filter((p) => p.prCreatedAt)
     .sort((a, b) => Date.parse(b.prCreatedAt) - Date.parse(a.prCreatedAt))
-    .slice(0, 10)
     .map((p) => ({
       pullRequestNumber: p.pullRequestNumber,
       title: p.pullRequestTitle,
@@ -155,14 +213,18 @@ async function refresh(): Promise<Cached> {
       prCreatedAt: p.prCreatedAt,
       prState: p.prState,
       mergedAt: p.mergedAt,
+      score: nullableNum(p.score),
+      additions: nullableNum(p.additions),
+      deletions: nullableNum(p.deletions),
     }));
+  const recentPrs = prs.slice(0, 10);
 
-  const next: Cached = { fetched_at: now, repos, recentPrs };
+  const next: Cached = { fetched_at: now, repos, recentPrs, prs };
   cache = next;
   return next;
 }
 
-function payload(c: Cached, source: 'live' | 'cache' | 'stale'): GtReposResponse {
+function payload(c: Cached, source: 'live' | 'cache' | 'stale') {
   const active = c.repos.filter((r) => r.isActive).length;
   return {
     fetched_at: c.fetched_at,
@@ -172,6 +234,7 @@ function payload(c: Cached, source: 'live' | 'cache' | 'stale'): GtReposResponse
     inactiveCount: c.repos.length - active,
     repos: c.repos,
     recentPrs: c.recentPrs,
+    prs: c.prs,
   };
 }
 

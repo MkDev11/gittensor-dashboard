@@ -172,7 +172,8 @@ export function getDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS repo_weights (
       full_name   TEXT PRIMARY KEY,
       weight      REAL NOT NULL DEFAULT 0,
-      updated_at  TEXT NOT NULL
+      updated_at  TEXT NOT NULL,
+      config_json TEXT
     );
 
     CREATE TABLE IF NOT EXISTS issue_comments (
@@ -242,6 +243,11 @@ export function getDb(): Database.Database {
   }
   if (!haveCol('issue_body_links_backfilled_at')) {
     db.exec('ALTER TABLE repo_meta ADD COLUMN issue_body_links_backfilled_at TEXT');
+  }
+
+  const repoWeightsCols = db.prepare('PRAGMA table_info(repo_weights)').all() as Array<{ name: string }>;
+  if (!repoWeightsCols.some((c) => c.name === 'config_json')) {
+    db.exec('ALTER TABLE repo_weights ADD COLUMN config_json TEXT');
   }
 
   // `pulls.author_association` was added later to mirror the issues table —
