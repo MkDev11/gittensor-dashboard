@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, getReadDb, PullRow } from '@/lib/db';
+import { getReadDb, PullRow } from '@/lib/db';
 import { refreshPullsIfStale } from '@/lib/refresh';
 import { buildEtag, etagNotModified, withEtagHeaders } from '@/lib/etag';
 import { authorCredibilityForRepo, getGittensorCredibilityIndex } from '@/lib/gittensor-credibility';
@@ -156,8 +156,8 @@ export async function GET(
   let new_count: number | undefined;
   if (since) {
     new_count = (db
-      .prepare(`SELECT COUNT(*) AS c FROM pulls WHERE repo_full_name = ? AND first_seen_at > ?`)
-      .get(full, since) as { c: number }).c;
+      .prepare(`SELECT COUNT(*) AS c FROM pulls WHERE repo_full_name = ? AND state = 'open' AND draft = 0 AND merged = 0 AND COALESCE(created_at, '') > ? AND first_seen_at > ?`)
+      .get(full, since, since) as { c: number }).c;
   }
 
   const meta = meta0;

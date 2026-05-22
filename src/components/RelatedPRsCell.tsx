@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text } from '@primer/react';
 import { GitPullRequestIcon } from '@primer/octicons-react';
 
@@ -45,9 +45,9 @@ export default function RelatedPRsCell({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [popoverLayout, setPopoverLayout] = useState<RelatedPopoverLayout>(DEFAULT_RELATED_POPOVER_LAYOUT);
 
-  const updatePopoverLayout = () => {
+  const updatePopoverLayout = useCallback(() => {
     setPopoverLayout(relatedPopoverLayout(wrapRef.current, prs.length));
-  };
+  }, [prs.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -70,7 +70,7 @@ export default function RelatedPRsCell({
       document.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, prs.length]);
+  }, [open, updatePopoverLayout]);
 
   if (prs.length === 0) {
     return <Text sx={{ color: 'var(--fg-muted)', fontFamily: 'mono', fontSize: 0 }}>—</Text>;

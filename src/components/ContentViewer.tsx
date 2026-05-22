@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   XIcon,
@@ -39,7 +39,6 @@ interface ContentViewerProps {
   target: ContentTarget;
   mode: 'modal' | 'inline' | 'side';
   onClose: () => void;
-  width?: number;
 }
 
 function preserveExistingBody<T extends Issue | Pull>(next: T, current: T | null): T {
@@ -100,9 +99,11 @@ type IssueTimelineEvent = {
   will_close: boolean | null;
 };
 
-export default function ContentViewer({ target, mode, onClose, width }: ContentViewerProps) {
+export default function ContentViewer({ target, mode, onClose }: ContentViewerProps) {
   const { settings } = useSettings();
   const targetKey = `${target.kind}:${target.owner}/${target.name}#${target.number}`;
+  const targetRef = useRef(target);
+  targetRef.current = target;
   const bodyScrollRef = useRef<HTMLDivElement | null>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const [issueData, setIssueData] = useState<Issue | null>(
@@ -130,14 +131,15 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
 
   // Reset all state when the underlying target changes
   useEffect(() => {
-    if (target.kind === 'issue') {
-      setIssueData((target.preloaded as Issue | undefined) ?? null);
+    const currentTarget = targetRef.current;
+    if (currentTarget.kind === 'issue') {
+      setIssueData((currentTarget.preloaded as Issue | undefined) ?? null);
       setPullData(null);
       setActiveTab({ kind: 'issue' });
     } else {
       setIssueData(null);
-      setPullData((target.preloaded as Pull | undefined) ?? null);
-      setActiveTab({ kind: 'pull', number: target.number });
+      setPullData((currentTarget.preloaded as Pull | undefined) ?? null);
+      setActiveTab({ kind: 'pull', number: currentTarget.number });
     }
     setLinkedIssueData(null);
     setRelatedPRs([]);
@@ -197,7 +199,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
         if (fetchedForRef.current !== key) return;
         setLoading(false);
       });
-  }, [targetKey]);
+  }, [target.kind, target.name, target.number, target.owner, targetKey]);
 
   // Fetch related PRs for issue mode (so we can show tabs)
   useEffect(() => {
@@ -208,7 +210,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
       .then((j) => setRelatedPRs(Array.isArray(j.pulls) ? (j.pulls as Pull[]) : []))
       .catch(() => setRelatedPRs([]))
       .finally(() => setRelatedPRsLoaded(true));
-  }, [targetKey]);
+  }, [target.kind, target.name, target.number, target.owner, targetKey]);
 
   useEffect(() => {
     if (target.kind !== 'pull') return;
@@ -228,7 +230,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
         setRelatedPRs([]);
       })
       .finally(() => setRelatedPRsLoaded(true));
-  }, [targetKey]);
+  }, [target.kind, target.name, target.number, target.owner, targetKey]);
 
   const activeIssueNumber =
     activeTab.kind === 'issue'
@@ -236,12 +238,17 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
         ? target.number
         : linkedIssueData?.number ?? null
       : null;
-  const activeTimelineTarget =
-    activeTab.kind === 'issue'
-      ? activeIssueNumber
+  const activeTabPullNumber = activeTab.kind === 'pull' ? activeTab.number : null;
+  const activeTimelineTarget = useMemo(() => {
+    if (activeTab.kind === 'issue') {
+      return activeIssueNumber
         ? { kind: 'issue' as const, owner: target.owner, name: target.name, number: activeIssueNumber }
-        : null
-      : { kind: 'pull' as const, owner: target.owner, name: target.name, number: activeTab.number };
+        : null;
+    }
+    return activeTabPullNumber === null
+      ? null
+      : { kind: 'pull' as const, owner: target.owner, name: target.name, number: activeTabPullNumber };
+  }, [activeIssueNumber, activeTab.kind, activeTabPullNumber, target.name, target.owner]);
   const activeTimelineKey = activeTimelineTarget
     ? `${activeTimelineTarget.kind}:${activeTimelineTarget.owner}/${activeTimelineTarget.name}#${activeTimelineTarget.number}`
     : 'none';
@@ -276,7 +283,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
         if (!ctrl.signal.aborted) setTimelineLoaded(true);
       });
     return () => ctrl.abort();
-  }, [activeTimelineKey]);
+  }, [activeTimelineKey, activeTimelineTarget]);
 
   useEffect(() => {
     if (mode !== 'modal') return;
@@ -423,7 +430,7 @@ export default function ContentViewer({ target, mode, onClose, width }: ContentV
   }
 
   if (mode === 'side') {
-    return <SidePanel inner={inner} onClose={onClose} width={width ?? 440} resetKey={`${targetKey}:${activeTabKey}`} />;
+    return <SidePanel inner={inner} onClose={onClose} resetKey={`${targetKey}:${activeTabKey}`} />;
   }
 
   const modal = (
@@ -472,12 +479,10 @@ function mergeActivePull(related: Pull | null, detailed: Pull | null): Pull | nu
 function SidePanel({
   inner,
   onClose,
-  width,
   resetKey,
 }: {
   inner: React.ReactNode;
   onClose: () => void;
-  width: number;
   resetKey: string;
 }) {
   const [isClosing, setIsClosing] = useState(false);

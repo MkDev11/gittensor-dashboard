@@ -2,12 +2,12 @@
 
 export const dynamic = 'force-dynamic';
 
-import React, { useState } from 'react';
+import React from 'react';
 import { useRouter } from 'next/navigation';
 import { PageLayout, Heading, Text, Box } from '@primer/react';
 import Spinner from '@/components/Spinner';
 import { GearIcon, PaintbrushIcon, BellIcon, RepoIcon, PersonIcon, EyeIcon, ArrowLeftIcon } from '@primer/octicons-react';
-import { useSettings, DEFAULT_SETTINGS, useSession } from '@/lib/settings';
+import { useSettings, useSession } from '@/lib/settings';
 import { useTheme } from '@/lib/theme';
 import Dropdown from '@/components/Dropdown';
 

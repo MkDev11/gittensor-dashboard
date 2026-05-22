@@ -2,9 +2,9 @@
 
 export const dynamic = 'force-dynamic';
 
-import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { PageLayout, Heading, Text, Box, Label, Link as PrimerLink } from '@primer/react';
 import {
@@ -83,6 +83,8 @@ export default function PullsPage() {
 }
 
 function AllPullsPage() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { repos: sn74Repos, weights: repoWeights, isSuccess: sn74ReposReady } = useSn74Repos();
   const { tracked, toggle: toggleTrackedRepo } = useTrackedRepos();
@@ -107,6 +109,21 @@ function AllPullsPage() {
   useEffect(() => {
     setMineOnly(mineOnlyFromUrl);
   }, [mineOnlyFromUrl]);
+
+  const setMineOnlyWithUrl = useCallback(
+    (next: boolean) => {
+      setMineOnly(next);
+      const sp = new URLSearchParams(searchParams.toString());
+      if (next) {
+        sp.set('mine', '1');
+      } else {
+        sp.delete('mine');
+      }
+      const qs = sp.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const { data: userReposData, isSuccess: userReposReady } = useQuery<UserReposResp>({
     queryKey: ['user-repos'],
@@ -315,7 +332,7 @@ function AllPullsPage() {
               </ToggleButton>
               <ToggleButton
                 active={mineOnly}
-                onClick={() => setMineOnly((v) => !v)}
+                onClick={() => setMineOnlyWithUrl(!mineOnly)}
                 tone="attention"
               >
                 My PRs only{myCount > 0 ? ` (${myCount})` : ''}
@@ -387,7 +404,7 @@ function AllPullsPage() {
                       <AuthorFilter
                         value={mineOnly ? me || 'all' : authorFilter}
                         onChange={(next) => {
-                          setMineOnly(false);
+                          setMineOnlyWithUrl(false);
                           setAuthorFilter(next);
                         }}
                         authors={authorOptions}

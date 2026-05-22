@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb, getReadDb, IssueRow } from '@/lib/db';
+import { getReadDb, IssueRow } from '@/lib/db';
 import { refreshIssuesIfStale, backfillPrIssueLinksIfNeeded } from '@/lib/refresh';
 import { buildEtag, etagNotModified, withEtagHeaders } from '@/lib/etag';
 import { getSessionFromCookies } from '@/lib/auth';
@@ -287,8 +287,8 @@ export async function GET(
   let new_count: number | undefined;
   if (since) {
     new_count = (db
-      .prepare(`SELECT COUNT(*) AS c FROM issues WHERE repo_full_name = ? AND first_seen_at > ?`)
-      .get(full, since) as { c: number }).c;
+      .prepare(`SELECT COUNT(*) AS c FROM issues WHERE repo_full_name = ? AND state = 'open' AND COALESCE(created_at, '') > ? AND first_seen_at > ?`)
+      .get(full, since, since) as { c: number }).c;
   }
 
   const meta = meta0;

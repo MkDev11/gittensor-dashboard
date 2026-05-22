@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useState } from 'react';
 import { Box } from '@primer/react';
 import { XIcon, IssueOpenedIcon, GitPullRequestIcon, BellIcon } from '@primer/octicons-react';
 

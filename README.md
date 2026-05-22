@@ -32,6 +32,17 @@ pnpm dev                           # http://localhost:12074
 
 Requires Node 20+ and pnpm.
 
+## Development checks
+
+```bash
+pnpm run lint
+pnpm run lint:warnings
+pnpm exec tsc --noEmit --incremental false
+pnpm build
+```
+
+`pnpm run lint` is warning-free and matches the CI lint gate. Use `pnpm run lint:warnings` when you want the full ESLint report locally.
+
 ## GitHub setup
 
 You need an **OAuth App** (sign-in) and one or more **Personal Access Tokens** (polling).

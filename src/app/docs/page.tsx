@@ -3,7 +3,7 @@
 export const dynamic = 'force-dynamic';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { PageLayout, Heading, Text, Box, Label } from '@primer/react';
+import { PageLayout, Heading, Text, Box } from '@primer/react';
 import {
   BookIcon,
   ChecklistIcon,

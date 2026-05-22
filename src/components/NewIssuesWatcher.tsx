@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useToast } from '@/lib/toast';
@@ -72,7 +72,7 @@ export default function NewIssuesWatcher() {
   const { data } = useQuery<IssuesResp>({
     queryKey: ['watcher-issues', sinceParam],
     queryFn: async ({ signal }) => {
-      const url = `/api/issues?since=${encodeURIComponent(sinceParam)}`;
+      const url = `/api/issues?since=${encodeURIComponent(sinceParam)}&state=open`;
       const r = await fetch(url, { signal });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();

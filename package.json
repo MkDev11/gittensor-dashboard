@@ -6,7 +6,7 @@
     "dev": "next dev -p 12074",
     "build": "next build",
     "start": "next start -p 12074",
-    "lint": "eslint . --quiet",
+    "lint": "eslint . --max-warnings=0",
     "lint:warnings": "eslint ."
   },
   "dependencies": {

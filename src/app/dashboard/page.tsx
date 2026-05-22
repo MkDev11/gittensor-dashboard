@@ -257,12 +257,6 @@ function fmtNumber(value: number): string {
   return value.toFixed(3);
 }
 
-function fmtToken(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0';
-  if (value >= 100) return value.toFixed(0);
-  if (value >= 10) return value.toFixed(2);
-  return value.toFixed(3);
-}
 
 function relative(value: string | number | null | undefined): string {
   if (!value) return 'pending';
@@ -749,7 +743,7 @@ export default function DashboardPage() {
     refetchInterval: 10_000,
   });
 
-  const repos = reposQuery.data?.repos ?? [];
+  const repos = useMemo(() => reposQuery.data?.repos ?? [], [reposQuery.data?.repos]);
   const activeRepos = useMemo(() => repos.filter((repo) => !repo.inactiveAt && repo.emissionShare > 0), [repos]);
   const activeRepoNames = useMemo(() => activeRepos.map((repo) => repo.fullName).sort(), [activeRepos]);
   const activeRepoSet = useMemo(() => new Set(activeRepoNames.map((repo) => repo.toLowerCase())), [activeRepoNames]);
@@ -822,9 +816,9 @@ export default function DashboardPage() {
     enabled: activeRepoNames.length > 0,
     refetchInterval: 30_000,
   });
-  const issues = issuesQuery.data?.issues ?? [];
-  const gtRepos = gtReposQuery.data?.repos ?? [];
-  const gtPrMetrics = gtReposQuery.data?.prs ?? [];
+  const issues = useMemo(() => issuesQuery.data?.issues ?? [], [issuesQuery.data?.issues]);
+  const gtRepos = useMemo(() => gtReposQuery.data?.repos ?? [], [gtReposQuery.data?.repos]);
+  const gtPrMetrics = useMemo(() => gtReposQuery.data?.prs ?? [], [gtReposQuery.data?.prs]);
 
   const localPullByKey = useMemo(() => {
     const map = new Map<string, PullDto>();
@@ -1161,7 +1155,7 @@ export default function DashboardPage() {
   const statSparkDuration = useMemo(() => {
     const ms = activeRepos.reduce((max, repo) => Math.max(max, repoWindowMs(durationKey, duration.ms, repo)), duration.ms);
     return { ...duration, ms };
-  }, [activeRepos, duration, duration.ms, durationKey]);
+  }, [activeRepos, duration, durationKey]);
   const statSparks = useMemo(() => {
     const resolvedIssues = rangeIssues.filter((issue) => {
       const stage = issuePipelineKey(issue, pipelinePullByKey, repoByName, issueScores);
@@ -1653,7 +1647,6 @@ function StatSparkline({ points, tone, duration, unit }: { points: number[]; ton
     };
   });
   const linePath = hasActivity ? smoothPath(coords) : `M ${pad.x} ${baseline} L ${width - pad.x} ${baseline}`;
-  const latest = coords[coords.length - 1] ?? { x: width - pad.x, y: baseline, value: 0, scaled: 0 };
   const peakIndex = hasActivity ? coords.reduce((bestIndex, point, index) => (point.value > coords[bestIndex].value ? index : bestIndex), 0) : -1;
   const sparkKey = `${Math.round(width)}:${values.map((value) => Math.round(value * 100) / 100).join('-')}`;
   const hoveredValue = hoveredIndex === null ? 0 : values[hoveredIndex] ?? 0;
@@ -1781,20 +1774,7 @@ function smoothPath(points: Array<{ x: number; y: number }>): string {
     .join(' ');
 }
 
-// Closed-area path built from a top edge (left→right) and a bottom edge
-// (left→right). The bottom edge is traversed in reverse so the path outlines
-// a filled band. Used by the stacked area chart.
-function areaPath(top: Array<{ x: number; y: number }>, bottom: Array<{ x: number; y: number }>): string {
-  if (top.length === 0) return '';
-  const topD = smoothPath(top);
-  const bottomReversed = [...bottom].reverse();
-  const bottomD = smoothPath(bottomReversed).replace(/^M\s+/, 'L ');
-  return `${topD} ${bottomD} Z`;
-}
 
-// Pick a "nice" rounded ceiling for y-axis max so the labels land on
-// readable values (10, 25, 50, 100, 250, 500, 1000…) instead of multiples
-// of (maxValue / 4).
 function niceCeil(value: number): number {
   if (value <= 4) return 4;
   const exp = Math.floor(Math.log10(value));
@@ -2245,7 +2225,7 @@ function BestWorkMiniPr({ row }: { row: BestWorkPull }) {
       <article className="best-work-mini-card">
         <div className="best-work-mini-top">
           <span className="best-work-mini-identity">
-            <img src={`https://github.com/${pr.repo_full_name.split('/')[0]}.png?size=40`} alt="" className="best-work-mini-repo-avatar" />
+            <Box as="img" src={`https://github.com/${pr.repo_full_name.split('/')[0]}.png?size=40`} alt="" className="best-work-mini-repo-avatar" />
             <span className="best-work-mini-repo-name">{pr.repo_full_name}</span>
           </span>
           <MetricChip tone="success" title="Modeled subnet emission share (reward) represented by this PR.">{fmtPct(row.reward)}</MetricChip>
@@ -2253,7 +2233,7 @@ function BestWorkMiniPr({ row }: { row: BestWorkPull }) {
         <span className="best-work-mini-title">#{pr.number} {pr.title}</span>
         <div className="best-work-mini-bottom">
           <span className="best-work-mini-identity">
-            <img src={`https://github.com/${author}.png?size=40`} alt="" className="best-work-mini-author-avatar" />
+            <Box as="img" src={`https://github.com/${author}.png?size=40`} alt="" className="best-work-mini-author-avatar" />
             <span className="best-work-mini-author-name">{author}</span>
             <RoleBadge association={pr.author_association} />
           </span>

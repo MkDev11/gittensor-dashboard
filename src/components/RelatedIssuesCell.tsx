@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Box, Text } from '@primer/react';
 import { IssueClosedIcon, IssueOpenedIcon, SkipIcon } from '@primer/octicons-react';
 import type { LinkedIssueReference } from '@/types/entities';
@@ -37,9 +37,9 @@ export default function RelatedIssuesCell({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [popoverLayout, setPopoverLayout] = useState<RelatedPopoverLayout>(DEFAULT_RELATED_POPOVER_LAYOUT);
 
-  const updatePopoverLayout = () => {
+  const updatePopoverLayout = useCallback(() => {
     setPopoverLayout(relatedPopoverLayout(wrapRef.current, issues.length));
-  };
+  }, [issues.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -60,7 +60,7 @@ export default function RelatedIssuesCell({
       document.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, issues.length]);
+  }, [open, updatePopoverLayout]);
 
   if (issues.length === 0) {
     return <Text sx={{ color: 'var(--fg-muted)', fontFamily: 'mono', fontSize: 0 }}>—</Text>;
