@@ -12,6 +12,8 @@ const TTL_MS = 30_000;
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SERIES_DAYS = 14;
+const DEFAULT_PR_LOOKBACK_DAYS = 30;
+const MAINTAINER_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
 interface UpstreamRepoConfig {
   // Upstream renamed `weight` → `emissionShare`. Keep both for back-compat
@@ -31,6 +33,10 @@ interface UpstreamRepoConfig {
   inactive_at?: string | null;
   eligibilityMode?: boolean;
   eligibility_mode?: boolean;
+  scoring?: {
+    prLookbackDays?: string | number | null;
+    pr_lookback_days?: string | number | null;
+  } | null;
 }
 
 interface UpstreamRepo {
@@ -143,6 +149,14 @@ interface CountRow {
   cnt: number;
 }
 
+interface OpenPrRow {
+  repo: string;
+  author: string;
+  authorAssociation: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 interface OpenPrPressure {
   total: number;
   maxByAuthor: number;
@@ -168,25 +182,48 @@ function countOpenIssuesByRepo(): Map<string, number> {
   }
 }
 
-function openPrPressureByRepo(): Map<string, OpenPrPressure> {
+function repoPrLookbackDays(repo: UpstreamRepo): number {
+  const days = nullableNum(repo.config?.scoring?.prLookbackDays ?? repo.config?.scoring?.pr_lookback_days);
+  return days != null && days > 0 ? days : DEFAULT_PR_LOOKBACK_DAYS;
+}
+
+function openPrPressureByRepo(lookbackDaysByRepo: Map<string, number>): Map<string, OpenPrPressure> {
   // Gittensor's excessive-open-PR rule is per miner within a repo. The UI
   // therefore needs the busiest author's open count, not repo-wide average PRs.
+  // The validator also drops maintainer-authored PRs and only sees PRs inside
+  // each repo's scoring lookback window.
   try {
     const rows = getReadDb()
       .prepare(
         `SELECT repo_full_name as repo,
-                COUNT(*) as cnt
+                author_login as author,
+                author_association as authorAssociation,
+                created_at as createdAt,
+                updated_at as updatedAt
          FROM pulls
          WHERE state = 'open' AND draft = 0
-         GROUP BY repo_full_name, COALESCE(NULLIF(author_login, ''), '(unknown)')`,
+           AND author_login IS NOT NULL AND author_login != ''`,
       )
-      .all() as CountRow[];
-    const m = new Map<string, OpenPrPressure>();
+      .all() as OpenPrRow[];
+    const byAuthor = new Map<string, number>();
+    const now = Date.now();
     for (const r of rows) {
-      const key = r.repo.toLowerCase();
+      const association = r.authorAssociation?.toUpperCase() ?? '';
+      if (MAINTAINER_ASSOCIATIONS.has(association)) continue;
+      const repoKey = r.repo.toLowerCase();
+      const lookbackDays = lookbackDaysByRepo.get(repoKey) ?? DEFAULT_PR_LOOKBACK_DAYS;
+      const cutoff = now - lookbackDays * DAY_MS;
+      const activityMs = Date.parse(r.updatedAt || r.createdAt || '');
+      if (!Number.isFinite(activityMs) || activityMs < cutoff) continue;
+      const authorKey = `${repoKey}\0${r.author.toLowerCase()}`;
+      byAuthor.set(authorKey, (byAuthor.get(authorKey) ?? 0) + 1);
+    }
+    const m = new Map<string, OpenPrPressure>();
+    for (const [authorKey, cnt] of byAuthor) {
+      const key = authorKey.split('\0', 1)[0];
       const current = m.get(key) ?? { total: 0, maxByAuthor: 0, authorCount: 0 };
-      current.total += r.cnt;
-      current.maxByAuthor = Math.max(current.maxByAuthor, r.cnt);
+      current.total += cnt;
+      current.maxByAuthor = Math.max(current.maxByAuthor, cnt);
       current.authorCount += 1;
       m.set(key, current);
     }
@@ -266,7 +303,8 @@ async function refresh(): Promise<Cached> {
     fetchJson<UpstreamPr[]>(PRS_URL),
     getLiveReposAsyncServer(),
   ]);
-  const openPrPressure = openPrPressureByRepo();
+  const lookbackDaysByRepo = new Map(reposRaw.map((r) => [r.fullName.toLowerCase(), repoPrLookbackDays(r)]));
+  const openPrPressure = openPrPressureByRepo(lookbackDaysByRepo);
   const openIssueByRepo = countOpenIssuesByRepo();
   const dbLastPrByRepo = lastPrAtByRepo();
   const sn74ByRepo = new Map<string, (typeof sn74.repos)[number]>();

@@ -12,6 +12,7 @@ const TTL_MS = 30_000;
 const TOP_MINERS_LIMIT = 5;
 const OSS_WINDOW_DAYS = 30;
 const OSS_WINDOW_MS = OSS_WINDOW_DAYS * 86_400_000;
+const MAINTAINER_SQL = "UPPER(COALESCE(author_association,'')) IN ('OWNER','MEMBER','COLLABORATOR')";
 
 interface UpstreamPr {
   repository: string;
@@ -62,20 +63,21 @@ function localContributorsForRepo(fullName: string): RepoMiner[] {
     const cutoffIso = new Date(Date.now() - OSS_WINDOW_MS).toISOString();
     const rows = getReadDb()
       .prepare(
-        `SELECT author_login as author, COUNT(*) as prCount,
-                SUM(CASE WHEN merged = 1 THEN 1 ELSE 0 END) as mergedCount
+        `SELECT author_login as author, COUNT(*) as prCount
          FROM pulls
          WHERE repo_full_name = ? COLLATE NOCASE AND author_login IS NOT NULL AND author_login != ''
-           AND COALESCE(NULLIF(merged_at, ''), created_at) >= ?
+           AND merged = 1
+           AND NOT (${MAINTAINER_SQL})
+           AND merged_at IS NOT NULL AND merged_at >= ?
          GROUP BY author_login
-         ORDER BY mergedCount DESC, prCount DESC
+         ORDER BY prCount DESC
          LIMIT ?`,
       )
-      .all(fullName, cutoffIso, TOP_MINERS_LIMIT) as Array<{ author: string; prCount: number; mergedCount: number }>;
+      .all(fullName, cutoffIso, TOP_MINERS_LIMIT) as Array<{ author: string; prCount: number }>;
     return rows.map((r) => ({
       githubId: '',
       githubUsername: r.author,
-      prCount: r.mergedCount > 0 ? r.mergedCount : r.prCount,
+      prCount: r.prCount,
       score: 0,
       ossRank: null,
       globalScore: null,
@@ -84,6 +86,10 @@ function localContributorsForRepo(fullName: string): RepoMiner[] {
   } catch {
     return [];
   }
+}
+
+function maintainerExpr(alias: string): string {
+  return `UPPER(COALESCE(${alias}.author_association,'')) IN ('OWNER','MEMBER','COLLABORATOR')`;
 }
 
 function issueDiscoveryReason(row: {
@@ -198,7 +204,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
     // validator's per-issue earned score, so expose candidates + solved counts
     // instead of a fake score.
     backfillPrIssueLinksIfNeeded(fullName);
-    const IS_MAINTAINER = `UPPER(COALESCE(i.author_association,'')) IN ('OWNER','MEMBER','COLLABORATOR')`;
+    const IS_MAINTAINER = maintainerExpr('i');
     const HAS_MERGED_PR =
       `EXISTS (SELECT 1 FROM pr_issue_links l
                JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
@@ -216,12 +222,21 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
                WHERE l.repo_full_name = i.repo_full_name
                  AND l.issue_number = i.number
                  AND p.merged = 1
+                 AND p.author_login IS NOT NULL AND p.author_login != ''
                  AND LOWER(COALESCE(p.author_login,'')) <> LOWER(COALESCE(i.author_login,''))
                  AND NOT EXISTS (
                    SELECT 1 FROM pr_issue_links l2
                    JOIN issues i2 ON i2.repo_full_name = l2.repo_full_name AND i2.number = l2.issue_number
+                   JOIN pulls p2 ON p2.repo_full_name = l2.repo_full_name AND p2.number = l2.pr_number
                    WHERE l2.repo_full_name = l.repo_full_name
                      AND l2.pr_number = l.pr_number
+                     AND i2.author_login IS NOT NULL AND i2.author_login != ''
+                     AND i2.state = 'closed'
+                     AND UPPER(COALESCE(i2.state_reason,'')) = 'COMPLETED'
+                     AND NOT (${maintainerExpr('i2')})
+                     AND p2.merged = 1
+                     AND p2.author_login IS NOT NULL AND p2.author_login != ''
+                     AND LOWER(COALESCE(p2.author_login,'')) <> LOWER(COALESCE(i2.author_login,''))
                      AND (
                        COALESCE(i2.created_at, '9999-12-31T23:59:59Z') < COALESCE(i.created_at, '9999-12-31T23:59:59Z')
                        OR (COALESCE(i2.created_at, '9999-12-31T23:59:59Z') = COALESCE(i.created_at, '9999-12-31T23:59:59Z') AND i2.number < i.number)
