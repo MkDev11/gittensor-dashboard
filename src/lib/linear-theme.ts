@@ -1,7 +1,8 @@
 import { theme as primerTheme } from '@primer/react';
 
-/* Linear-inspired override for Primer's theme. Swaps both color schemes
- * so sx-prop consumers (`bg: 'canvas.subtle'` etc.) track the new palette. */
+/* Linear-inspired override for Primer's theme. The color tokens resolve
+ * through CSS variables, so sx-prop consumers (`bg: 'canvas.subtle'` etc.)
+ * follow the pre-paint data-theme before React color mode hydrates. */
 
 interface LinearColors {
   canvas: { default: string; overlay: string; inset: string; subtle: string };
@@ -182,6 +183,95 @@ function deepMerge<T extends AnyRecord>(base: T, override: Partial<T>): T {
   return out as T;
 }
 
+function cssVar(name: string, fallback: string): string {
+  return `var(${name}, ${fallback})`;
+}
+
+function cssVarColors(fallback: LinearColors): LinearColors {
+  return {
+    canvas: {
+      default: cssVar('--bg-canvas', fallback.canvas.default),
+      overlay: cssVar('--bg-overlay', fallback.canvas.overlay),
+      inset: cssVar('--bg-inset', fallback.canvas.inset),
+      subtle: cssVar('--bg-subtle', fallback.canvas.subtle),
+    },
+    fg: {
+      default: cssVar('--fg-default', fallback.fg.default),
+      muted: cssVar('--fg-muted', fallback.fg.muted),
+      subtle: cssVar('--fg-subtle', fallback.fg.subtle),
+      onEmphasis: cssVar('--fg-on-emphasis', fallback.fg.onEmphasis),
+    },
+    border: {
+      default: cssVar('--border-default', fallback.border.default),
+      muted: cssVar('--border-muted', fallback.border.muted),
+      subtle: cssVar('--border-subtle', fallback.border.subtle),
+    },
+    accent: {
+      fg: cssVar('--accent-fg', fallback.accent.fg),
+      emphasis: cssVar('--accent-emphasis', fallback.accent.emphasis),
+      subtle: cssVar('--accent-subtle', fallback.accent.subtle),
+      muted: cssVar('--accent-muted', fallback.accent.muted),
+    },
+    success: {
+      fg: cssVar('--success-fg', fallback.success.fg),
+      emphasis: cssVar('--success-emphasis', fallback.success.emphasis),
+      subtle: cssVar('--success-subtle', fallback.success.subtle),
+      muted: cssVar('--success-muted', fallback.success.muted),
+    },
+    attention: {
+      fg: cssVar('--attention-fg', fallback.attention.fg),
+      emphasis: cssVar('--attention-emphasis', fallback.attention.emphasis),
+      subtle: cssVar('--attention-subtle', fallback.attention.subtle),
+      muted: cssVar('--attention-muted', fallback.attention.muted),
+    },
+    danger: {
+      fg: cssVar('--danger-fg', fallback.danger.fg),
+      emphasis: cssVar('--danger-emphasis', fallback.danger.emphasis),
+      subtle: cssVar('--danger-subtle', fallback.danger.subtle),
+      muted: cssVar('--danger-muted', fallback.danger.muted),
+    },
+    neutral: {
+      emphasisPlus: cssVar('--neutral-emphasis-plus', fallback.neutral.emphasisPlus),
+      emphasis: cssVar('--neutral-emphasis', fallback.neutral.emphasis),
+      muted: cssVar('--neutral-muted', fallback.neutral.muted),
+      subtle: cssVar('--neutral-subtle', fallback.neutral.subtle),
+    },
+    open: {
+      fg: cssVar('--success-fg', fallback.open.fg),
+      emphasis: cssVar('--success-emphasis', fallback.open.emphasis),
+      subtle: cssVar('--success-subtle', fallback.open.subtle),
+      muted: cssVar('--success-muted', fallback.open.muted),
+    },
+    closed: {
+      fg: cssVar('--danger-fg', fallback.closed.fg),
+      emphasis: cssVar('--danger-emphasis', fallback.closed.emphasis),
+      subtle: cssVar('--danger-subtle', fallback.closed.subtle),
+      muted: cssVar('--danger-muted', fallback.closed.muted),
+    },
+    done: {
+      fg: cssVar('--done-fg', fallback.done.fg),
+      emphasis: cssVar('--done-emphasis', fallback.done.emphasis),
+      subtle: cssVar('--done-subtle', fallback.done.subtle),
+      muted: cssVar('--done-muted', fallback.done.muted),
+    },
+    severe: {
+      fg: cssVar('--severe-fg', fallback.severe.fg),
+      emphasis: cssVar('--severe-emphasis', fallback.severe.emphasis),
+      subtle: cssVar('--severe-subtle', fallback.severe.subtle),
+      muted: cssVar('--severe-muted', fallback.severe.muted),
+    },
+    btn: {
+      primary: {
+        bg: cssVar('--btn-primary-bg', fallback.btn.primary.bg),
+        text: cssVar('--btn-primary-fg', fallback.btn.primary.text),
+        hoverBg: cssVar('--btn-primary-hover-bg', fallback.btn.primary.hoverBg),
+        selectedBg: cssVar('--btn-primary-active-bg', fallback.btn.primary.selectedBg),
+        border: cssVar('--btn-primary-border', fallback.btn.primary.border),
+      },
+    },
+  };
+}
+
 export const linearTheme = deepMerge(primerTheme as unknown as AnyRecord, {
   // Route Primer's sx font tokens through the same Inter / JetBrains Mono
   // pair next/font registers as `--font-sans` / `--font-mono`. Without this,
@@ -191,7 +281,7 @@ export const linearTheme = deepMerge(primerTheme as unknown as AnyRecord, {
     mono: 'var(--font-mono), ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace',
   },
   colorSchemes: {
-    dark: { colors: dark },
-    light: { colors: light },
+    dark: { colors: cssVarColors(dark) },
+    light: { colors: cssVarColors(light) },
   },
 });

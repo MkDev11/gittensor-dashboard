@@ -15,27 +15,38 @@
   /* Borders — minimal, almost invisible at rest */
   --border-default: #23252a;
   --border-muted: #1a1c1f;
+  --border-subtle: rgba(255, 255, 255, 0.04);
   --border-strong: #3a3d44;
 
   /* Foreground (text) */
   --fg-default: #f7f8f8;
   --fg-muted: #b4bcd0;
   --fg-subtle: #8a8f98;
+  --fg-on-emphasis: #ffffff;
 
   /* Accent — Linear's signature indigo */
   --accent-fg: #b4bdff;
   --accent-emphasis: #5e6ad2;
   --accent-glow: rgba(94, 106, 210, 0.32);
+  --accent-muted: rgba(94, 106, 210, 0.40);
 
   /* State colors */
   --success-fg: #4cb782;
   --success-emphasis: #3fa672;
+  --success-muted: rgba(76, 183, 130, 0.40);
   --attention-fg: #f2c94c;
   --attention-emphasis: #e0b53d;
+  --attention-muted: rgba(242, 201, 76, 0.38);
   --danger-fg: #eb5757;
   --danger-emphasis: #d63b3b;
+  --danger-muted: rgba(235, 87, 87, 0.40);
   --done-fg: #a584ff;
   --done-emphasis: #8866ee;
+  --done-muted: rgba(165, 132, 255, 0.40);
+  --severe-fg: #f2994a;
+  --severe-emphasis: #e0823d;
+  --severe-subtle: rgba(242, 153, 74, 0.14);
+  --severe-muted: rgba(242, 153, 74, 0.40);
 
   /* Menu / list hover surface — Linear uses a very subtle tint, no full bg fill */
   --menu-item-hover-bg: rgba(94, 106, 210, 0.12);
@@ -54,7 +65,9 @@
   --attention-subtle-strong: rgba(242, 201, 76, 0.22);
   --danger-subtle: rgba(235, 87, 87, 0.14);
   --done-subtle: rgba(165, 132, 255, 0.14);
-  --neutral-subtle: rgba(255, 255, 255, 0.06);
+  --neutral-emphasis-plus: #3a3d44;
+  --neutral-muted: rgba(255, 255, 255, 0.06);
+  --neutral-subtle: rgba(255, 255, 255, 0.03);
   --neutral-emphasis: #2a2c30;
   --bottom-nav-bg: rgba(16, 17, 19, 0.96);
   --bottom-nav-shadow: 0 -12px 28px rgba(0, 0, 0, 0.35);
@@ -103,27 +116,38 @@
 
   --border-default: #e6e6e8;
   --border-muted: #efeff1;
+  --border-subtle: rgba(0, 0, 0, 0.04);
   --border-strong: #c2c3c9;
 
   --fg-default: #161617;
   --fg-muted: #4a4d54;
   /* Bumped from #8a8f98 → #6b7280 so subtle text on white hits WCAG AA (≥4.5:1). */
   --fg-subtle: #6b7280;
+  --fg-on-emphasis: #ffffff;
 
   --accent-fg: #5e6ad2;
   --accent-emphasis: #5e6ad2;
   --accent-glow: rgba(94, 106, 210, 0.22);
+  --accent-muted: rgba(94, 106, 210, 0.32);
 
   /* Light-mode semantic fgs darkened so badges with subtle/strong tinted
    * bgs still pass WCAG AA. Verified ≥5.85:1 on *-subtle@0.10 over white. */
   --success-fg: #1a6943;
   --success-emphasis: #1a6943;
+  --success-muted: rgba(26, 105, 67, 0.32);
   --attention-fg: #7d5614;
   --attention-emphasis: #7d5614;
+  --attention-muted: rgba(125, 86, 20, 0.32);
   --danger-fg: #a72424;
   --danger-emphasis: #a72424;
+  --danger-muted: rgba(167, 36, 36, 0.32);
   --done-fg: #5635c3;
   --done-emphasis: #5635c3;
+  --done-muted: rgba(86, 53, 195, 0.32);
+  --severe-fg: #c66628;
+  --severe-emphasis: #c66628;
+  --severe-subtle: rgba(198, 102, 40, 0.10);
+  --severe-muted: rgba(198, 102, 40, 0.32);
 
   --menu-item-hover-bg: rgba(94, 106, 210, 0.08);
   --menu-item-hover-fg: #161617;
@@ -146,7 +170,9 @@
   --attention-subtle-strong: rgba(125, 86, 20, 0.16);
   --danger-subtle: rgba(167, 36, 36, 0.10);
   --done-subtle: rgba(86, 53, 195, 0.10);
-  --neutral-subtle: rgba(0, 0, 0, 0.06);
+  --neutral-emphasis-plus: #161617;
+  --neutral-muted: rgba(0, 0, 0, 0.06);
+  --neutral-subtle: rgba(0, 0, 0, 0.03);
   --neutral-emphasis: #4a4d54;
   --bottom-nav-bg: rgba(249, 250, 251, 0.96);
   --bottom-nav-shadow: 0 -10px 26px rgba(16, 24, 40, 0.10);

@@ -36,7 +36,7 @@ import type {
   RepoMinersResponse,
 } from '@/types/entities';
 import { renderMarkdownToHtml } from '@/lib/markdown';
-import { formatRelativeTime } from '@/lib/format';
+import { formatRelativeTime, formatWeightPct } from '@/lib/format';
 
 type TabKey = 'readme' | 'code' | 'issues' | 'pulls' | 'contributing' | 'check';
 
@@ -205,7 +205,7 @@ export default function RepoDetailPage(ctx: { params: Promise<{ owner: string; n
 
           <Box sx={{ width: ['100%', null, 320], flexShrink: 0, position: ['static', null, 'sticky'], top: 'calc(var(--header-height) + 16px)', display: 'flex', flexDirection: 'column', gap: 4, mt: [4, null, 0] }}>
             <SidebarSection title="Repository Stats">
-              <KvRow label="Weight" value={summary.data?.weight != null ? summary.data.weight.toFixed(2) : '—'} />
+              <KvRow label="Weight" value={summary.data?.weight != null ? formatWeightPct(summary.data.weight) : '—'} />
               <KvRow label="Total Score" value={fmtScore(summary.data?.totalScore)} />
               <KvRow label="Merged PRs" value={summary.data ? summary.data.mergedPrCount : '—'} />
               <KvStatusRow

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { GtRepoPr, GtRepoPrsResponse } from '@/types/entities';
+import { getReadDb } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,14 +90,73 @@ async function getShared(): Promise<Cached> {
   return inFlight;
 }
 
+interface LocalPullRow {
+  number: number;
+  title: string;
+  state: string;
+  draft: number;
+  merged: number;
+  author_login: string | null;
+  created_at: string | null;
+  merged_at: string | null;
+}
+
+function localPullsForRepo(fullName: string): GtRepoPr[] {
+  try {
+    const rows = getReadDb()
+      .prepare(
+        `SELECT number, title, state, draft, merged, author_login, created_at, merged_at
+         FROM pulls WHERE repo_full_name = ? COLLATE NOCASE AND draft = 0`,
+      )
+      .all(fullName) as LocalPullRow[];
+    return rows
+      .filter((r) => r.created_at)
+      .map((r): GtRepoPr => {
+        const author = r.author_login ?? '';
+        const prState: 'OPEN' | 'MERGED' | 'CLOSED' = r.merged
+          ? 'MERGED'
+          : (r.state ?? '').toUpperCase() === 'OPEN'
+            ? 'OPEN'
+            : 'CLOSED';
+        return {
+          pullRequestNumber: r.number,
+          title: r.title,
+          author,
+          githubId: null,
+          avatarUrl: author ? `https://github.com/${author}.png?size=48` : '',
+          prState,
+          prCreatedAt: r.created_at as string,
+          mergedAt: r.merged_at,
+          additions: 0,
+          deletions: 0,
+          commitCount: 0,
+          score: 0,
+          linkedIssueNumber: parseLinkedIssue(r.title ?? ''),
+        };
+      });
+  } catch {
+    return [];
+  }
+}
+
 export async function GET(_req: Request, ctx: { params: Promise<{ owner: string; name: string }> }) {
   const params = await ctx.params;
   const fullName = `${params.owner}/${params.name}`;
   try {
     const shared = await getShared();
-    const prs = shared.byRepo.get(fullName.toLowerCase()) ?? [];
+    const upstream = shared.byRepo.get(fullName.toLowerCase()) ?? [];
+    // Merge upstream (scored) with local DB so unscored open PRs still appear.
+    // Upstream wins on conflict because it carries the scoring fields.
+    const merged = [...upstream];
+    const seen = new Set(upstream.map((p) => p.pullRequestNumber));
+    for (const p of localPullsForRepo(fullName)) {
+      if (!seen.has(p.pullRequestNumber)) {
+        merged.push(p);
+        seen.add(p.pullRequestNumber);
+      }
+    }
     // Newest first by created date.
-    const sorted = [...prs].sort((a, b) => (Date.parse(b.prCreatedAt) || 0) - (Date.parse(a.prCreatedAt) || 0));
+    const sorted = merged.sort((a, b) => (Date.parse(b.prCreatedAt) || 0) - (Date.parse(a.prCreatedAt) || 0));
     const counts = {
       all: sorted.length,
       open: sorted.filter((p) => p.prState === 'OPEN').length,

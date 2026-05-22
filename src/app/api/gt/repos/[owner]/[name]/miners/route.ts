@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { RepoMiner, RepoMinersResponse } from '@/types/entities';
 import { getReadDb } from '@/lib/db';
 import { backfillPrIssueLinksIfNeeded } from '@/lib/refresh';
 
@@ -9,6 +10,9 @@ const MINERS_URL = 'https://api.gittensor.io/miners';
 const REPOS_URL = 'https://api.gittensor.io/dash/repos';
 const TTL_MS = 30_000;
 const TOP_MINERS_LIMIT = 5;
+const OSS_WINDOW_DAYS = 30;
+const OSS_WINDOW_MS = OSS_WINDOW_DAYS * 86_400_000;
+const MAINTAINER_SQL = "UPPER(COALESCE(author_association,'')) IN ('OWNER','MEMBER','COLLABORATOR')";
 
 interface UpstreamPr {
   repository: string;
@@ -52,6 +56,40 @@ async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
   if (!response.ok) throw new Error(`upstream ${url} ${response.status}`);
   return response.json() as Promise<T>;
+}
+
+function localContributorsForRepo(fullName: string): RepoMiner[] {
+  try {
+    const cutoffIso = new Date(Date.now() - OSS_WINDOW_MS).toISOString();
+    const rows = getReadDb()
+      .prepare(
+        `SELECT author_login as author, COUNT(*) as prCount
+         FROM pulls
+         WHERE repo_full_name = ? COLLATE NOCASE AND author_login IS NOT NULL AND author_login != ''
+           AND merged = 1
+           AND NOT (${MAINTAINER_SQL})
+           AND merged_at IS NOT NULL AND merged_at >= ?
+         GROUP BY author_login
+         ORDER BY prCount DESC
+         LIMIT ?`,
+      )
+      .all(fullName, cutoffIso, TOP_MINERS_LIMIT) as Array<{ author: string; prCount: number }>;
+    return rows.map((r) => ({
+      githubId: '',
+      githubUsername: r.author,
+      prCount: r.prCount,
+      score: 0,
+      ossRank: null,
+      globalScore: null,
+      avatarUrl: `https://github.com/${r.author}.png?size=48`,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function maintainerExpr(alias: string): string {
+  return `UPPER(COALESCE(${alias}.author_association,'')) IN ('OWNER','MEMBER','COLLABORATOR')`;
 }
 
 function issueDiscoveryReason(row: {
@@ -114,11 +152,16 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       minersByLogin.set(m.githubUsername.toLowerCase(), m);
     }
 
-    // OSS Contributions: sum of merged PR scores per author for this repo.
+    // OSS Contributions: sum of merged PR scores per author for this repo,
+    // restricted to the last OSS_WINDOW_DAYS so the panel matches its label.
     interface OssAgg { githubId: string; githubUsername: string; prCount: number; score: number }
     const ossMap = new Map<string, OssAgg>();
+    const cutoffMs = Date.now() - OSS_WINDOW_MS;
     for (const p of shared.prs) {
       if (p.repository.toLowerCase() !== fullNameKey) continue;
+      if (!p.mergedAt) continue;
+      const mergedMs = Date.parse(p.mergedAt);
+      if (!Number.isFinite(mergedMs) || mergedMs < cutoffMs) continue;
       const id = p.githubId || p.author;
       if (!id) continue;
       let row = ossMap.get(id);
@@ -126,14 +169,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
         row = { githubId: p.githubId || '', githubUsername: p.author || id, prCount: 0, score: 0 };
         ossMap.set(id, row);
       }
-      // Count only merged PRs and their official PR scores.
-      if (p.mergedAt) {
-        row.prCount += 1;
-        row.score += num(p.score);
-      }
+      row.prCount += 1;
+      row.score += num(p.score);
     }
-    const ossContributions = [...ossMap.values()]
-      .filter((r) => r.prCount > 0 || r.score > 0)
+    const ossAll = [...ossMap.values()].filter((r) => r.prCount > 0 || r.score > 0);
+    // Captured pre-slice so the UI's share denominator covers the long tail.
+    const ossContributionsTotalScore = ossAll.reduce((s, r) => s + r.score, 0);
+    let ossContributions: RepoMiner[] = ossAll
       .sort((a, b) => b.score - a.score || b.prCount - a.prCount)
       .slice(0, TOP_MINERS_LIMIT)
       .map((r) => {
@@ -150,13 +192,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
         };
       });
 
+    // Fallback for newer repos with no scored upstream PRs: contributors
+    // from local pulls cache, score=0. The muted-zero UI handles this.
+    if (ossContributions.length === 0) {
+      ossContributions = localContributorsForRepo(fullName);
+    }
+
     // Issue Discoveries: repo-specific candidates only. Gittensor scores a
     // subset of solved issues: same-author issue/PR pairs and sibling issues
     // on the same solving PR are credibility-only. The hub does not have the
     // validator's per-issue earned score, so expose candidates + solved counts
     // instead of a fake score.
     backfillPrIssueLinksIfNeeded(fullName);
-    const IS_MAINTAINER = `UPPER(COALESCE(i.author_association,'')) IN ('OWNER','MEMBER','COLLABORATOR')`;
+    const IS_MAINTAINER = maintainerExpr('i');
     const HAS_MERGED_PR =
       `EXISTS (SELECT 1 FROM pr_issue_links l
                JOIN pulls p ON p.repo_full_name = l.repo_full_name AND p.number = l.pr_number
@@ -174,12 +222,21 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
                WHERE l.repo_full_name = i.repo_full_name
                  AND l.issue_number = i.number
                  AND p.merged = 1
+                 AND p.author_login IS NOT NULL AND p.author_login != ''
                  AND LOWER(COALESCE(p.author_login,'')) <> LOWER(COALESCE(i.author_login,''))
                  AND NOT EXISTS (
                    SELECT 1 FROM pr_issue_links l2
                    JOIN issues i2 ON i2.repo_full_name = l2.repo_full_name AND i2.number = l2.issue_number
+                   JOIN pulls p2 ON p2.repo_full_name = l2.repo_full_name AND p2.number = l2.pr_number
                    WHERE l2.repo_full_name = l.repo_full_name
                      AND l2.pr_number = l.pr_number
+                     AND i2.author_login IS NOT NULL AND i2.author_login != ''
+                     AND i2.state = 'closed'
+                     AND UPPER(COALESCE(i2.state_reason,'')) = 'COMPLETED'
+                     AND NOT (${maintainerExpr('i2')})
+                     AND p2.merged = 1
+                     AND p2.author_login IS NOT NULL AND p2.author_login != ''
+                     AND LOWER(COALESCE(p2.author_login,'')) <> LOWER(COALESCE(i2.author_login,''))
                      AND (
                        COALESCE(i2.created_at, '9999-12-31T23:59:59Z') < COALESCE(i.created_at, '9999-12-31T23:59:59Z')
                        OR (COALESCE(i2.created_at, '9999-12-31T23:59:59Z') = COALESCE(i.created_at, '9999-12-31T23:59:59Z') AND i2.number < i.number)
@@ -265,13 +322,15 @@ export async function GET(_req: Request, ctx: { params: Promise<{ owner: string;
       .sort((a, b) => b.issueCount - a.issueCount || b.candidateIssueCount - a.candidateIssueCount || b.solvedIssueCount - a.solvedIssueCount)
       .slice(0, TOP_MINERS_LIMIT);
 
-    return NextResponse.json({
+    const body: RepoMinersResponse = {
       fullName,
       issueDiscoveryEnabled,
       ossContributions,
+      ossContributionsTotalScore,
       issueDiscoveries,
       fetched_at: shared.fetched_at,
-    });
+    };
+    return NextResponse.json(body);
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 502 });
   }

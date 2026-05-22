@@ -72,6 +72,30 @@ export interface GtRepo {
   prsLastWeek: number;
   trendingPct: number;
   lastPrAt: string | null;
+  /** Local DB count of pulls where state='open' and draft=0. */
+  openPrCount: number;
+  /** Highest open, non-draft PR count held by a single author in this repo. */
+  openPrMaxByAuthor: number;
+  /** Number of authors/groups represented in the open, non-draft PR count. */
+  openPrAuthorCount: number;
+  /** Local DB count of issues where state='open'. */
+  openIssueCount: number;
+  /** Excessive-PR penalty threshold from SN74 policy. Null when unknown. */
+  excessivePrPenaltyThreshold: number | null;
+  /** Daily merged-PR counts, oldest-first, length 14. UTC day buckets ending today. */
+  mergedPrSeries14d: number[];
+  /** Per-label scoring multipliers from SN74 policy. Null when unknown. */
+  labelMultipliers: Record<string, number> | null;
+  /** Fraction of emission allocated to issue discovery. Null when unknown. */
+  issueDiscoveryShare: number | null;
+  /** Fraction of emission reserved for registered maintainers. Null when unknown. */
+  maintainerCut: number | null;
+  /** Minimum PR credibility required for rewards. Null when unknown. */
+  minCredibility: number | null;
+  /** Whether scoring-label application is trusted. Null when unknown. */
+  trustedLabelPipeline: boolean | null;
+  /** GitHub stargazer count. Null when the repo is unreachable/private. */
+  stars: number | null;
 }
 
 /** Recent-PR summary attached to the GtRepos response. */
@@ -95,6 +119,36 @@ export interface GtReposResponse {
   count: number;
   activeCount: number;
   inactiveCount: number;
+  /** Sum of active-repo weights (≈ fraction of network emission flowing to active repos). */
+  totalEmissionWeight: number;
+  /** Network-level PRs merged in the last 7d. */
+  prsMergedThisWeek: number;
+  /** Network-level PRs merged 7–14d ago (for WoW delta). */
+  prsMergedLastWeek: number;
+  /** Distinct authors of PRs merged in the last 7d. */
+  uniqueContributors7d: number;
+  /** Distinct authors of PRs merged 7–14d ago (for WoW delta). */
+  uniqueContributorsPriorWeek: number;
+  /** Sum of raw Gittensor PR score across PRs merged in the last 7d. */
+  scoreEarnedThisWeek: number;
+  /** Sum of raw Gittensor PR score across PRs merged 7–14d ago (for WoW delta). */
+  scoreEarnedPriorWeek: number;
+  /** Active repos that have any collateral staked. */
+  stakedRepoCount: number;
+  /** Sum of top-5 active-repo weights divided by total active weight. 0..1. */
+  top5WeightConcentration: number;
+  /** Network-wide daily merged-PR counts, oldest-first, length 14. */
+  prsMergedSeries14d: number[];
+  /** Network-wide daily sum of raw Gittensor PR score across merged PRs, oldest-first, length 14. */
+  scoreEarnedSeries14d: number[];
+  /** Authors whose earliest-ever merged PR is in the last 7d. */
+  newContributors7d: number;
+  /** Authors with merged PRs older than 14d, none in the 7–14d window, one in the last 7d. */
+  returningContributors7d: number;
+  /** Median (mergedAt - prCreatedAt) in hours, across PRs merged in the last 7d. */
+  medianMergeLatencyHours7d: number;
+  /** Same metric, 7–14d window, for WoW delta. */
+  medianMergeLatencyHoursPriorWeek: number;
   repos: GtRepo[];
   recentPrs: GtPrSummary[];
   prs?: GtPrSummary[];
@@ -247,6 +301,9 @@ export interface RepoMinersResponse {
   issueDiscoveryEnabled?: boolean;
   ossContributions: RepoMiner[];
   issueDiscoveries: RepoMiner[];
+  /** Sum of `ossContributions[*].score` across all contributors in the
+   * window, before the top-N slice. Used as the share denominator. */
+  ossContributionsTotalScore: number;
   fetched_at: number;
 }
 
