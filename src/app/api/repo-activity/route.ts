@@ -127,6 +127,15 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({})) as { since?: unknown; viewed_at?: unknown };
+  let body: { since?: unknown; viewed_at?: unknown };
+  try {
+    const parsed = await req.json();
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+    body = parsed as { since?: unknown; viewed_at?: unknown };
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
   return activityResponse(body.since, body.viewed_at);
 }
