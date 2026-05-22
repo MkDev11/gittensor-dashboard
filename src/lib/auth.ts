@@ -200,6 +200,34 @@ export function listUsers(): UserRow[] {
   return db.prepare('SELECT * FROM users ORDER BY created_at DESC').all() as UserRow[];
 }
 
+// ---------------------------------------------------------------------------
+// Role management (admin <-> regular user)
+// ---------------------------------------------------------------------------
+
+export class RoleError extends Error {
+  constructor(
+    public code: 'not_found' | 'self_demote' | 'last_admin',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'RoleError';
+  }
+}
+
+/**
+ * Count *active* admins only — `is_admin = 1` AND still `approved`. A rejected
+ * (banned) user keeps its `is_admin` flag, so counting the raw flag would let
+ * the last-admin guards think a usable admin exists when it doesn't.
+ */
+export function countAdmins(): number {
+  const db = getDb();
+  return (
+    db
+      .prepare("SELECT COUNT(*) c FROM users WHERE is_admin = 1 AND status = 'approved'")
+      .get() as { c: number }
+  ).c;
+}
+
 export function approveUser(id: number, approvedById: number): UserRow | null {
   const db = getDb();
   const now = new Date().toISOString();
@@ -210,12 +238,23 @@ export function approveUser(id: number, approvedById: number): UserRow | null {
 }
 
 export function rejectUser(id: number, approvedById: number): UserRow | null {
+  if (id === approvedById) throw new RoleError('self_demote', 'You cannot reject yourself');
   const db = getDb();
   const now = new Date().toISOString();
-  db.prepare(
-    `UPDATE users SET status = 'rejected', approved_at = ?, approved_by_id = ? WHERE id = ?`,
-  ).run(now, approvedById, id);
-  return getUserById(id);
+  // IMMEDIATE so the count check and the write are atomic: without it two
+  // admins rejecting each other concurrently could both read countAdmins() === 2,
+  // both pass the guard, and both commit — leaving zero active admins (TOCTOU).
+  const run = db.transaction((): UserRow | null => {
+    const target = getUserById(id);
+    if (!target) return null;
+    if (target.is_admin && target.status === 'approved' && countAdmins() <= 1)
+      throw new RoleError('last_admin', 'Cannot reject the last admin');
+    db.prepare(
+      `UPDATE users SET status = 'rejected', approved_at = ?, approved_by_id = ? WHERE id = ?`,
+    ).run(now, approvedById, id);
+    return getUserById(id);
+  });
+  return run.immediate();
 }
 
 export function userCount(): number {
@@ -233,25 +272,6 @@ export function recentPendingUsers(limit = 20): UserRow[] {
   return db
     .prepare("SELECT * FROM users WHERE status = 'pending' ORDER BY created_at DESC LIMIT ?")
     .all(limit) as UserRow[];
-}
-
-// ---------------------------------------------------------------------------
-// Role management (admin <-> regular user)
-// ---------------------------------------------------------------------------
-
-export class RoleError extends Error {
-  constructor(
-    public code: 'not_found' | 'self_demote' | 'last_admin',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'RoleError';
-  }
-}
-
-export function countAdmins(): number {
-  const db = getDb();
-  return (db.prepare('SELECT COUNT(*) c FROM users WHERE is_admin = 1').get() as { c: number }).c;
 }
 
 /**
@@ -284,12 +304,21 @@ export function promoteUser(id: number, byId: number): UserRow {
  * or the last remaining admin.
  */
 export function demoteUser(id: number, byId: number): UserRow {
-  const target = getUserById(id);
-  if (!target) throw new RoleError('not_found', 'User not found');
   if (id === byId) throw new RoleError('self_demote', 'You cannot demote yourself');
-  if (!target.is_admin) return target;
-  if (countAdmins() <= 1) throw new RoleError('last_admin', 'Cannot demote the last admin');
   const db = getDb();
-  db.prepare('UPDATE users SET is_admin = 0 WHERE id = ?').run(id);
-  return getUserById(id)!;
+  // IMMEDIATE for the same TOCTOU reason as rejectUser: serialize the
+  // last-admin check with the write so concurrent demotes can't both pass.
+  const run = db.transaction((): UserRow => {
+    const target = getUserById(id);
+    if (!target) throw new RoleError('not_found', 'User not found');
+    if (!target.is_admin) return target;
+    // Only an *approved* admin counts toward countAdmins(); a rejected user
+    // keeps its stale is_admin flag but isn't an active admin, so clearing it
+    // can't lock us out. Mirror the rejectUser() guard.
+    if (target.status === 'approved' && countAdmins() <= 1)
+      throw new RoleError('last_admin', 'Cannot demote the last admin');
+    db.prepare('UPDATE users SET is_admin = 0 WHERE id = ?').run(id);
+    return getUserById(id)!;
+  });
+  return run.immediate();
 }
